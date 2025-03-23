@@ -1,2 +1,2 @@
-TELEGRAM_TOKEN = 'your_bot_token_here'
-TELEGRAM_CHAT_ID = 'your_chat_id_here'
+TELEGRAM_TOKEN = '7695922215:AAE6MJ5hvUpBwMeVqVl0yiQbaDtxRvTcaXI'
+TELEGRAM_CHAT_ID = '7624657066'
