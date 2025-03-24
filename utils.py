@@ -22,27 +22,59 @@ def set_leverage(exchange, symbol, leverage=10):
     except Exception as e:
         return {'error': str(e)}
 
-def place_futures_order(exchange, symbol, side, usdt_amount, leverage=10):
+def place_futures_order(exchange, symbol, side, usdt_amount, tp_price, sl_price, leverage=10):
     try:
         # Set leverage
         set_leverage(exchange, symbol, leverage)
 
-        # Get market price
+        # Get current price
         ticker = exchange.fetch_ticker(symbol)
         price = ticker['last']
-
-        # Calculate base size (amount in contracts)
         base_amount = usdt_amount / price
 
-        # Create order
-        order = exchange.create_market_order(
+        # Market entry
+        entry_order = exchange.create_market_order(
             symbol=symbol,
             side=side,
             amount=round(base_amount, 4),
             params={'leverage': leverage}
         )
 
-        return {'status': 'success', 'order': order}
+        # Determine opposite side for TP/SL
+        close_side = 'sell' if side == 'buy' else 'buy'
+
+        # Create TAKE PROFIT conditional order
+        tp_order = exchange.create_order(
+            symbol=symbol,
+            type='takeProfitMarket',
+            side=close_side,
+            amount=round(base_amount, 4),
+            params={
+                'stopPrice': round(tp_price, 4),
+                'reduceOnly': True,
+                'leverage': leverage
+            }
+        )
+
+        # Create STOP LOSS conditional order
+        sl_order = exchange.create_order(
+            symbol=symbol,
+            type='stopMarket',
+            side=close_side,
+            amount=round(base_amount, 4),
+            params={
+                'stopPrice': round(sl_price, 4),
+                'reduceOnly': True,
+                'leverage': leverage
+            }
+        )
+
+        return {
+            'status': 'success',
+            'entry_order': entry_order,
+            'tp_order': tp_order,
+            'sl_order': sl_order
+        }
 
     except Exception as e:
         return {'status': 'error', 'message': str(e)}
@@ -92,13 +124,29 @@ def calculate_trade_levels(price, direction, tp_pct=2.0, sl_pct=1.0):
     }
 
 def get_top_volume_pairs(exchange, quote='USDT', top_n=5):
-    markets = exchange.load_markets()
+    print("⏳ Fetching tickers...")
+    try:
+        tickers = exchange.fetch_tickers()
+        print(f"✅ Fetched {len(tickers)} tickers.")
+    except Exception as e:
+        print("❌ Error fetching tickers:", e)
+        return []
+
     volume_data = []
 
-    for symbol in markets:
-        market = markets[symbol]
-        if market['quote'] == quote and market['active']:
-            volume = market.get('info', {}).get('quoteVolume') or market.get('info', {}).get('volume')
+    # List of stablecoins to filter out
+    stablecoins = {'USDT', 'USDC', 'BUSD', 'TUSD', 'DAI', 'FDUSD', 'UST'}
+
+    for symbol, ticker in tickers.items():
+            if not symbol.endswith(f"/{quote}"):
+                continue
+
+            base = symbol.split('/')[0]
+
+            if base in stablecoins:
+                continue  # skip stablecoin-to-stablecoin pairs
+
+            volume = ticker.get('quoteVolume')
             if volume:
                 try:
                     volume = float(volume)
@@ -107,4 +155,5 @@ def get_top_volume_pairs(exchange, quote='USDT', top_n=5):
                     continue
 
     top_pairs = sorted(volume_data, key=lambda x: x[1], reverse=True)[:top_n]
+    print("🔥 Top pairs:", top_pairs)
     return [pair[0] for pair in top_pairs]

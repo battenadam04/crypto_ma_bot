@@ -12,7 +12,7 @@ from utils import init_kucoin_futures, place_futures_order
 
 kucoin_futures = init_kucoin_futures()
 
-EXCHANGE = ccxt.binance()
+EXCHANGE = ccxt.kucoin()
 TIMEFRAME = '5m'
 PAIRS = get_top_volume_pairs(EXCHANGE, quote='USDT', top_n=5)
 
@@ -73,14 +73,16 @@ def process_pair(symbol):
         levels = calculate_trade_levels(entry_price, direction='long')
         path = save_chart(lower_df, symbol)
 
-        # Execute live market buy (e.g. $50 position)
-        trade_result = place_futures_order(
-            exchange=kucoin_futures,
-            symbol=symbol,           # Example: 'BTC/USDT:USDT'
-            side='buy',
-            usdt_amount=5,          # Your trade size in USDT
-            leverage=10              # 10x leverage
-        )
+        # trade_result = place_futures_order(
+        #     exchange=kucoin_futures,
+        #     symbol=symbol,
+        #     side='buy',  # or 'sell' for short
+        #     usdt_amount=50,
+        #     tp_price=levels['take_profit'],
+        #     sl_price=levels['stop_loss'],
+        #     leverage=10
+        # )
+
 
         # Add trade info to the alert message
         message = (
@@ -89,7 +91,7 @@ def process_pair(symbol):
             f'💰 Entry (limit): {levels["entry"]}\n'
             f'🎯 Take Profit: {levels["take_profit"]}\n'
             f'🛑 Stop Loss: {levels["stop_loss"]}\n\n'
-            f'⚙️ Futures Trade Status: {trade_result["status"]}'
+           # f'⚙️ Futures Trade Status: {trade_result["status"]}'
         )
         send_telegram(message, image_path=path)
         log_event("🚀 LONG signal triggered: " + message)
@@ -104,7 +106,8 @@ def process_pair(symbol):
             f'Confirmed by 1h downtrend\n\n'
             f'💰 Entry (limit): {levels["entry"]}\n'
             f'🎯 Take Profit: {levels["take_profit"]}\n'
-            f'🛑 Stop Loss: {levels["stop_loss"]}'
+            f'🛑 Stop Loss: {levels["stop_loss"]}\n\n'
+         #    f'⚙️ Futures Trade Status: {trade_result["status"]}'
         )
         send_telegram(message, image_path=path)
         log_event("🔻 SHORT signal triggered: " + message)
@@ -114,6 +117,7 @@ def process_pair(symbol):
 
 def main():
     for pair in PAIRS:
+        log_event(f"checking  {pair}.")
         process_pair(pair)
 
 if __name__ == '__main__':
