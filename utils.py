@@ -5,6 +5,7 @@ import mplfinance as mpf
 import os
 import ccxt
 from config import KUCOIN_API_KEY, KUCOIN_SECRET_KEY, KUCOIN_PASSPHRASE
+from ta.trend import ADXIndicator
 
 def init_kucoin_futures():
     return ccxt.kucoinfutures({
@@ -86,16 +87,45 @@ def calculate_mas(df):
     return df
 
 def check_long_signal(df):
+    if len(df) < 51:  # Ensure at least 50 candles for MA50
+        return False
+
     last, prev = df.iloc[-1], df.iloc[-2]
+    
+    # ✅ Crossover check (10 crosses above 20)
     crossover = prev['ma10'] < prev['ma20'] and last['ma10'] > last['ma20']
+    
+    # ✅ MA alignment (trend confirmation)
     alignment = last['ma20'] > last['ma50']
-    return crossover and alignment
+
+    # ✅ Extra condition: Price should be above MA10 (bullish momentum)
+    price_momentum = last['close'] > last['ma10']
+
+    # ✅ Final confirmation: Add volume filter (optional)
+    volume_confirmation = last['volume'] > prev['volume']  # Ensure increasing volume
+
+    return crossover and alignment and price_momentum and volume_confirmation
+
 
 def check_short_signal(df):
+    if len(df) < 51:  # Ensure we have enough data
+        return False
+
     last, prev = df.iloc[-1], df.iloc[-2]
+
+    # ✅ Crossover check (10 crosses below 20)
     crossover = prev['ma10'] > prev['ma20'] and last['ma10'] < last['ma20']
+
+    # ✅ MA alignment (bearish trend confirmation)
     alignment = last['ma20'] < last['ma50']
-    return crossover and alignment
+
+    # ✅ Extra condition: Price should be below MA10 (selling momentum)
+    price_momentum = last['close'] < last['ma10']
+
+    # ✅ Volume confirmation (optional)
+    volume_confirmation = last['volume'] > prev['volume']  # Ensure increasing selling volume
+
+    return crossover and alignment and price_momentum and volume_confirmation
 
 def save_chart(df, symbol):
     df = df.copy()
@@ -157,3 +187,51 @@ def get_top_volume_pairs(exchange, quote='USDT', top_n=5):
     top_pairs = sorted(volume_data, key=lambda x: x[1], reverse=True)[:top_n]
     print("🔥 Top pairs:", top_pairs)
     return [pair[0] for pair in top_pairs]
+
+
+
+def is_weak_trend(df, period=14, threshold=20):
+    adx = ADXIndicator(df['high'], df['low'], df['close'], window=period)
+    df['adx'] = adx.adx()
+    return df['adx'].iloc[-1] < threshold
+
+def are_mas_compressed(df, threshold_pct=0.3):
+    last = df.iloc[-1]
+    ma_values = [last['ma10'], last['ma20'], last['ma50']]
+    max_ma = max(ma_values)
+    min_ma = min(ma_values)
+    spread = ((max_ma - min_ma) / min_ma) * 100
+    return spread < threshold_pct
+
+def is_consolidating(df, lookback=20, threshold_pct=1.5):
+    recent = df.tail(lookback)
+    high = recent['high'].max()
+    low = recent['low'].min()
+    range_pct = ((high - low) / low) * 100
+
+    return range_pct < threshold_pct  # Returns True if it's consolidating
+
+def should_trade(df):
+    if is_consolidating(df):
+        return False
+    if are_mas_compressed(df):
+        return False
+    if is_weak_trend(df):
+        return False
+    return True
+
+
+def is_early_breakout(df):
+    last = df.iloc[-1]
+    prev = df.iloc[-2]
+
+    # MA10 crossing MA20
+    crossover = prev['ma10'] < prev['ma20'] and last['ma10'] > last['ma20']
+
+    # Both are still under or near MA50
+    under_ma50 = last['ma10'] < last['ma50'] and last['ma20'] < last['ma50']
+
+    # Price is approaching MA50
+    near_ma50 = abs(last['close'] - last['ma50']) / last['ma50'] < 0.005  # within 0.5%
+
+    return crossover and (under_ma50 or near_ma50)

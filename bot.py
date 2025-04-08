@@ -9,14 +9,18 @@ from utils import calculate_mas, check_long_signal, check_short_signal, save_cha
 from utils import calculate_trade_levels
 from utils import get_top_volume_pairs
 from utils import init_kucoin_futures, place_futures_order
+from utils import should_trade
+from utils import is_early_breakout
+
 
 kucoin_futures = init_kucoin_futures()
 
 EXCHANGE = ccxt.kucoin()
-TIMEFRAME = '5m'
-PAIRS = get_top_volume_pairs(EXCHANGE, quote='USDT', top_n=5)
+TIMEFRAME = '1m'
+PAIRS = get_top_volume_pairs(EXCHANGE, quote='USDT', top_n=10)
 
-def fetch_data(symbol, timeframe='15m', limit=100):
+
+def fetch_data(symbol, timeframe=TIMEFRAME, limit=100):
     try:
         ohlcv = EXCHANGE.fetch_ohlcv(symbol, timeframe, limit=limit)
         df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
@@ -53,7 +57,7 @@ def process_pair(symbol):
 
     # Fetch lower (5m) and higher (1h) data
     lower_df = fetch_data(symbol, TIMEFRAME)
-    higher_df = fetch_data(symbol, '1h')
+    higher_df = fetch_data(symbol, '15m')
 
     if lower_df is None or higher_df is None or len(lower_df) < 51 or len(higher_df) < 51:
         log_event(f"⚠️ Skipping {symbol} — insufficient data.")
@@ -68,20 +72,20 @@ def process_pair(symbol):
     trend_down = higher_df.iloc[-1]['ma20'] < higher_df.iloc[-1]['ma50']
 
     # Only consider signals if higher timeframe agrees
-    if check_long_signal(lower_df) and trend_up:
+    if check_long_signal(lower_df) and trend_up and should_trade(lower_df):
         entry_price = lower_df.iloc[-1]['close']
         levels = calculate_trade_levels(entry_price, direction='long')
         path = save_chart(lower_df, symbol)
 
-        # trade_result = place_futures_order(
-        #     exchange=kucoin_futures,
-        #     symbol=symbol,
-        #     side='buy',  # or 'sell' for short
-        #     usdt_amount=50,
-        #     tp_price=levels['take_profit'],
-        #     sl_price=levels['stop_loss'],
-        #     leverage=10
-        # )
+        trade_result = place_futures_order(
+            exchange=kucoin_futures,
+            symbol=symbol,
+            side='buy',  # or 'sell' for short
+            usdt_amount=5,
+            tp_price=levels['take_profit'],
+            sl_price=levels['stop_loss'],
+            leverage=10
+        )
 
 
         # Add trade info to the alert message
@@ -91,15 +95,25 @@ def process_pair(symbol):
             f'💰 Entry (limit): {levels["entry"]}\n'
             f'🎯 Take Profit: {levels["take_profit"]}\n'
             f'🛑 Stop Loss: {levels["stop_loss"]}\n\n'
-           # f'⚙️ Futures Trade Status: {trade_result["status"]}'
+            f'⚙️ Futures Trade Status: {trade_result["status"]}'
         )
         send_telegram(message, image_path=path)
         log_event("🚀 LONG signal triggered: " + message)
 
-    elif check_short_signal(lower_df) and trend_down:
+    elif check_short_signal(lower_df) and trend_down and should_trade(lower_df):
         entry_price = lower_df.iloc[-1]['close']
         levels = calculate_trade_levels(entry_price, direction='short')
         path = save_chart(lower_df, symbol)
+
+        trade_result = place_futures_order(
+            exchange=kucoin_futures,
+            symbol=symbol,
+            side='sell',  # or 'sell' for short
+            usdt_amount=5,
+            tp_price=levels['take_profit'],
+            sl_price=levels['stop_loss'],
+            leverage=10
+        )
 
         message = (
             f'📉 SHORT SIGNAL for {symbol} ({TIMEFRAME})\n'
@@ -123,5 +137,5 @@ def main():
 if __name__ == '__main__':
     while True:
         main()
-        log_event("🕒 Waiting 5 minutes until next cycle...\n")
-        time.sleep(5 * 60)
+        log_event("🕒 Waiting 1 minutes until next cycle...\n")
+        time.sleep(1 * 60)
