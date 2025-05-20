@@ -19,12 +19,6 @@ TIMEFRAME = '1m'
 PAIRS = get_top_volume_pairs(EXCHANGE, quote='USDT', top_n=20)
 higher_timeframe_cache = {}
 
-def log_event(text):
-    os.makedirs('logs', exist_ok=True)  # Ensure 'logs/' directory exists
-    log_text = f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {text}"
-    print(log_text)
-    with open('logs/trades.log', 'a') as f:
-        f.write(log_text + '\n')
 
 def fetch_data(symbol, timeframe=TIMEFRAME, limit=100):
     try:
@@ -53,6 +47,7 @@ def send_telegram(text, image_path=None):
 
 
 def log_event(text):
+    os.makedirs('logs', exist_ok=True)  # Ensure 'logs/' directory exists
     log_text = f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {text}"
     print(log_text)
     with open('logs/trades.log', 'a') as f:
