@@ -1,20 +1,15 @@
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
+
 import ccxt
-import pandas as pd
-from utils import calculate_mas, check_long_signal, check_short_signal
+from utils import check_long_signal, check_short_signal
 from utils import get_top_volume_pairs
 
 EXCHANGE = ccxt.kucoin()
 PAIRS = get_top_volume_pairs(EXCHANGE, quote='USDT', top_n=10)
 
-def fetch_data(symbol, tf='5m', limit=3000):
-    exchange = ccxt.kucoin()
-    ohlcv = exchange.fetch_ohlcv(symbol, timeframe=tf, limit=limit)
-    df = pd.DataFrame(ohlcv, columns=['timestamp','open','high','low','close','volume'])
-    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-    
-    return calculate_mas(df)
-
-def simulate_trades(df, tp_pct=1.4, sl_pct=1.0):
+def backtest_ma_Strategy(df,pair, tp_pct=1.4, sl_pct=1.0):
     long_wins = 0
     long_losses = 0
     short_wins = 0
@@ -53,9 +48,9 @@ def simulate_trades(df, tp_pct=1.4, sl_pct=1.0):
     all_trades = long_total + short_total
 
 
-    print(f'check: {long_wins} : {long_losses}')  # Check the last 20 candles
+    print(f'check: {long_wins} : {long_losses}')
 
-    return {
+    results = {
         'total_trades': all_trades,
         'long_trades': long_total,
         'short_trades': short_total,
@@ -65,15 +60,14 @@ def simulate_trades(df, tp_pct=1.4, sl_pct=1.0):
         'short_losses': short_losses,
         'long_win_rate': round((long_wins / long_total) * 100, 2) if long_total > 0 else 0,
         'short_win_rate': round((short_wins / short_total) * 100, 2) if short_total > 0 else 0,
-        'overall_win_rate': round(((long_wins + short_wins) / all_trades) * 100, 2) if all_trades > 0 else 0
+        'overall_win_rate': round((long_wins / (long_wins + short_wins)) * 100, 2) if (long_wins + short_wins) > 0 else 0
     }
 
-for pair in PAIRS:
-    data = fetch_data(pair)
-    results = simulate_trades(data)
 
     print(f"Backtest Results for {pair}:")
     print(f"Total Trades: {results['total_trades']}")
     print(f"Wins: {results['long_wins'] + results['short_wins']}")
     print(f"Losses: {results['long_losses'] + results['short_losses']}")
     print(f"Win Rate: {results['long_win_rate'] + results['short_win_rate']}%")
+
+    return results

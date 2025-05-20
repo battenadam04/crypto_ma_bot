@@ -86,46 +86,48 @@ def calculate_mas(df):
     df['ma50'] = SMAIndicator(df['close'], window=50).sma_indicator()
     return df
 
-def check_long_signal(df):
-    if len(df) < 51:  # Ensure at least 50 candles for MA50
+def check_ma_crossover(prev_ma1, prev_ma2, curr_ma1, curr_ma2, direction="long"):
+    if direction == "long":
+        return prev_ma1 < prev_ma2 and curr_ma1 > curr_ma2
+    else:
+        return prev_ma1 > prev_ma2 and curr_ma1 < curr_ma2
+
+def confirm_trend(df, last_idx, ma_key, condition_func, lookahead):
+    for j in range(1, lookahead + 1):
+        idx = last_idx + j
+        if idx >= len(df):
+            break
+        if condition_func(df.iloc[idx][ma_key], df.iloc[idx]['close']):
+            return True
+    return False
+
+def check_long_signal(df, lookahead=10):
+    if len(df) < 51:
         return False
 
-    last, prev = df.iloc[-1], df.iloc[-2]
-    
-    # ✅ Crossover check (10 crosses above 20)
-    crossover = prev['ma10'] < prev['ma20'] and last['ma10'] > last['ma20']
-    
-    # ✅ MA alignment (trend confirmation)
+    prev = df.iloc[-2]
+    last = df.iloc[-1]
+
+    crossover = check_ma_crossover(prev['ma10'], prev['ma20'], last['ma10'], last['ma20'], direction="long")
     alignment = last['ma20'] > last['ma50']
+    momentum = last['close'] > last['ma10']
+    confirmed = confirm_trend(df, len(df)-1, 'ma50', lambda ma, close: close > ma, lookahead)
 
-    # ✅ Extra condition: Price should be above MA10 (bullish momentum)
-    price_momentum = last['close'] > last['ma10']
+    return crossover and alignment and momentum and confirmed
 
-    # ✅ Final confirmation: Add volume filter (optional)
-    volume_confirmation = last['volume'] > prev['volume']  # Ensure increasing volume
-
-    return crossover and alignment and price_momentum and volume_confirmation
-
-
-def check_short_signal(df):
-    if len(df) < 51:  # Ensure we have enough data
+def check_short_signal(df, lookahead=10):
+    if len(df) < 51:
         return False
 
-    last, prev = df.iloc[-1], df.iloc[-2]
+    prev = df.iloc[-2]
+    last = df.iloc[-1]
 
-    # ✅ Crossover check (10 crosses below 20)
-    crossover = prev['ma10'] > prev['ma20'] and last['ma10'] < last['ma20']
-
-    # ✅ MA alignment (bearish trend confirmation)
+    crossover = check_ma_crossover(prev['ma10'], prev['ma20'], last['ma10'], last['ma20'], direction="short")
     alignment = last['ma20'] < last['ma50']
+    momentum = last['close'] < last['ma10']
+    confirmed = confirm_trend(df, len(df)-1, 'ma50', lambda ma, close: close < ma, lookahead)
 
-    # ✅ Extra condition: Price should be below MA10 (selling momentum)
-    price_momentum = last['close'] < last['ma10']
-
-    # ✅ Volume confirmation (optional)
-    volume_confirmation = last['volume'] > prev['volume']  # Ensure increasing selling volume
-
-    return crossover and alignment and price_momentum and volume_confirmation
+    return crossover and alignment and momentum and confirmed
 
 def save_chart(df, symbol):
     df = df.copy()
