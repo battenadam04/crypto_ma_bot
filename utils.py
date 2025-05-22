@@ -101,33 +101,42 @@ def confirm_trend(df, last_idx, ma_key, condition_func, lookahead):
             return True
     return False
 
-def check_long_signal(df, lookahead=4):
+def check_long_signal(df, lookahead=10):
     if len(df) < 51:
         return False
 
     prev = df.iloc[-2]
     last = df.iloc[-1]
 
-    crossover = check_ma_crossover(prev['ma10'], prev['ma20'], last['ma10'], last['ma20'], direction="long")
+    # Crossover condition (MA10 crosses above MA20)
+    crossover = prev['ma10'] < prev['ma20'] and last['ma10'] > last['ma20']
+
+    # Continuation condition (MA10 stays above MA20)
+    continuation = last['ma10'] > last['ma20']
+
+    # Shared trend confirmation
     alignment = last['ma20'] > last['ma50']
     momentum = last['close'] > last['ma10']
     confirmed = confirm_trend(df, len(df)-1, 'ma50', lambda ma, close: close > ma, lookahead)
 
-    return crossover and alignment and momentum and confirmed
+    return (crossover or continuation) and alignment and momentum and confirmed
 
-def check_short_signal(df, lookahead=4):
+
+def check_short_signal(df, lookahead=10):
     if len(df) < 51:
         return False
 
     prev = df.iloc[-2]
     last = df.iloc[-1]
 
-    crossover = check_ma_crossover(prev['ma10'], prev['ma20'], last['ma10'], last['ma20'], direction="short")
+    crossover = prev['ma10'] > prev['ma20'] and last['ma10'] < last['ma20']
+    continuation = last['ma10'] < last['ma20']
+
     alignment = last['ma20'] < last['ma50']
     momentum = last['close'] < last['ma10']
     confirmed = confirm_trend(df, len(df)-1, 'ma50', lambda ma, close: close < ma, lookahead)
 
-    return crossover and alignment and momentum and confirmed
+    return (crossover or continuation) and alignment and momentum and confirmed
 
 def save_chart(df, symbol):
     df = df.copy()
@@ -253,3 +262,13 @@ def check_range_short(df):
     resistance = df['high'][-20:].max()
     last_close = df.iloc[-1]['close']
     return last_close >= resistance * 0.99  # near resistance
+
+def check_trend_continuation(df):
+    if len(df) < 51:
+        return False
+    last = df.iloc[-1]
+    return (
+        last['ma10'] > last['ma20'] and
+        last['ma20'] > last['ma50'] and
+        last['close'] > last['ma10']
+    )
