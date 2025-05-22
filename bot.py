@@ -15,8 +15,8 @@ from utils import (
 
 kucoin_futures = init_kucoin_futures()
 EXCHANGE = ccxt.kucoin()
-TIMEFRAME = '5m'
-PAIRS = get_top_volume_pairs(EXCHANGE, quote='USDT', top_n=20)
+TIMEFRAME = '1m'
+PAIRS = get_top_volume_pairs(EXCHANGE, quote='USDT', top_n=40)
 higher_timeframe_cache = {}
 
 
