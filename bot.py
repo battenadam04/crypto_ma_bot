@@ -16,7 +16,7 @@ from utils import (
 kucoin_futures = init_kucoin_futures()
 EXCHANGE = ccxt.kucoin()
 TIMEFRAME = '1m'
-PAIRS = get_top_volume_pairs(EXCHANGE, quote='USDT', top_n=40)
+PAIRS = get_top_volume_pairs(EXCHANGE, quote='USDT', top_n=20)
 higher_timeframe_cache = {}
 
 
@@ -25,7 +25,7 @@ def fetch_data(symbol, timeframe=TIMEFRAME, limit=100):
         ohlcv = EXCHANGE.fetch_ohlcv(symbol, timeframe, limit=limit)
         df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-        return df
+        return df.limit(200)
     except Exception as e:
         log_event(f"❌ Error fetching data for {symbol}: {str(e)}")
         return None
