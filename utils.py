@@ -142,7 +142,7 @@ def save_chart(df, symbol):
              title=f"{symbol} MA Crossover", savefig=path)
     return path
 
-def calculate_trade_levels(price, direction, tp_pct=2.0, sl_pct=1.0):
+def calculate_trade_levels(price, direction, tp_pct=10.0, sl_pct=1.0):
     if direction == 'long':
         tp = price * (1 + tp_pct / 100)
         sl = price * (1 - sl_pct / 100)
@@ -237,3 +237,19 @@ def is_early_breakout(df):
     near_ma50 = abs(last['close'] - last['ma50']) / last['ma50'] < 0.005  # within 0.5%
 
     return crossover and (under_ma50 or near_ma50)
+
+def is_ranging(df, window=50, threshold=0.02):
+    high = df['high'][-window:].max()
+    low = df['low'][-window:].min()
+    range_pct = (high - low) / low
+    return range_pct < threshold  # e.g., less than 2% movement
+
+def check_range_long(df):
+    support = df['low'][-20:].min()
+    last_close = df.iloc[-1]['close']
+    return last_close <= support * 1.01  # near support
+
+def check_range_short(df):
+    resistance = df['high'][-20:].max()
+    last_close = df.iloc[-1]['close']
+    return last_close >= resistance * 0.99  # near resistance
