@@ -117,9 +117,9 @@ def check_long_signal(df, lookahead=10):
     # Shared trend confirmation
     alignment = last['ma20'] > last['ma50']
     momentum = last['close'] > last['ma10']
-    confirmed = confirm_trend(df, len(df)-1, 'ma50', lambda ma, close: close > ma, lookahead)
+    #confirmed = confirm_trend(df, len(df)-1, 'ma50', lambda ma, close: close > ma, lookahead)
 
-    return (crossover or continuation) and alignment and momentum and confirmed
+    return (crossover or continuation) and momentum
 
 
 def check_short_signal(df, lookahead=10):
@@ -134,9 +134,9 @@ def check_short_signal(df, lookahead=10):
 
     alignment = last['ma20'] < last['ma50']
     momentum = last['close'] < last['ma10']
-    confirmed = confirm_trend(df, len(df)-1, 'ma50', lambda ma, close: close < ma, lookahead)
+    #confirmed = confirm_trend(df, len(df)-1, 'ma50', lambda ma, close: close < ma, lookahead)
 
-    return (crossover or continuation) and alignment and momentum and confirmed
+    return (crossover or continuation)  and momentum
 
 def save_chart(df, symbol):
     df = df.copy()
