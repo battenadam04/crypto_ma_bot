@@ -211,7 +211,7 @@ def is_consolidating(df, lookback=20, threshold_pct=1.5):
     low = recent['low'].min()
     range_pct = ((high - low) / low) * 100
 
-    return range_pct < threshold_pct  # Returns True if it's consolidating
+    return range_pct < threshold_pct and are_mas_compressed(df)  # Returns True if it's consolidating
 
 def should_trade(df):
     if is_consolidating(df):

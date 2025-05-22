@@ -10,7 +10,7 @@ from config import CRYPTO_PAIRS, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
 from utils import (
     calculate_mas, check_long_signal, check_short_signal, save_chart,
     calculate_trade_levels, get_top_volume_pairs, init_kucoin_futures,
-    place_futures_order, should_trade,is_ranging, check_range_short, check_range_long
+    place_futures_order, should_trade,is_consolidating, check_range_short, check_range_long
 )
 
 kucoin_futures = init_kucoin_futures()
@@ -113,7 +113,7 @@ def process_pair(symbol):
     elif check_short_signal(lower_df) and trend_down:
         handle_trade(symbol, 'short', lower_df, trend_down)
     elif not trend_up and not trend_down:
-        if is_ranging(lower_df):
+        if is_consolidating(lower_df):
             if check_range_long(lower_df):
                 handle_trade(symbol, 'long', lower_df, True)
             elif check_range_short(lower_df):
