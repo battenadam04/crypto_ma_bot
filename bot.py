@@ -90,7 +90,7 @@ def handle_trade(symbol, direction, df, trend_confirmed):
         log_event(f"Trade: {message}")
 
     else:
-    print(f"Open order already exists for {symbol}. Skipping new order.")
+        print(f"Open order already exists for {symbol}. Skipping new order.")
 
 
 def process_pair(symbol):
