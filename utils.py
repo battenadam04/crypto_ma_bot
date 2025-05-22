@@ -15,6 +15,14 @@ def init_kucoin_futures():
         'enableRateLimit': True
     })
 
+def has_open_order(symbol):
+    try:
+        open_orders = init_kucoin_futures.fetch_open_orders(symbol)
+        return len(open_orders) > 1
+    except Exception as e:
+        print(f"Error fetching open orders for {symbol}: {e}")
+        return False
+
 def set_leverage(exchange, symbol, leverage=10):
     market = exchange.market(symbol)
     try:

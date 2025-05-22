@@ -10,7 +10,7 @@ from config import CRYPTO_PAIRS, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
 from utils import (
     calculate_mas, check_long_signal, check_short_signal, save_chart,
     calculate_trade_levels, get_top_volume_pairs, init_kucoin_futures,
-    place_futures_order, should_trade,is_consolidating, check_range_short, check_range_long
+    place_futures_order,has_open_order, should_trade,is_consolidating, check_range_short, check_range_long
 )
 
 kucoin_futures = init_kucoin_futures()
@@ -63,27 +63,34 @@ def handle_trade(symbol, direction, df, trend_confirmed):
     path = save_chart(df, symbol)
     side = 'buy' if direction == 'long' else 'sell'
 
-    trade_result = place_futures_order(
-        exchange=kucoin_futures,
-        symbol=symbol,
-        side=side,
-        usdt_amount=5,
-        tp_price=levels['take_profit'],
-        sl_price=levels['stop_loss'],
-        leverage=10
-    )
 
-    status = trade_result.get('status', 'unknown')
-    message = (
-        f"{'📈 LONG' if direction == 'long' else '📉 SHORT'} SIGNAL for {symbol} ({TIMEFRAME})\n"
-        f"Confirmed by 15m {'up' if direction == 'long' else 'down'}trend\n\n"
-        f"💰 Entry: {levels['entry']}\n"
-        f"🎯 TP: {levels['take_profit']}\n"
-        f"🛑 SL: {levels['stop_loss']}\n"
-        f"⚙️ Trade Status: {status}"
-    )
-    send_telegram(message, image_path=path)
-    log_event(f"Trade: {message}")
+    if not has_open_order(symbol):
+
+        ## update to return if open orders exist until they dont
+        trade_result = place_futures_order(
+            exchange=kucoin_futures,
+            symbol=symbol,
+            side=side,
+            usdt_amount=5,
+            tp_price=levels['take_profit'],
+            sl_price=levels['stop_loss'],
+            leverage=10
+        )
+
+        status = trade_result.get('status', 'unknown')
+        message = (
+            f"{'📈 LONG' if direction == 'long' else '📉 SHORT'} SIGNAL for {symbol} ({TIMEFRAME})\n"
+            f"Confirmed by 15m {'up' if direction == 'long' else 'down'}trend\n\n"
+            f"💰 Entry: {levels['entry']}\n"
+            f"🎯 TP: {levels['take_profit']}\n"
+            f"🛑 SL: {levels['stop_loss']}\n"
+            f"⚙️ Trade Status: {status}"
+        )
+        send_telegram(message, image_path=path)
+        log_event(f"Trade: {message}")
+
+    else:
+    print(f"Open order already exists for {symbol}. Skipping new order.")
 
 
 def process_pair(symbol):
