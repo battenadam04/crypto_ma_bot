@@ -55,8 +55,8 @@ def log_event(text):
 
 
 def handle_trade(symbol, direction, df, trend_confirmed):
-    if not trend_confirmed or not should_trade(df):
-        return
+    # if not trend_confirmed or not should_trade(df):
+    #     return
 
     entry_price = df.iloc[-1]['close']
     levels = calculate_trade_levels(entry_price, direction)

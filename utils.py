@@ -101,42 +101,92 @@ def confirm_trend(df, last_idx, ma_key, condition_func, lookahead):
             return True
     return False
 
+# def check_long_signal(df, lookahead=10):
+#     if len(df) < 51:
+#         return False
+
+#     prev = df.iloc[-2]
+#     last = df.iloc[-1]
+
+#     # Crossover condition (MA10 crosses above MA20)
+#     crossover = prev['ma10'] < prev['ma20'] and last['ma10'] > last['ma20']
+
+#     # Continuation condition (MA10 stays above MA20)
+#     continuation = last['ma10'] > last['ma20']
+
+#     # Shared trend confirmation
+#     alignment = last['ma20'] > last['ma50']
+#     momentum = last['close'] > last['ma10']
+#     #confirmed = confirm_trend(df, len(df)-1, 'ma50', lambda ma, close: close > ma, lookahead)
+
+#     return (crossover or continuation) and momentum
 def check_long_signal(df, lookahead=10):
     if len(df) < 51:
         return False
 
-    prev = df.iloc[-2]
     last = df.iloc[-1]
+    prev = df.iloc[-2]
 
-    # Crossover condition (MA10 crosses above MA20)
+    # Crossover condition: MA10 crosses above MA20
     crossover = prev['ma10'] < prev['ma20'] and last['ma10'] > last['ma20']
 
-    # Continuation condition (MA10 stays above MA20)
+    # Continuation condition: MA10 remains above MA20
     continuation = last['ma10'] > last['ma20']
 
-    # Shared trend confirmation
+    # Trend alignment: MA20 above MA50 (higher timeframe trend)
     alignment = last['ma20'] > last['ma50']
+
+    # Momentum: price above MA10 (showing bullish momentum)
     momentum = last['close'] > last['ma10']
-    #confirmed = confirm_trend(df, len(df)-1, 'ma50', lambda ma, close: close > ma, lookahead)
 
-    return (crossover or continuation) and momentum
+    # Optional: bullish candle confirmation (price closed higher than open)
+    bullish_candle = last['close'] > last['open']
+
+    # Combine conditions: crossover or continuation + momentum + alignment + bullish candle
+    if (crossover or continuation) and alignment and momentum and bullish_candle:
+        print(f"LONG SIGNAL TRIGGERED at {last['timestamp']}")
+        return True
+
+    return False
 
 
+# def check_short_signal(df, lookahead=10):
+#     if len(df) < 51:
+#         return False
+
+#     prev = df.iloc[-2]
+#     last = df.iloc[-1]
+
+#     crossover = prev['ma10'] > prev['ma20'] and last['ma10'] < last['ma20']
+#     continuation = last['ma10'] < last['ma20']
+
+#     alignment = last['ma20'] < last['ma50']
+#     momentum = last['close'] < last['ma10']
+#     #confirmed = confirm_trend(df, len(df)-1, 'ma50', lambda ma, close: close < ma, lookahead)
+
+#     return (crossover or continuation)  and momentum
 def check_short_signal(df, lookahead=10):
     if len(df) < 51:
         return False
 
-    prev = df.iloc[-2]
     last = df.iloc[-1]
 
-    crossover = prev['ma10'] > prev['ma20'] and last['ma10'] < last['ma20']
-    continuation = last['ma10'] < last['ma20']
+    # Basic bearish structure: MA10 < MA20 < MA50 and price below MA10
+    condition = (
+        last['ma10'] < last['ma20'] and
+        last['ma20'] < last['ma50'] and
+        last['close'] < last['ma10']
+    )
 
-    alignment = last['ma20'] < last['ma50']
-    momentum = last['close'] < last['ma10']
-    #confirmed = confirm_trend(df, len(df)-1, 'ma50', lambda ma, close: close < ma, lookahead)
+    # Optional: basic bearish candle confirmation
+    bearish_candle = last['close'] < last['open']
+    small_lower_wick = (last['close'] - last['low']) < (last['high'] - last['low']) * 0.3
 
-    return (crossover or continuation)  and momentum
+    if condition and bearish_candle and small_lower_wick:
+        print(f"SHORT SIGNAL TRIGGERED at {last['timestamp']}")
+        return True
+
+    return False
 
 def save_chart(df, symbol):
     df = df.copy()

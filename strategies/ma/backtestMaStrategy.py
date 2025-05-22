@@ -2,7 +2,6 @@ import sys
 import os
 import ccxt
 import pandas as pd
-from ta.trend import SMAIndicator
 from datetime import datetime, timedelta
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
@@ -20,44 +19,56 @@ def fetch_ohlcv(symbol, timeframe='1m', limit=150):
     df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
     return calculate_mas(df)
 
+def check_trade_outcome(df, start_idx, direction, entry_price, tp_pct, sl_pct, max_lookahead=10):
+    tp = entry_price * (1 + tp_pct / 100) if direction == 'long' else entry_price * (1 - tp_pct / 100)
+    sl = entry_price * (1 - sl_pct / 100) if direction == 'long' else entry_price * (1 + sl_pct / 100)
+
+    for j in range(1, max_lookahead + 1):
+        if start_idx + j >= len(df):
+            break
+        candle = df.iloc[start_idx + j]
+        high, low = candle['high'], candle['low']
+
+        if direction == 'long':
+            if high >= tp:
+                return 'win'
+            if low <= sl:
+                return 'loss'
+        else:
+            if low <= tp:
+                return 'win'
+            if high >= sl:
+                return 'loss'
+    return 'none'  # No outcome hit in the lookahead window
+
 def backtest_ma_strategy(df, pair, tp_pct=1.4, sl_pct=1.0):
     long_wins = long_losses = short_wins = short_losses = 0
-    for i in range(51, len(df) - 1):
+
+    for i in range(51, len(df) - 10):  # ensure enough candles left for lookahead
         slice_df = df.iloc[:i+1]
         current = df.iloc[i]
-        next_candle = df.iloc[i+1]
         entry = current['close']
-        high = next_candle['high']
-        low = next_candle['low']
-
-        # print("Testing one candle:")
-        # test_df = df.iloc[:60]
-        # print("LONG:", check_long_signal(test_df))
-        # print("SHORT:", check_short_signal(test_df))
 
         if check_long_signal(slice_df):
-            print(f"[{pair}] LONG signal at index {i} | Price: {entry}")
-            tp = entry * (1 + tp_pct / 100)
-            sl = entry * (1 - sl_pct / 100)
-            if high >= tp:
+            result = check_trade_outcome(df, i, 'long', entry, tp_pct, sl_pct)
+            print(f"\nCHECKING LONG VALUE {result}:")
+            if result == 'win':
                 long_wins += 1
-            elif low <= sl:
+            elif result == 'loss':
                 long_losses += 1
 
         elif check_short_signal(slice_df):
-            print(f"[{pair}] SHORT signal at index {i} | Price: {entry}")
-            tp = entry * (1 - tp_pct / 100)
-            sl = entry * (1 + sl_pct / 100)
-            if low <= tp:
+            result = check_trade_outcome(df, i, 'short', entry, tp_pct, sl_pct)
+            if result == 'win':
                 short_wins += 1
-            elif high >= sl:
+            elif result == 'loss':
                 short_losses += 1
 
     long_total = long_wins + long_losses
     short_total = short_wins + short_losses
     all_trades = long_total + short_total
 
-    print(f"Backtest Results for {pair}:")
+    print(f"\nBacktest Results for {pair}:")
     print(f"Total Trades: {all_trades}")
     print(f"Wins: {long_wins + short_wins}")
     print(f"Losses: {long_losses + short_losses}")
