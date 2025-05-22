@@ -101,7 +101,7 @@ def confirm_trend(df, last_idx, ma_key, condition_func, lookahead):
             return True
     return False
 
-def check_long_signal(df, lookahead=10):
+def check_long_signal(df, lookahead=4):
     if len(df) < 51:
         return False
 
@@ -115,7 +115,7 @@ def check_long_signal(df, lookahead=10):
 
     return crossover and alignment and momentum and confirmed
 
-def check_short_signal(df, lookahead=10):
+def check_short_signal(df, lookahead=4):
     if len(df) < 51:
         return False
 
