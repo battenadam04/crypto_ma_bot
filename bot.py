@@ -25,7 +25,7 @@ def fetch_data(symbol, timeframe=TIMEFRAME, limit=100):
         ohlcv = EXCHANGE.fetch_ohlcv(symbol, timeframe, limit=limit)
         df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-        return df.limit(200)
+        return df.tail(200)
     except Exception as e:
         log_event(f"❌ Error fetching data for {symbol}: {str(e)}")
         return None
