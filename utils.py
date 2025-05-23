@@ -7,17 +7,28 @@ import ccxt
 from config import KUCOIN_API_KEY, KUCOIN_SECRET_KEY, KUCOIN_PASSPHRASE
 from ta.trend import ADXIndicator
 
+
+EXCHANGE = ccxt.kucoin({
+        'apiKey': KUCOIN_API_KEY,
+        'secret': KUCOIN_SECRET_KEY,
+        'password': KUCOIN_PASSPHRASE,
+        'enableRateLimit': True
+})
+
 def init_kucoin_futures():
-    return ccxt.kucoinfutures({
+    futures = ccxt.kucoinfutures({
         'apiKey': KUCOIN_API_KEY,
         'secret': KUCOIN_SECRET_KEY,
         'password': KUCOIN_PASSPHRASE,
         'enableRateLimit': True
     })
+    futures.load_markets()
+    return futures
 
 def has_open_order(symbol):
     try:
-        open_orders = init_kucoin_futures.fetch_open_orders(symbol)
+        kucoin_futures = init_kucoin_futures()
+        open_orders = kucoin_futures.fetch_open_orders(symbol)
         return len(open_orders) > 1
     except Exception as e:
         print(f"Error fetching open orders for {symbol}: {e}")
@@ -30,51 +41,101 @@ def set_leverage(exchange, symbol, leverage=10):
         return response
     except Exception as e:
         return {'error': str(e)}
+    
+def set_leverage(exchange, symbol, leverage):
+    try:
+        exchange.set_leverage(
+            leverage=leverage,
+            symbol=symbol,
+            #params={"marginMode": "cross"}  # ✅ Required for KuCoin Futures
+        )
+    except Exception as e:
+        print(f"⚠️ Failed to set leverage for {symbol}: {str(e)}")
+
+def set_margin_mode(exchange, symbol, mode='cross'):
+    try:
+        exchange.set_margin_mode(
+            marginMode=mode,
+            symbol=symbol
+        )
+        print(f"✅ Margin mode set to {mode} for {symbol}")
+    except Exception as e:
+        print(f"⚠️ Failed to set margin mode for {symbol}: {str(e)}")
+
+def get_decimal_places(value):
+    if isinstance(value, int):
+        return 0
+    elif isinstance(value, float):
+        str_val = f"{value:.8f}".rstrip('0')  # limit to 8 decimals
+        if '.' in str_val:
+            return len(str_val.split('.')[1])
+    return 0
+
 
 def place_futures_order(exchange, symbol, side, usdt_amount, tp_price, sl_price, leverage=10):
     try:
-        # Set leverage
-        set_leverage(exchange, symbol, leverage)
+        exchange.load_markets()
+        market = exchange.market(symbol)
 
         # Get current price
         ticker = exchange.fetch_ticker(symbol)
         price = ticker['last']
+        amount_precision = get_decimal_places(market['precision']['amount'])
+        price_precision = get_decimal_places(market['precision']['price'])
+        amount = round(usdt_amount / price, amount_precision)
+
+        # Determine entry price with small buffer
+        buffer = 0.05
+        entry_price = price * (1 + buffer / 100) if side == 'buy' else price * (1 - buffer / 100)
+        entry_price = round(entry_price, price_precision)
+
+
+        # Convert USDT → base asset contracts
         base_amount = usdt_amount / price
 
-        # Market entry
-        entry_order = exchange.create_market_order(
+        # 🔄 You may skip leverage setting if your account is already set
+        # ✅ This avoids conflict with isolated/cross mismatch
+        # exchange.set_leverage(leverage, symbol, params={"marginMode": "cross"})
+
+        # Entry Order
+        entry_order = exchange.create_limit_order(
             symbol=symbol,
             side=side,
-            amount=round(base_amount, 4),
-            params={'leverage': leverage}
-        )
-
-        # Determine opposite side for TP/SL
-        close_side = 'sell' if side == 'buy' else 'buy'
-
-        # Create TAKE PROFIT conditional order
-        tp_order = exchange.create_order(
-            symbol=symbol,
-            type='takeProfitMarket',
-            side=close_side,
-            amount=round(base_amount, 4),
+            amount=round(base_amount, market['precision']['amount']),
+            price=entry_price,
             params={
-                'stopPrice': round(tp_price, 4),
-                'reduceOnly': True,
-                'leverage': leverage
+                'leverage': int(leverage)  # ⚠️ Do not set marginMode here
             }
         )
 
-        # Create STOP LOSS conditional order
+        close_side = 'sell' if side == 'buy' else 'buy'
+
+        # Take-Profit Order (Limit or Conditional)
+        tp_order = exchange.create_order(
+            symbol=symbol,
+            type='limit',
+            side=close_side,
+            amount=round(base_amount, market['precision']['amount']),
+            price=round(tp_price, market['precision']['price']),
+            params={
+                'reduceOnly': True,
+                'stop': True,
+                'stopPrice': round(tp_price, market['precision']['price']),
+                'triggerType': 'last',
+            }
+        )
+
+        # Stop-Loss Order (Market or Conditional)
         sl_order = exchange.create_order(
             symbol=symbol,
-            type='stopMarket',
+            type='market',
             side=close_side,
-            amount=round(base_amount, 4),
+            amount=round(base_amount, market['precision']['amount']),
             params={
-                'stopPrice': round(sl_price, 4),
                 'reduceOnly': True,
-                'leverage': leverage
+                'stop': True,
+                'stopPrice': round(sl_price, market['precision']['price']),
+                'triggerType': 'last',
             }
         )
 
@@ -87,6 +148,8 @@ def place_futures_order(exchange, symbol, side, usdt_amount, tp_price, sl_price,
 
     except Exception as e:
         return {'status': 'error', 'message': str(e)}
+
+
 
 def calculate_mas(df):
     df['ma10'] = SMAIndicator(df['close'], window=10).sma_indicator()
@@ -196,18 +259,18 @@ def check_short_signal(df, lookahead=10):
 
     return False
 
-def save_chart(df, symbol):
-    df = df.copy()
-    df.index = pd.to_datetime(df['timestamp'])
-    add_plot = [
-        mpf.make_addplot(df['ma10'], color='blue'),
-        mpf.make_addplot(df['ma20'], color='orange'),
-        mpf.make_addplot(df['ma50'], color='green')
-    ]
-    path = f'charts/{symbol.replace("/", "_")}.png'
-    mpf.plot(df, type='candle', style='charles', addplot=add_plot, volume=True,
-             title=f"{symbol} MA Crossover", savefig=path)
-    return path
+# def save_chart(df, symbol):
+#     df = df.copy()
+#     df.index = pd.to_datetime(df['timestamp'])
+#     add_plot = [
+#         mpf.make_addplot(df['ma10'], color='blue'),
+#         mpf.make_addplot(df['ma20'], color='orange'),
+#         mpf.make_addplot(df['ma50'], color='green')
+#     ]
+#     path = f'charts/{symbol.replace("/", "_")}.png'
+#     mpf.plot(df, type='candle', style='charles', addplot=add_plot, volume=True,
+#              title=f"{symbol} MA Crossover", savefig=path)
+#     return path
 
 def calculate_trade_levels(price, direction, tp_pct=10.0, sl_pct=1.0):
     if direction == 'long':
@@ -330,3 +393,49 @@ def check_trend_continuation(df):
         last['ma20'] > last['ma50'] and
         last['close'] > last['ma10']
     )
+
+def get_top_futures_tradable_pairs(exchange, quote='USDT', top_n=15):
+    print("⏳ Loading KuCoin Futures markets...")
+    try:
+        markets = exchange.load_markets()
+        print(f"✅ Loaded {len(markets)} markets.")
+    except Exception as e:
+        print("❌ Error loading markets:", e)
+        return []
+
+    stablecoins = {'USDT', 'USDC', 'BUSD', 'TUSD', 'DAI', 'FDUSD', 'UST'}
+    volume_data = []
+
+    for symbol, market in markets.items():
+        # Filter for futures markets with the specified quote currency
+        if market.get('future', False):
+            continue
+        if market.get('quote') != quote:
+            continue
+        if not market.get('linear', False):
+            continue
+        if not market.get('active', False):
+            continue
+
+        base = market.get('base')
+        if base in stablecoins:
+            continue  # Skip stablecoin-to-stablecoin pairs
+
+        # Retrieve volume information
+        vol_value = market.get('info', {}).get('volumeOf24h')
+        if vol_value is None:
+            print(f"Skipping {market}: Missing volValue.")
+            continue
+
+        try:
+            volume = float(vol_value)
+            volume_data.append((symbol, volume))
+        except ValueError:
+            print(f"Skipping {symbol}: Invalid volValue '{vol_value}'.")
+            continue
+
+    # Sort by volume in descending order and select top N pairs
+    top_pairs = sorted(volume_data, key=lambda x: x[1], reverse=True)[:top_n]
+    print(f"🔥 Top {top_n} tradable futures pairs:", top_pairs)
+
+    return [pair[0] for pair in top_pairs]

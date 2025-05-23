@@ -3,33 +3,57 @@ import pandas as pd
 import requests
 import time
 import os
-from datetime import datetime
+from datetime import datetime,timedelta
 from concurrent.futures import ThreadPoolExecutor
 
 from config import CRYPTO_PAIRS, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
 from utils import (
-    calculate_mas, check_long_signal, check_short_signal, save_chart,
-    calculate_trade_levels, get_top_volume_pairs, init_kucoin_futures,
+    calculate_mas, check_long_signal, check_short_signal,
+    calculate_trade_levels, get_top_futures_tradable_pairs, init_kucoin_futures,
     place_futures_order,has_open_order, should_trade,is_consolidating, check_range_short, check_range_long
 )
 
 kucoin_futures = init_kucoin_futures()
 EXCHANGE = ccxt.kucoin()
 TIMEFRAME = '1m'
-PAIRS = get_top_volume_pairs(EXCHANGE, quote='USDT', top_n=20)
+# def get_top_futures_pairs(exchange, quote='USDT', top_n=20):
+#     markets = exchange.load_markets()
+#     futures_pairs = []
+
+#     for symbol, market in markets.items():
+#         if (
+#             market.get('quote') == quote
+#             and market.get('active', False)
+#             and market.get('linear', False)  # KuCoin futures are linear
+#             and market.get('future', False) 
+#         ):
+#             futures_pairs.append({
+#                 'symbol': symbol,
+#                 'baseVolume': market.get('info', {}).get('volValue', 0)  # USD volume
+#             })
+
+#     # Sort by volume descending
+#     sorted_pairs = sorted(futures_pairs, key=lambda x: float(x['baseVolume']), reverse=True)
+#     print(f"💰 {sorted_pairs}.")
+#     return [pair['symbol'] for pair in sorted_pairs[:top_n]]
+
+PAIRS = get_top_futures_tradable_pairs(kucoin_futures, quote='USDT', top_n=20)
 higher_timeframe_cache = {}
 
 
-def fetch_data(symbol, timeframe=TIMEFRAME, limit=100):
+def fetch_data(symbol, timeframe=TIMEFRAME, limit=350):
     try:
-        ohlcv = EXCHANGE.fetch_ohlcv(symbol, timeframe, limit=limit)
+
+        hours_back = 6 if timeframe == '1m' else 48
+        since_dt = datetime.now() - timedelta(hours=hours_back)
+        since_ms = int(since_dt.timestamp() * 1000)  # ✅ convert to ms
+        ohlcv = kucoin_futures.fetch_ohlcv(symbol, timeframe=timeframe, since=since_ms, limit=limit)
         df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-        return df.tail(200)
+        return df
     except Exception as e:
         log_event(f"❌ Error fetching data for {symbol}: {str(e)}")
         return None
-
 
 def send_telegram(text, image_path=None):
     try:
@@ -60,12 +84,12 @@ def handle_trade(symbol, direction, df, trend_confirmed):
 
     entry_price = df.iloc[-1]['close']
     levels = calculate_trade_levels(entry_price, direction)
-    path = save_chart(df, symbol)
+     ## path = save_chart(df, symbol)
     side = 'buy' if direction == 'long' else 'sell'
-
+    print(f"💰 starting kucoin trade beginning.")
 
     if not has_open_order(symbol):
-
+        print(f"💰 starting kucoin trade.")
         ## update to return if open orders exist until they dont
         trade_result = place_futures_order(
             exchange=kucoin_futures,
@@ -76,17 +100,18 @@ def handle_trade(symbol, direction, df, trend_confirmed):
             sl_price=levels['stop_loss'],
             leverage=10
         )
-
+        print(f"🔍 Full KuCoin trade result:\n{trade_result}")
         status = trade_result.get('status', 'unknown')
         message = (
             f"{'📈 LONG' if direction == 'long' else '📉 SHORT'} SIGNAL for {symbol} ({TIMEFRAME})\n"
             f"Confirmed by 15m {'up' if direction == 'long' else 'down'}trend\n\n"
-            f"💰 Entry: {levels['entry']}\n"
+            f" Entry: {levels['entry']}\n"
             f"🎯 TP: {levels['take_profit']}\n"
             f"🛑 SL: {levels['stop_loss']}\n"
             f"⚙️ Trade Status: {status}"
         )
-        send_telegram(message, image_path=path)
+        send_telegram(message)
+        #send_telegram(message, image_path=path)
         log_event(f"Trade: {message}")
 
     else:
@@ -115,16 +140,17 @@ def process_pair(symbol):
     trend_up = higher_df.iloc[-1]['ma20'] > higher_df.iloc[-1]['ma50']
     trend_down = higher_df.iloc[-1]['ma20'] < higher_df.iloc[-1]['ma50']
 
-    if check_long_signal(lower_df) and trend_up:
+        #and trend_down - add back to each IF
+    if check_long_signal(lower_df):
         handle_trade(symbol, 'long', lower_df, trend_up)
-    elif check_short_signal(lower_df) and trend_down:
+    elif check_short_signal(lower_df) :
         handle_trade(symbol, 'short', lower_df, trend_down)
-    elif not trend_up and not trend_down:
-        if is_consolidating(lower_df):
-            if check_range_long(lower_df):
-                handle_trade(symbol, 'long', lower_df, True)
-            elif check_range_short(lower_df):
-                handle_trade(symbol, 'short', lower_df, True)
+    # elif not trend_up and not trend_down:
+    #     if is_consolidating(lower_df):
+    #         if check_range_long(lower_df):
+    #             handle_trade(symbol, 'long', lower_df, True)
+    #         elif check_range_short(lower_df):
+    #             handle_trade(symbol, 'short', lower_df, True)
     else:
         log_event(f"✅ No confirmed signal for {symbol} this cycle.")
 
