@@ -17,27 +17,6 @@ kucoin_futures = init_kucoin_futures()
 EXCHANGE = ccxt.kucoin()
 TIMEFRAME = '1m'
 MAX_OPEN_TRADES = 3
-# def get_top_futures_pairs(exchange, quote='USDT', top_n=20):
-#     markets = exchange.load_markets()
-#     futures_pairs = []
-
-#     for symbol, market in markets.items():
-#         if (
-#             market.get('quote') == quote
-#             and market.get('active', False)
-#             and market.get('linear', False)  # KuCoin futures are linear
-#             and market.get('future', False) 
-#         ):
-#             futures_pairs.append({
-#                 'symbol': symbol,
-#                 'baseVolume': market.get('info', {}).get('volValue', 0)  # USD volume
-#             })
-
-#     # Sort by volume descending
-#     sorted_pairs = sorted(futures_pairs, key=lambda x: float(x['baseVolume']), reverse=True)
-#     print(f"💰 {sorted_pairs}.")
-#     return [pair['symbol'] for pair in sorted_pairs[:top_n]]
-
 PAIRS = get_top_futures_tradable_pairs(kucoin_futures, quote='USDT', top_n=8)
 higher_timeframe_cache = {}
 
@@ -88,9 +67,8 @@ def handle_trade(symbol, direction, df, trend_confirmed):
      ## path = save_chart(df, symbol)
     side = 'buy' if direction == 'long' else 'sell'
 
-    if not has_max_open_orders():
-        print(f"💰 starting kucoin trade.")
-        trade_result = place_futures_order(
+    print(f"💰 starting kucoin trade.")
+    trade_result = place_futures_order(
             exchange=kucoin_futures,
             symbol=symbol,
             side=side,
@@ -99,9 +77,9 @@ def handle_trade(symbol, direction, df, trend_confirmed):
             sl_price=levels['stop_loss'],
             leverage=10
         )
-        print(f"🔍 KuCoin trade results:\n{trade_result}")
-        status = trade_result.get('status', 'unknown')
-        message = (
+    print(f"🔍 KuCoin trade results:\n{trade_result}")
+    status = trade_result.get('status', 'unknown')
+    message = (
             f"{'📈 LONG' if direction == 'long' else '📉 SHORT'} SIGNAL for {symbol} ({TIMEFRAME})\n"
             f"Confirmed by 15m {'up' if direction == 'long' else 'down'}trend\n\n"
             f" Entry: {levels['entry']}\n"
@@ -109,49 +87,49 @@ def handle_trade(symbol, direction, df, trend_confirmed):
             f"🛑 SL: {levels['stop_loss']}\n"
             f"⚙️ Trade Status: {status}"
         )
-        send_telegram(message)
-        #send_telegram(message, image_path=path)
-        log_event(f"Trade: {message}")
-
-    else:
-        print(f"Max open order already exists. Skipping new order.")
+    send_telegram(message)
+     #send_telegram(message, image_path=path)
+    log_event(f"Trade: {message}")
 
 
 def process_pair(symbol):
-    log_event(f"🔍 Checking {symbol} on {TIMEFRAME} timeframe...")
-    lower_df = fetch_data(symbol, TIMEFRAME)
-    if lower_df is None or len(lower_df) < 51:
-        log_event(f"⚠️ Skipping {symbol} — insufficient lower timeframe data.")
-        return
-    lower_df = calculate_mas(lower_df)
-
-    now = time.time()
-    if symbol not in higher_timeframe_cache or now - higher_timeframe_cache[symbol]['timestamp'] > 900:
-        higher_df = fetch_data(symbol, '15m')
-        if higher_df is None or len(higher_df) < 51:
-            log_event(f"⚠️ Skipping {symbol} — insufficient higher timeframe data.")
+    if not has_max_open_orders():
+        log_event(f"🔍 Checking {symbol} on {TIMEFRAME} timeframe...")
+        lower_df = fetch_data(symbol, TIMEFRAME)
+        if lower_df is None or len(lower_df) < 51:
+            log_event(f"⚠️ Skipping {symbol} — insufficient lower timeframe data.")
             return
-        higher_df = calculate_mas(higher_df)
-        higher_timeframe_cache[symbol] = {'timestamp': now, 'data': higher_df}
-    else:
-        higher_df = higher_timeframe_cache[symbol]['data']
+        lower_df = calculate_mas(lower_df)
 
-    trend_up = higher_df.iloc[-1]['ma20'] > higher_df.iloc[-1]['ma50']
-    trend_down = higher_df.iloc[-1]['ma20'] < higher_df.iloc[-1]['ma50']
+        now = time.time()
+        if symbol not in higher_timeframe_cache or now - higher_timeframe_cache[symbol]['timestamp'] > 900:
+            higher_df = fetch_data(symbol, '15m')
+            if higher_df is None or len(higher_df) < 51:
+                log_event(f"⚠️ Skipping {symbol} — insufficient higher timeframe data.")
+                return
+            higher_df = calculate_mas(higher_df)
+            higher_timeframe_cache[symbol] = {'timestamp': now, 'data': higher_df}
+        else:
+            higher_df = higher_timeframe_cache[symbol]['data']
 
-        #and trend_down - add back to each IF
-    if check_long_signal(lower_df) and trend_up:
-        handle_trade(symbol, 'long', lower_df, trend_up)
-    elif check_short_signal(lower_df) and trend_down :
-        handle_trade(symbol, 'short', lower_df, trend_down)
-    # elif not trend_up and not trend_down:
-    #     if is_consolidating(lower_df):
-    #         if check_range_long(lower_df):
-    #             handle_trade(symbol, 'long', lower_df, True)
-    #         elif check_range_short(lower_df):
-    #             handle_trade(symbol, 'short', lower_df, True)
+        trend_up = higher_df.iloc[-1]['ma20'] > higher_df.iloc[-1]['ma50']
+        trend_down = higher_df.iloc[-1]['ma20'] < higher_df.iloc[-1]['ma50']
+
+            #and trend_down - add back to each IF
+        if check_long_signal(lower_df) and trend_up:
+            handle_trade(symbol, 'long', lower_df, trend_up)
+        elif check_short_signal(lower_df) and trend_down :
+            handle_trade(symbol, 'short', lower_df, trend_down)
+        elif not trend_up and not trend_down:
+            if is_consolidating(lower_df):
+                if check_range_long(lower_df):
+                    handle_trade(symbol, 'long', lower_df, True)
+                elif check_range_short(lower_df):
+                    handle_trade(symbol, 'short', lower_df, True)
+        else:
+            log_event(f"✅ No confirmed signal for {symbol} this cycle.")
     else:
-        log_event(f"✅ No confirmed signal for {symbol} this cycle.")
+        print(f"Max open order already exists. Skipping new order.")
 
 
 def main():

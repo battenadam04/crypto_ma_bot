@@ -1,23 +1,15 @@
 import sys
 import os
 import ccxt
-import pandas as pd
-from datetime import datetime, timedelta
+
+from utils import is_consolidating, check_range_long, check_range_short, get_top_futures_tradable_pairs, init_kucoin_futures
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 
 from utils import check_long_signal, check_short_signal
 from utils import get_top_volume_pairs, calculate_mas
 
-EXCHANGE = ccxt.kucoin()
-PAIRS = get_top_volume_pairs(EXCHANGE, quote='USDT', top_n=10)
 
-def fetch_ohlcv(symbol, timeframe='1m', limit=150):
-    since = EXCHANGE.parse8601((datetime.utcnow() - timedelta(hours=52)).strftime('%Y-%m-%dT%H:%M:%SZ'))
-    ohlcv = EXCHANGE.fetch_ohlcv(symbol, timeframe=timeframe, since=since, limit=limit)
-    df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-    return calculate_mas(df)
 
 def check_trade_outcome(df, start_idx, direction, entry_price, tp_pct, sl_pct, max_lookahead=10):
     tp = entry_price * (1 + tp_pct / 100) if direction == 'long' else entry_price * (1 - tp_pct / 100)
@@ -39,31 +31,53 @@ def check_trade_outcome(df, start_idx, direction, entry_price, tp_pct, sl_pct, m
                 return 'win'
             if high >= sl:
                 return 'loss'
-    return 'none'  # No outcome hit in the lookahead window
+    return 'none'  # No TP/SL hit within the lookahead window
 
-def backtest_ma_strategy(df, pair, tp_pct=1.4, sl_pct=1.0):
+def get_trend_flags(df):
+    latest = df.iloc[-1]
+    trend_up = latest['ma20'] > latest['ma50']
+    trend_down = latest['ma20'] < latest['ma50']
+    return trend_up, trend_down
+
+def backtest_combined_strategy(df, pair, tp_pct=1.4, sl_pct=1.0):
     long_wins = long_losses = short_wins = short_losses = 0
 
-    for i in range(51, len(df) - 10):  # ensure enough candles left for lookahead
+    for i in range(51, len(df) - 10):
         slice_df = df.iloc[:i+1]
         current = df.iloc[i]
         entry = current['close']
 
-        if check_long_signal(slice_df):
-            result = check_trade_outcome(df, i, 'long', entry, tp_pct, sl_pct)
-            print(f"\nCHECKING LONG VALUE {result}:")
-            if result == 'win':
-                long_wins += 1
-            elif result == 'loss':
-                long_losses += 1
+        trend_up, trend_down = get_trend_flags(slice_df)
 
-        elif check_short_signal(slice_df):
+        if check_long_signal(slice_df) and trend_up:
+            result = check_trade_outcome(df, i, 'long', entry, tp_pct, sl_pct)
+        elif check_short_signal(slice_df) and trend_down:
             result = check_trade_outcome(df, i, 'short', entry, tp_pct, sl_pct)
-            if result == 'win':
+        elif not trend_up and not trend_down:
+            if is_consolidating(slice_df):
+                if check_range_long(slice_df):
+                    result = check_trade_outcome(df, i, 'long', entry, tp_pct, sl_pct)
+                elif check_range_short(slice_df):
+                    result = check_trade_outcome(df, i, 'short', entry, tp_pct, sl_pct)
+                else:
+                    result = 'none'
+            else:
+                result = 'none'
+        else:
+            result = 'none'
+
+        if result == 'win':
+            if 'long' in locals() and check_long_signal(slice_df):
+                long_wins += 1
+            else:
                 short_wins += 1
-            elif result == 'loss':
+        elif result == 'loss':
+            if 'long' in locals() and check_long_signal(slice_df):
+                long_losses += 1
+            else:
                 short_losses += 1
 
+    # Summary output (same as before)
     long_total = long_wins + long_losses
     short_total = short_wins + short_losses
     all_trades = long_total + short_total
@@ -75,15 +89,3 @@ def backtest_ma_strategy(df, pair, tp_pct=1.4, sl_pct=1.0):
     print(f"Long Win Rate: {round((long_wins / long_total) * 100, 2) if long_total > 0 else 0}%")
     print(f"Short Win Rate: {round((short_wins / short_total) * 100, 2) if short_total > 0 else 0}%")
     print(f"Overall Win Rate: {round(((long_wins + short_wins) / all_trades) * 100, 2) if all_trades > 0 else 0}%\n")
-
-def run_backtest():
-    for pair in PAIRS:
-        try:
-            df = fetch_ohlcv(pair)
-            if len(df) > 60:
-                backtest_ma_strategy(df, pair)
-        except Exception as e:
-            print(f"Error fetching data for {pair}: {e}")
-
-if __name__ == '__main__':
-    run_backtest()

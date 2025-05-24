@@ -31,7 +31,7 @@ def has_max_open_orders():
         positions = kucoin_futures.fetch_positions()
         for p in positions:
             if float(p['contracts']) > 0:
-                print(f"📈 Open Position: {p['symbol']}, Size: {p['contracts']}, Side: {p['side'], len(positions)}")
+                print(f"📈 Open Position: {p['symbol']}, Size: {p['contracts']}, Side: {p['side']}")
         return len(positions) > 3
     except Exception as e:
         print(f"❌ Error fetching open orders: {e}")
@@ -124,31 +124,29 @@ def place_futures_order(exchange, symbol, side, usdt_amount, tp_price, sl_price,
 
         close_side = 'sell' if side == 'buy' else 'buy'
 
-       # Take-Profit
+        # Take-Profit Order (use 'takeProfit' type)
         tp_order = exchange.create_order(
             symbol=symbol,
-            type='limit',
+            type='takeProfit',
             side=close_side,
             amount=amount,
             price=round(tp_price, price_precision),
             params={
                 'reduceOnly': True,
-                'stop': 'entry',  # 'entry' or 'loss'
                 'stopPrice': round(tp_price, price_precision),
-                'triggerType': 'last',
+                'triggerType': 'last',  # or 'mark'
             }
         )
 
-        # Stop-Loss
+        # Stop-Loss Order (use 'stopLoss' type)
         sl_order = exchange.create_order(
             symbol=symbol,
-            type='limit',
+            type='stopLoss',
             side=close_side,
             amount=amount,
             price=round(sl_price, price_precision),
             params={
                 'reduceOnly': True,
-                'stop': 'loss',
                 'stopPrice': round(sl_price, price_precision),
                 'triggerType': 'last',
             }
@@ -211,7 +209,7 @@ def check_long_signal(df, lookahead=10):
     bullish_candle = last['close'] > last['open']
 
     # Combine conditions: crossover or continuation + momentum + alignment + bullish candle
-    if (crossover or continuation) and alignment and momentum and bullish_candle:
+    if (crossover or continuation) and alignment and momentum and bullish_candle and not is_near_resistance(df):
         print(f"LONG SIGNAL TRIGGERED at {last['timestamp']}")
         return True
 
@@ -301,7 +299,10 @@ def get_top_volume_pairs(exchange, quote='USDT', top_n=5):
     print("🔥 Top pairs:", top_pairs)
     return [pair[0] for pair in top_pairs]
 
-
+def is_near_resistance(df, threshold=0.005, lookahead=10):  # 0.5% proximity
+    recent_high = df['high'].iloc[-lookahead:].max()
+    current_price = df.iloc[-1]['close']
+    return (recent_high - current_price) / recent_high < threshold
 
 def is_weak_trend(df, period=14, threshold=20):
     adx = ADXIndicator(df['high'], df['low'], df['close'], window=period)

@@ -6,24 +6,30 @@ import ccxt
 from utils import get_top_volume_pairs
 
 
-EXCHANGE = ccxt.kucoin()
-PAIRS = get_top_volume_pairs(EXCHANGE, quote='USDT', top_n=10)
 
-# 📌 Check Range Trade Signals (Long/Short)
-def check_range_trade(df):
-    last = df.iloc[-1]
+def check_trade_outcome(df, start_idx, direction, entry_price, tp_pct, sl_pct, max_lookahead=10):
+    tp = entry_price * (1 + tp_pct / 100) if direction == 'long' else entry_price * (1 - tp_pct / 100)
+    sl = entry_price * (1 - sl_pct / 100) if direction == 'long' else entry_price * (1 + sl_pct / 100)
 
-    buy_signal = (
-        last['close'] <= last['support'] * 1.01  # Near support (1% buffer)
-        and last['rsi'] < 30  # Oversold
-    )
+    for j in range(1, max_lookahead + 1):
+        if start_idx + j >= len(df):
+            break
 
-    sell_signal = (
-        last['close'] >= last['resistance'] * 0.99  # Near resistance (1% buffer)
-        and last['rsi'] > 70  # Overbought
-    )
+        candle = df.iloc[start_idx + j]
+        high, low = candle['high'], candle['low']
 
-    return buy_signal, sell_signal
+        if direction == 'long':
+            if high >= tp:
+                return 'win'
+            if low <= sl:
+                return 'loss'
+        else:  # short
+            if low <= tp:
+                return 'win'
+            if high >= sl:
+                return 'loss'
+
+    return 'none'  # Neither TP nor SL hit
 
 # 📌 Calculate Stop Loss & Take Profit
 def calculate_sl_tp(entry_price, support, resistance, risk_reward=2):
@@ -43,7 +49,7 @@ def backtest_range_trading(df, pair, timeframe='5m', days=30):
         next_candle = df.iloc[i+1]
         entry = current['close']
 
-        buy_signal, sell_signal = check_range_trade(slice_df)
+        buy_signal, sell_signal = check_trade_outcome(slice_df)
 
         # Long trade
         if buy_signal:
