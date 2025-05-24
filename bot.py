@@ -6,17 +6,18 @@ import os
 from datetime import datetime,timedelta
 from concurrent.futures import ThreadPoolExecutor
 
-from config import CRYPTO_PAIRS, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
+from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
 from utils import (
     calculate_mas, check_long_signal, check_short_signal,
     calculate_trade_levels, get_top_futures_tradable_pairs, init_kucoin_futures,
-    place_futures_order,has_max_open_orders, should_trade,is_consolidating, check_range_short, check_range_long
+    place_futures_order,can_place_order, should_trade,is_consolidating, check_range_short, check_range_long
 )
 
 kucoin_futures = init_kucoin_futures()
 EXCHANGE = ccxt.kucoin()
 TIMEFRAME = '1m'
 MAX_OPEN_TRADES = 3
+MAX_LOSSES = 3
 PAIRS = get_top_futures_tradable_pairs(kucoin_futures, quote='USDT', top_n=8)
 higher_timeframe_cache = {}
 
@@ -93,7 +94,7 @@ def handle_trade(symbol, direction, df, trend_confirmed):
 
 
 def process_pair(symbol):
-    if not has_max_open_orders():
+    if can_place_order(symbol):
         log_event(f"🔍 Checking {symbol} on {TIMEFRAME} timeframe...")
         lower_df = fetch_data(symbol, TIMEFRAME)
         if lower_df is None or len(lower_df) < 51:

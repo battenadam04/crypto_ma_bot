@@ -6,6 +6,7 @@ import os
 import ccxt
 from config import KUCOIN_API_KEY, KUCOIN_SECRET_KEY, KUCOIN_PASSPHRASE
 from ta.trend import ADXIndicator
+import time
 
 
 EXCHANGE = ccxt.kucoin({
@@ -25,16 +26,37 @@ def init_kucoin_futures():
     futures.load_markets()
     return futures
 
-def has_max_open_orders():
+loss_tracker = {}
+MAX_LOSSES = 3
+MAX_OPEN_ORDERS = 3
+
+
+def can_place_order(symbol):
     try:
         kucoin_futures = init_kucoin_futures()
         positions = kucoin_futures.fetch_positions()
-        for p in positions:
-            if float(p['contracts']) > 0:
-                print(f"📈 Open Position: {p['symbol']}, Size: {p['contracts']}, Side: {p['side']}")
-        return len(positions) > 3
+
+        open_positions = [
+            p for p in positions if float(p['contracts']) > 0
+        ]
+
+        for p in open_positions:
+            print(f"📈 Open Position: {p['symbol']}, Size: {p['contracts']}, Side: {p['side']}")
+
+        # Block if too many open positions
+        if len(open_positions) >= MAX_OPEN_ORDERS:
+            print(f"⛔ Max open positions reached ({MAX_OPEN_ORDERS}). Skipping {symbol}.")
+            return False
+
+        # Block if this symbol hit its loss cap
+        if loss_tracker.get(symbol, 0) >= MAX_LOSSES:
+            print(f"⛔ {symbol} skipped due to {loss_tracker[symbol]} recent losses.")
+            return False
+
+        return True
+
     except Exception as e:
-        print(f"❌ Error fetching open orders: {e}")
+        print(f"❌ Error in can_place_order: {e}")
         return False
 
 def set_leverage(exchange, symbol, leverage=10):
@@ -80,37 +102,53 @@ def place_futures_order(exchange, symbol, side, usdt_amount, tp_price, sl_price,
         exchange.load_markets()
         market = exchange.market(symbol)
 
+        # Precision
+        amount_precision = get_decimal_places(market['precision']['amount'])
+        price_precision = get_decimal_places(market['precision']['price'])
+
+        # Minimums
+        min_price = market.get('limits', {}).get('price', {}).get('min', 0)
+        min_amount = market.get('limits', {}).get('amount', {}).get('min', 0)
+
         # Get current price
         ticker = exchange.fetch_ticker(symbol)
         price = ticker['last']
-        amount_precision = get_decimal_places(market['precision']['amount'])
-        price_precision = get_decimal_places(market['precision']['price'])
-        # 2. Get the contract size (usually 1 for KuCoin linear futures, but confirm)
-        contract_value = float(market.get('contractSize', 1))  # Default to 1 if not defined
+        contract_value = float(market.get('contractSize', 1))
 
-        # 3. Calculate the notional value per unit of base currency
-        price = ticker['last']
-        notional_per_unit = price * contract_value
+        if not price or price <= 0:
+            return {'status': 'error', 'message': f"Invalid market price for {symbol}: {price}"}
 
-        # 4. Apply leverage
+        # Notional & leverage
         max_notional = usdt_amount * leverage
-
-        # 5. Calculate the amount of base asset you can afford at leverage
-        raw_amount = max_notional / notional_per_unit
-
-        # 6. Round to allowed precision
+        raw_amount = max_notional / (price * contract_value)
         amount = round(raw_amount, amount_precision)
 
-        # Determine entry price with small buffer
+        # Skip if amount is below minimum
+        if amount < min_amount:
+            return {'status': 'error', 'message': f"Amount {amount} is below min allowed: {min_amount}"}
+
+        # Entry price (with buffer)
         buffer = 0.05
         entry_price = price * (1 + buffer / 100) if side == 'buy' else price * (1 - buffer / 100)
         entry_price = round(entry_price, price_precision)
 
-        balance = exchange.fetch_balance({'type': 'future'})  # Specify futures account
-        available = balance['free'].get('USDT', 0)
-        print(f"💰 Available {'USDT'} Balance (Futures): {available}")
+        if entry_price < min_price:
+            return {'status': 'error', 'message': f"Entry price {entry_price} is below min allowed: {min_price}"}
 
-        # Entry Order
+        # Round TP/SL and validate
+        tp_price = round(tp_price, price_precision)
+        sl_price = round(sl_price, price_precision)
+
+        if tp_price < min_price or sl_price < min_price:
+            return {'status': 'error', 'message': f"TP/SL price too low. TP: {tp_price}, SL: {sl_price}, Min: {min_price}"}
+
+        # Fetch available balance
+        balance = exchange.fetch_balance({'type': 'future'})
+        available = balance['free'].get('USDT', 0)
+        print(f"💰 Available USDT Balance (Futures): {available}")
+
+
+        # Place Entry Order
         entry_order = exchange.create_limit_order(
             symbol=symbol,
             side=side,
@@ -122,36 +160,57 @@ def place_futures_order(exchange, symbol, side, usdt_amount, tp_price, sl_price,
             }
         )
 
+        order_id = entry_order['id']
+
+        # 🕒 Poll until filled or timeout
+        for _ in range(15):  # Retry up to 15 times (~15 seconds)
+            order_status = exchange.fetch_order(order_id, symbol)
+            if order_status['status'] == 'closed':
+                break
+            time.sleep(1)
+        else:
+            return {'status': 'error', 'message': 'Entry order not filled in time'}
+        
         close_side = 'sell' if side == 'buy' else 'buy'
 
-        # Take-Profit Order (use 'takeProfit' type)
+        # Take Profit (stop-limit)
         tp_order = exchange.create_order(
             symbol=symbol,
-            type='takeProfit',
+            type='lLimit',           # or 'stopLimit' if your ccxt supports it explicitly
             side=close_side,
             amount=amount,
-            price=round(tp_price, price_precision),
+            price=tp_price,
             params={
+                'leverage': 10,
+                'stopPrice': tp_price,     # trigger price
                 'reduceOnly': True,
-                'stopPrice': round(tp_price, price_precision),
-                'triggerType': 'last',  # or 'mark'
+                'timeInForce': 'GTC',
+                'closePosition': False,
+                'triggerType': 'LastPrice',  # or 'MarkPrice', check your exchange docs
+                'stopPriceType': 'TP'
             }
         )
 
-        # Stop-Loss Order (use 'stopLoss' type)
+        # Stop Loss (stop-limit)
         sl_order = exchange.create_order(
             symbol=symbol,
-            type='stopLoss',
+            type='limit',          # or 'stopLimit'
             side=close_side,
             amount=amount,
-            price=round(sl_price, price_precision),
+            price=sl_price,
             params={
+                'leverage': 10,
+                'stopPrice': sl_price,
                 'reduceOnly': True,
-                'stopPrice': round(sl_price, price_precision),
-                'triggerType': 'last',
+                'timeInForce': 'GTC',
+                'closePosition': False,
+                'triggerType': 'LastPrice',
+                'stopPriceType': 'SL'
             }
         )
-
+        
+        print(f"CHECKING TP {tp_order}")
+        print(f"CHECKING SL {sl_order}")
 
         return {
             'status': 'success',
@@ -160,10 +219,9 @@ def place_futures_order(exchange, symbol, side, usdt_amount, tp_price, sl_price,
             'sl_order': sl_order
         }
 
+
     except Exception as e:
         return {'status': 'error', 'message': str(e)}
-
-
 
 def calculate_mas(df):
     df['ma10'] = SMAIndicator(df['close'], window=10).sma_indicator()
