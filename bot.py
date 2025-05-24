@@ -10,12 +10,13 @@ from config import CRYPTO_PAIRS, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
 from utils import (
     calculate_mas, check_long_signal, check_short_signal,
     calculate_trade_levels, get_top_futures_tradable_pairs, init_kucoin_futures,
-    place_futures_order,has_open_order, should_trade,is_consolidating, check_range_short, check_range_long
+    place_futures_order,has_max_open_orders, should_trade,is_consolidating, check_range_short, check_range_long
 )
 
 kucoin_futures = init_kucoin_futures()
 EXCHANGE = ccxt.kucoin()
 TIMEFRAME = '1m'
+MAX_OPEN_TRADES = 3
 # def get_top_futures_pairs(exchange, quote='USDT', top_n=20):
 #     markets = exchange.load_markets()
 #     futures_pairs = []
@@ -37,7 +38,7 @@ TIMEFRAME = '1m'
 #     print(f"💰 {sorted_pairs}.")
 #     return [pair['symbol'] for pair in sorted_pairs[:top_n]]
 
-PAIRS = get_top_futures_tradable_pairs(kucoin_futures, quote='USDT', top_n=20)
+PAIRS = get_top_futures_tradable_pairs(kucoin_futures, quote='USDT', top_n=8)
 higher_timeframe_cache = {}
 
 
@@ -86,21 +87,19 @@ def handle_trade(symbol, direction, df, trend_confirmed):
     levels = calculate_trade_levels(entry_price, direction)
      ## path = save_chart(df, symbol)
     side = 'buy' if direction == 'long' else 'sell'
-    print(f"💰 starting kucoin trade beginning.")
 
-    if not has_open_order(symbol):
+    if not has_max_open_orders():
         print(f"💰 starting kucoin trade.")
-        ## update to return if open orders exist until they dont
         trade_result = place_futures_order(
             exchange=kucoin_futures,
             symbol=symbol,
             side=side,
-            usdt_amount=5,
+            usdt_amount=3,
             tp_price=levels['take_profit'],
             sl_price=levels['stop_loss'],
             leverage=10
         )
-        print(f"🔍 Full KuCoin trade result:\n{trade_result}")
+        print(f"🔍 KuCoin trade results:\n{trade_result}")
         status = trade_result.get('status', 'unknown')
         message = (
             f"{'📈 LONG' if direction == 'long' else '📉 SHORT'} SIGNAL for {symbol} ({TIMEFRAME})\n"
@@ -115,7 +114,7 @@ def handle_trade(symbol, direction, df, trend_confirmed):
         log_event(f"Trade: {message}")
 
     else:
-        print(f"Open order already exists for {symbol}. Skipping new order.")
+        print(f"Max open order already exists. Skipping new order.")
 
 
 def process_pair(symbol):
@@ -141,9 +140,9 @@ def process_pair(symbol):
     trend_down = higher_df.iloc[-1]['ma20'] < higher_df.iloc[-1]['ma50']
 
         #and trend_down - add back to each IF
-    if check_long_signal(lower_df):
+    if check_long_signal(lower_df) and trend_up:
         handle_trade(symbol, 'long', lower_df, trend_up)
-    elif check_short_signal(lower_df) :
+    elif check_short_signal(lower_df) and trend_down :
         handle_trade(symbol, 'short', lower_df, trend_down)
     # elif not trend_up and not trend_down:
     #     if is_consolidating(lower_df):

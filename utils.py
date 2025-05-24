@@ -25,13 +25,16 @@ def init_kucoin_futures():
     futures.load_markets()
     return futures
 
-def has_open_order(symbol):
+def has_max_open_orders():
     try:
         kucoin_futures = init_kucoin_futures()
-        open_orders = kucoin_futures.fetch_open_orders(symbol)
-        return len(open_orders) > 1
+        positions = kucoin_futures.fetch_positions()
+        for p in positions:
+            if float(p['contracts']) > 0:
+                print(f"📈 Open Position: {p['symbol']}, Size: {p['contracts']}, Side: {p['side'], len(positions)}")
+        return len(positions) > 3
     except Exception as e:
-        print(f"Error fetching open orders for {symbol}: {e}")
+        print(f"❌ Error fetching open orders: {e}")
         return False
 
 def set_leverage(exchange, symbol, leverage=10):
@@ -82,62 +85,75 @@ def place_futures_order(exchange, symbol, side, usdt_amount, tp_price, sl_price,
         price = ticker['last']
         amount_precision = get_decimal_places(market['precision']['amount'])
         price_precision = get_decimal_places(market['precision']['price'])
-        amount = round(usdt_amount / price, amount_precision)
+        # 2. Get the contract size (usually 1 for KuCoin linear futures, but confirm)
+        contract_value = float(market.get('contractSize', 1))  # Default to 1 if not defined
+
+        # 3. Calculate the notional value per unit of base currency
+        price = ticker['last']
+        notional_per_unit = price * contract_value
+
+        # 4. Apply leverage
+        max_notional = usdt_amount * leverage
+
+        # 5. Calculate the amount of base asset you can afford at leverage
+        raw_amount = max_notional / notional_per_unit
+
+        # 6. Round to allowed precision
+        amount = round(raw_amount, amount_precision)
 
         # Determine entry price with small buffer
         buffer = 0.05
         entry_price = price * (1 + buffer / 100) if side == 'buy' else price * (1 - buffer / 100)
         entry_price = round(entry_price, price_precision)
 
-
-        # Convert USDT → base asset contracts
-        base_amount = usdt_amount / price
-
-        # 🔄 You may skip leverage setting if your account is already set
-        # ✅ This avoids conflict with isolated/cross mismatch
-        # exchange.set_leverage(leverage, symbol, params={"marginMode": "cross"})
+        balance = exchange.fetch_balance({'type': 'future'})  # Specify futures account
+        available = balance['free'].get('USDT', 0)
+        print(f"💰 Available {'USDT'} Balance (Futures): {available}")
 
         # Entry Order
         entry_order = exchange.create_limit_order(
             symbol=symbol,
             side=side,
-            amount=round(base_amount, market['precision']['amount']),
+            amount=amount,
             price=entry_price,
             params={
-                'leverage': int(leverage)  # ⚠️ Do not set marginMode here
+                'leverage': int(leverage),
+                'marginMode': 'isolated'
             }
         )
 
         close_side = 'sell' if side == 'buy' else 'buy'
 
-        # Take-Profit Order (Limit or Conditional)
+       # Take-Profit
         tp_order = exchange.create_order(
             symbol=symbol,
             type='limit',
             side=close_side,
-            amount=round(base_amount, market['precision']['amount']),
-            price=round(tp_price, market['precision']['price']),
+            amount=amount,
+            price=round(tp_price, price_precision),
             params={
                 'reduceOnly': True,
-                'stop': True,
-                'stopPrice': round(tp_price, market['precision']['price']),
+                'stop': 'entry',  # 'entry' or 'loss'
+                'stopPrice': round(tp_price, price_precision),
                 'triggerType': 'last',
             }
         )
 
-        # Stop-Loss Order (Market or Conditional)
+        # Stop-Loss
         sl_order = exchange.create_order(
             symbol=symbol,
-            type='market',
+            type='limit',
             side=close_side,
-            amount=round(base_amount, market['precision']['amount']),
+            amount=amount,
+            price=round(sl_price, price_precision),
             params={
                 'reduceOnly': True,
-                'stop': True,
-                'stopPrice': round(sl_price, market['precision']['price']),
+                'stop': 'loss',
+                'stopPrice': round(sl_price, price_precision),
                 'triggerType': 'last',
             }
         )
+
 
         return {
             'status': 'success',
@@ -172,25 +188,6 @@ def confirm_trend(df, last_idx, ma_key, condition_func, lookahead):
             return True
     return False
 
-# def check_long_signal(df, lookahead=10):
-#     if len(df) < 51:
-#         return False
-
-#     prev = df.iloc[-2]
-#     last = df.iloc[-1]
-
-#     # Crossover condition (MA10 crosses above MA20)
-#     crossover = prev['ma10'] < prev['ma20'] and last['ma10'] > last['ma20']
-
-#     # Continuation condition (MA10 stays above MA20)
-#     continuation = last['ma10'] > last['ma20']
-
-#     # Shared trend confirmation
-#     alignment = last['ma20'] > last['ma50']
-#     momentum = last['close'] > last['ma10']
-#     #confirmed = confirm_trend(df, len(df)-1, 'ma50', lambda ma, close: close > ma, lookahead)
-
-#     return (crossover or continuation) and momentum
 def check_long_signal(df, lookahead=10):
     if len(df) < 51:
         return False
@@ -220,22 +217,6 @@ def check_long_signal(df, lookahead=10):
 
     return False
 
-
-# def check_short_signal(df, lookahead=10):
-#     if len(df) < 51:
-#         return False
-
-#     prev = df.iloc[-2]
-#     last = df.iloc[-1]
-
-#     crossover = prev['ma10'] > prev['ma20'] and last['ma10'] < last['ma20']
-#     continuation = last['ma10'] < last['ma20']
-
-#     alignment = last['ma20'] < last['ma50']
-#     momentum = last['close'] < last['ma10']
-#     #confirmed = confirm_trend(df, len(df)-1, 'ma50', lambda ma, close: close < ma, lookahead)
-
-#     return (crossover or continuation)  and momentum
 def check_short_signal(df, lookahead=10):
     if len(df) < 51:
         return False
