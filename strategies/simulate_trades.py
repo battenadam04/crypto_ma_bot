@@ -4,13 +4,11 @@ import os
 from datetime import datetime, timedelta
 import ccxt
 import pandas as pd
-import numpy as np
-import pandas_ta as ta
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 
-from strategies.combined.backtestCombinedStrategy import backtest_combined_strategy
-from utils import init_kucoin_futures, get_top_futures_tradable_pairs, check_long_signal, check_short_signal
+from utils.utils import check_long_signal, check_short_signal
+from utils.kuCoinUtils import init_kucoin_futures, get_top_futures_tradable_pairs
 from strategies.range.range_utils import check_range_trade, calculate_sl_tp
 
 

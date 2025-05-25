@@ -7,11 +7,16 @@ from datetime import datetime,timedelta
 from concurrent.futures import ThreadPoolExecutor
 
 from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
-from utils import (
+from utils.utils import (
     calculate_mas, check_long_signal, check_short_signal,
-    calculate_trade_levels, get_top_futures_tradable_pairs, init_kucoin_futures,
-    place_futures_order,can_place_order, should_trade,is_consolidating, check_range_short, check_range_long
+    calculate_trade_levels,is_consolidating, check_range_short, check_range_long
 )
+
+from utils.kuCoinUtils import (
+    get_top_futures_tradable_pairs, init_kucoin_futures,
+    place_futures_order,can_place_order
+)
+
 
 kucoin_futures = init_kucoin_futures()
 EXCHANGE = ccxt.kucoin()
