@@ -145,15 +145,15 @@ def place_entry_order_with_fallback(exchange, symbol, side, amount, entry_price,
     try:
         # First attempt with 'isolated'
         return exchange.create_limit_order(
-            symbol=symbol,
-            side=side,
-            amount=amount,
-            price=entry_price,
-            params={
-                'leverage': int(leverage),
-                'marginMode': 'isolated'
-            }
-        )
+                symbol=symbol,
+                side=side,
+                amount=amount,
+                price=entry_price,
+                params={
+                    'leverage': int(leverage),
+                    'marginMode': 'isolated'
+                }
+            )
     except Exception as e:
         if 'margin mode' in str(e).lower():
             print("⚠️ Isolated margin failed. Retrying with 'cross' margin mode...")
@@ -227,19 +227,9 @@ def place_futures_order(exchange, symbol, side, usdt_amount, tp_price, sl_price,
         print(f"💰 Available USDT Balance (Futures): {available}")
 
         if entry_price > 0:
-
+           
             # Place Entry Order
-            entry_order = exchange.create_limit_order(
-                symbol=symbol,
-                side=side,
-                amount=amount,
-                price=entry_price,
-                params={
-                    'leverage': int(leverage),
-                    'marginMode': 'isolated'
-                }
-            )
-
+            entry_order = place_entry_order_with_fallback(exchange, symbol, side, amount, entry_price, leverage)
             order_id = entry_order['id']
 
             # 🕒 Poll until filled or timeout
