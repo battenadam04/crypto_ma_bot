@@ -3,6 +3,8 @@ import ccxt
 from config import KUCOIN_API_KEY, KUCOIN_SECRET_KEY, KUCOIN_PASSPHRASE
 import time
 
+from utils.utils import get_decimal_places
+
 
 
 EXCHANGE = ccxt.kucoin({
