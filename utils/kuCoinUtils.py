@@ -3,6 +3,7 @@ import ccxt
 from config import KUCOIN_API_KEY, KUCOIN_SECRET_KEY, KUCOIN_PASSPHRASE
 import time
 
+from utils.coinGeckoData import fetch_market_caps
 from utils.utils import get_decimal_places
 
 
@@ -29,7 +30,8 @@ MAX_LOSSES = 3
 MAX_OPEN_ORDERS = 3
 
 
-def can_place_order(symbol):
+def can_place_order(symbol, can_trade_event):
+
     try:
         kucoin_futures = init_kucoin_futures()
         positions = kucoin_futures.fetch_positions()
@@ -42,12 +44,14 @@ def can_place_order(symbol):
             print(f"📈 Open Position: {p['symbol']}, Size: {p['contracts']}, Side: {p['side']}")
 
         # Block if too many open positions
-        if len(open_positions) >= MAX_OPEN_ORDERS:
+        if len(open_positions) == MAX_OPEN_ORDERS:
             print(f"⛔ Max open positions reached ({MAX_OPEN_ORDERS}). Skipping {symbol}.")
+            can_trade_event.clear()  # Pause all threads
             return False
 
+        can_trade_event.set() # Resume if conditions are OK
         # Block if this symbol hit its loss cap
-        if loss_tracker.get(symbol, 0) >= MAX_LOSSES:
+        if loss_tracker.get(symbol, 0) == MAX_LOSSES:
             print(f"⛔ {symbol} skipped due to {loss_tracker[symbol]} recent losses.")
             return False
 
@@ -94,7 +98,7 @@ def get_top_volume_pairs(exchange, quote='USDT', top_n=5):
     return [pair[0] for pair in top_pairs]
 
 
-def get_top_futures_tradable_pairs(exchange, quote='USDT', top_n=15):
+def get_top_futures_tradable_pairs(exchange, quote='USDT', top_n=15, min_volume=1_000_000, min_market_cap_usd=4_000_000_000):
     print("⏳ Loading KuCoin Futures markets...")
     try:
         markets = exchange.load_markets()
@@ -102,9 +106,9 @@ def get_top_futures_tradable_pairs(exchange, quote='USDT', top_n=15):
     except Exception as e:
         print("❌ Error loading markets:", e)
         return []
-
+    market_caps = fetch_market_caps(min_market_cap_usd)
     stablecoins = {'USDT', 'USDC', 'BUSD', 'TUSD', 'DAI', 'FDUSD', 'UST'}
-    volume_data = []
+    filtered_pairs = []
 
     for symbol, market in markets.items():
         # Filter for futures markets with the specified quote currency
@@ -121,28 +125,36 @@ def get_top_futures_tradable_pairs(exchange, quote='USDT', top_n=15):
         if base in stablecoins:
             continue  # Skip stablecoin-to-stablecoin pairs
 
-        # Retrieve volume information
+        if base not in market_caps:
+            # Skip pairs whose base coin market cap is below threshold
+            continue
+
+               # Check 24h volume
         vol_value = market.get('info', {}).get('volumeOf24h')
         if vol_value is None:
-            print(f"Skipping {market}: Missing volValue.")
             continue
-
         try:
             volume = float(vol_value)
-            volume_data.append((symbol, volume))
-        except ValueError:
-            print(f"Skipping {symbol}: Invalid volValue '{vol_value}'.")
+        except Exception:
             continue
 
-    # Sort by volume in descending order and select top N pairs
-    top_pairs = sorted(volume_data, key=lambda x: x[1], reverse=True)[:top_n]
-    print(f"🔥 Top {top_n} tradable futures pairs:", top_pairs)
+        if volume < min_volume:
+            continue
 
-    return [pair[0] for pair in top_pairs]
+        filtered_pairs.append((symbol, market_caps[base], volume))
+
+    # Sort by market cap descending, then volume descending
+    sorted_pairs = sorted(filtered_pairs, key=lambda x: (x[1], x[2]), reverse=True)[:top_n]
+
+    print(f"🔥 Top {top_n} pairs filtered by market cap > {min_market_cap_usd} USD and volume > {min_volume} USD:")
+    for sym, cap, vol in sorted_pairs:
+        print(f"  {sym}: Market Cap = {cap:,}, Volume = {vol:,}")
+    return [pair[0] for pair in sorted_pairs]
 
 
-def place_entry_order_with_fallback(exchange, symbol, side, amount, entry_price, leverage):
+def place_entry_order_with_fallback(exchange, symbol, side, amount, entry_price, leverage, tp_price, sl_price):
     try:
+        exchange.set_margin_mode('isolated', symbol)
         # First attempt with 'isolated'
         return exchange.create_limit_order(
                 symbol=symbol,
@@ -151,7 +163,16 @@ def place_entry_order_with_fallback(exchange, symbol, side, amount, entry_price,
                 price=entry_price,
                 params={
                     'leverage': int(leverage),
-                    'marginMode': 'isolated'
+                            'takeProfit': {
+            'price': tp_price,            # Your TP price
+            'type': 'limit',
+            'reduceOnly': True
+        },
+        'stopLoss': {
+            'price': sl_price,            # Your SL price
+            'type': 'limit',
+            'reduceOnly': True
+        }
                 }
             )
     except Exception as e:
@@ -159,6 +180,7 @@ def place_entry_order_with_fallback(exchange, symbol, side, amount, entry_price,
             print("⚠️ Isolated margin failed. Retrying with 'cross' margin mode...")
             try:
                 # Retry with 'cross'
+                exchange.set_margin_mode('cross', symbol)
                 return exchange.create_limit_order(
                     symbol=symbol,
                     side=side,
@@ -166,7 +188,6 @@ def place_entry_order_with_fallback(exchange, symbol, side, amount, entry_price,
                     price=entry_price,
                     params={
                         'leverage': int(leverage),
-                        'marginMode': 'cross'
                     }
                 )
             except Exception as retry_error:
@@ -192,10 +213,11 @@ def place_futures_order(exchange, symbol, side, usdt_amount, tp_price, sl_price,
         # Get current price
         ticker = exchange.fetch_ticker(symbol)
         price = ticker['last']
-        contract_value = float(market.get('contractSize', 1))
 
-        if not price or price <= 0:
-            return {'status': 'error', 'message': f"Invalid market price for {symbol}: {price}"}
+        if price is None or price <= 0:
+            return {'status': 'error', 'message': f"Invalid ticker data for {symbol}: {ticker}"}
+
+        contract_value = float(market.get('contractSize', 1))
 
         # Notional & leverage
         max_notional = usdt_amount * leverage
@@ -208,89 +230,91 @@ def place_futures_order(exchange, symbol, side, usdt_amount, tp_price, sl_price,
 
         # Entry price (with buffer)
         buffer = 0.05
-        entry_price = price * (1 + buffer / 100) if side == 'buy' else price * (1 - buffer / 100)
-        entry_price = round(entry_price, price_precision)
+        raw_entry_price = price * (1 + buffer / 100) if side == 'buy' else price * (1 - buffer / 100)
 
-        if entry_price < min_price:
-            return {'status': 'error', 'message': f"Entry price {entry_price} is below min allowed: {min_price}"}
+        if raw_entry_price <= min_price:
+            return {'status': 'error', 'message': f"Raw entry price {raw_entry_price} is below min allowed: {min_price}"}
 
-        # Round TP/SL and validate
+        entry_price = round(raw_entry_price, price_precision)
+
+        if entry_price <= 0:
+            return {'status': 'error', 'message': f"Final entry price is invalid: {entry_price}"}
+        # Round TP/SL
         tp_price = round(tp_price, price_precision)
         sl_price = round(sl_price, price_precision)
 
         if tp_price < min_price or sl_price < min_price:
             return {'status': 'error', 'message': f"TP/SL price too low. TP: {tp_price}, SL: {sl_price}, Min: {min_price}"}
 
-        # Fetch available balance
+        # Fetch balance
         balance = exchange.fetch_balance({'type': 'future'})
         available = balance['free'].get('USDT', 0)
         print(f"💰 Available USDT Balance (Futures): {available}")
 
-        if entry_price > 0:
-           
-            # Place Entry Order
-            entry_order = place_entry_order_with_fallback(exchange, symbol, side, amount, entry_price, leverage)
-            order_id = entry_order['id']
+        if available < usdt_amount:
+            return {'status': 'error', 'message': f"Insufficient balance. Required: {usdt_amount}, Available: {available}"}
 
-            # 🕒 Poll until filled or timeout
-            for _ in range(15):  # Retry up to 15 times (~15 seconds)
-                order_status = exchange.fetch_order(order_id, symbol)
-                if order_status['status'] == 'closed':
-                    break
-                time.sleep(1)
-            else:
-                return {'status': 'error', 'message': 'Entry order not filled in time'}
-            
-            close_side = 'sell' if side == 'buy' else 'buy'
+        # ✅ Place Entry Order
+        entry_order = place_entry_order_with_fallback(exchange, symbol, side, amount, entry_price, leverage, tp_price, sl_price)
 
-            # Take Profit (stop-limit)
-            tp_order = exchange.create_order(
-                symbol=symbol,
-                type='lLimit',           # or 'stopLimit' if your ccxt supports it explicitly
-                side=close_side,
-                amount=amount,
-                price=tp_price,
-                params={
-                    'leverage': 10,
-                    'stopPrice': tp_price,     # trigger price
-                    'reduceOnly': True,
-                    'timeInForce': 'GTC',
-                    'closePosition': False,
-                    'triggerType': 'LastPrice',  # or 'MarkPrice', check your exchange docs
-                    'stopPriceType': 'TP'
-                }
-            )
+        if not entry_order or not isinstance(entry_order, dict) or 'id' not in entry_order:
+            return {'status': 'error', 'message': f"Entry order failed: {entry_order}"}
 
-            # Stop Loss (stop-limit)
-            sl_order = exchange.create_order(
-                symbol=symbol,
-                type='limit',          # or 'stopLimit'
-                side=close_side,
-                amount=amount,
-                price=sl_price,
-                params={
-                    'leverage': 10,
-                    'stopPrice': sl_price,
-                    'reduceOnly': True,
-                    'timeInForce': 'GTC',
-                    'closePosition': False,
-                    'triggerType': 'LastPrice',
-                    'stopPriceType': 'SL'
-                }
-            )
-            
-            print(f"CHECKING TP {tp_order}")
-            print(f"CHECKING SL {sl_order}")
+        order_id = entry_order['id']
 
-            return {
-                'status': 'success',
-                'entry_order': entry_order,
-                'tp_order': tp_order,
-                'sl_order': sl_order
-             }
-
+        # 🕒 Poll for order fill
+        for _ in range(15):
+            order_status = exchange.fetch_order(order_id, symbol)
+            if order_status['status'] == 'closed':
+                break
+            time.sleep(1)
         else:
-            return {'status': 'error', 'Balance below entry price requirement': {balance}}
+            return {'status': 'error', 'message': 'Entry order not filled in time'}
+
+        #close_side = 'sell' if side == 'buy' else 'buy'
+
+        # # 📈 Take-Profit Order
+        # tp_order = exchange.create_order(
+        #     symbol=symbol,
+        #     type='limit',
+        #     side=close_side,
+        #     amount=amount,
+        #     price=tp_price,
+        #     params={
+        #           'reduceOnly': True,
+        #             'stop': True,
+        #             'stopPrice': tp_price,
+        #             'triggerPrice': tp_price,
+        #             'triggerType': 'last',
+        #     }
+        # )
+
+        # # 📉 Stop-Loss Order
+        # sl_order = exchange.create_order(
+        #     symbol=symbol,
+        #     type='limit',
+        #     side=close_side,
+        #     amount=amount,
+        #     price=sl_price,
+        #     params={
+        #          'reduceOnly': True,
+        #             'stop': True,
+        #             'stopPrice': sl_price,
+        #             'triggerPrice': sl_price,
+        #             'triggerType': 'last',
+        #     }
+        # )
+
+
+        print(f"✅ TP Order: {tp_order}")
+        print(f"✅ SL Order: {sl_order}")
+
+        return {
+            'status': 'success',
+            'entry_order': entry_order,
+            'tp_order': tp_order,
+            'sl_order': sl_order
+        }
 
     except Exception as e:
         return {'status': 'error', 'message': str(e)}

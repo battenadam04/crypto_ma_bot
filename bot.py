@@ -5,17 +5,25 @@ import time
 import os
 from datetime import datetime,timedelta
 from concurrent.futures import ThreadPoolExecutor
+import threading
 
 from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
 from utils.utils import (
     calculate_mas, check_long_signal, check_short_signal,
-    calculate_trade_levels,is_consolidating, check_range_short, check_range_long
+    calculate_trade_levels,is_consolidating, check_range_short, check_range_long, is_near_resistance
 )
 
 from utils.kuCoinUtils import (
     get_top_futures_tradable_pairs, init_kucoin_futures,
     place_futures_order,can_place_order
 )
+
+
+
+# Global flag
+can_trade_event = threading.Event()
+can_trade_event.set()  # Initially allow trading
+
 
 
 kucoin_futures = init_kucoin_futures()
@@ -69,7 +77,7 @@ def handle_trade(symbol, direction, df, trend_confirmed):
     #     return
 
     entry_price = df.iloc[-1]['close']
-    levels = calculate_trade_levels(entry_price, direction)
+    levels = calculate_trade_levels(entry_price, direction, df)
      ## path = save_chart(df, symbol)
     side = 'buy' if direction == 'long' else 'sell'
 
@@ -99,7 +107,9 @@ def handle_trade(symbol, direction, df, trend_confirmed):
 
 
 def process_pair(symbol):
-    if can_place_order(symbol):
+    # Wait for global trade permission
+    can_trade_event.wait()
+    if can_place_order(symbol, can_trade_event):
         log_event(f"🔍 Checking {symbol} on {TIMEFRAME} timeframe...")
         lower_df = fetch_data(symbol, TIMEFRAME)
         if lower_df is None or len(lower_df) < 51:
@@ -122,7 +132,7 @@ def process_pair(symbol):
         trend_down = higher_df.iloc[-1]['ma20'] < higher_df.iloc[-1]['ma50']
 
             #and trend_down - add back to each IF
-        if check_long_signal(lower_df) and trend_up:
+        if check_long_signal(lower_df) and trend_up and not is_near_resistance(higher_df):
             handle_trade(symbol, 'long', lower_df, trend_up)
         elif check_short_signal(lower_df) and trend_down :
             handle_trade(symbol, 'short', lower_df, trend_down)

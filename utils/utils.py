@@ -1,6 +1,6 @@
 from ta.trend import SMAIndicator
 from ta.trend import ADXIndicator
-
+import pandas as pd
 
     
 def set_leverage(exchange, symbol, leverage):
@@ -77,8 +77,9 @@ def check_long_signal(df, lookahead=10):
     bullish_candle = last['close'] > last['open']
 
     # Combine conditions: crossover or continuation + momentum + alignment + bullish candle
-    if (crossover or continuation) and alignment and momentum and bullish_candle and not is_near_resistance(df):
-        print(f"LONG SIGNAL TRIGGERED at {last['timestamp']}")
+    #  and not is_near_resistance(df)
+    if (crossover or continuation) and alignment and momentum and bullish_candle:
+        #print(f"LONG SIGNAL TRIGGERED at {last['timestamp']}")
         return True
 
     return False
@@ -88,20 +89,28 @@ def check_short_signal(df, lookahead=10):
         return False
 
     last = df.iloc[-1]
+    prev = df.iloc[-2]
 
-    # Basic bearish structure: MA10 < MA20 < MA50 and price below MA10
-    condition = (
-        last['ma10'] < last['ma20'] and
-        last['ma20'] < last['ma50'] and
-        last['close'] < last['ma10']
-    )
+    # Crossover condition: MA10 crosses below MA20
+    crossover = prev['ma10'] > prev['ma20'] and last['ma10'] < last['ma20']
 
-    # Optional: basic bearish candle confirmation
+    # Continuation condition: MA10 remains below MA20
+    continuation = last['ma10'] < last['ma20']
+
+    # Trend alignment: MA20 below MA50 (higher timeframe bearish trend)
+    alignment = last['ma20'] < last['ma50']
+
+    # Momentum: price below MA10 (bearish momentum)
+    momentum = last['close'] < last['ma10']
+
+    # Optional: bearish candle confirmation (close < open)
     bearish_candle = last['close'] < last['open']
-    small_lower_wick = (last['close'] - last['low']) < (last['high'] - last['low']) * 0.3
 
-    if condition and bearish_candle and small_lower_wick:
-        print(f"SHORT SIGNAL TRIGGERED at {last['timestamp']}")
+    # Avoid signals near support (you can define a function similar to `is_near_resistance`)
+    not_near_support = not is_near_support(df)  # You need to implement this function
+
+    if (crossover or continuation) and alignment and momentum and bearish_candle and not_near_support:
+       #print(f"SHORT SIGNAL TRIGGERED at {last['timestamp']}")
         return True
 
     return False
@@ -119,19 +128,61 @@ def check_short_signal(df, lookahead=10):
 #              title=f"{symbol} MA Crossover", savefig=path)
 #     return path
 
-def calculate_trade_levels(price, direction, tp_pct=10.0, sl_pct=1.0):
+def calculate_trade_levels(price, direction, df, atr_period=7, atr_multiplier_sl=2.0, atr_multiplier_tp=3.0):
+    """
+    Calculate TP/SL levels using real ATR.
+
+    Parameters:
+    - price: Current price
+    - direction: 'long' or 'short'
+    - df: DataFrame with OHLCV
+    - atr_period: Period to use for ATR calculation
+    - atr_multiplier_sl: Multiplier for stop-loss distance
+    - atr_multiplier_tp: Multiplier for take-profit distance
+    """
+
+    if 'ATR' not in df.columns:
+        # Calculate True Range
+        df['H-L'] = df['high'] - df['low']
+        df['H-PC'] = abs(df['high'] - df['close'].shift(1))
+        df['L-PC'] = abs(df['low'] - df['close'].shift(1))
+        df['TR'] = df[['H-L', 'H-PC', 'L-PC']].max(axis=1)
+        df['ATR'] = df['TR'].rolling(window=atr_period).mean()
+        df.drop(columns=['H-L', 'H-PC', 'L-PC', 'TR'], inplace=True)
+
+    atr = df['ATR'].iloc[-1]
+
+    # Fallback in case ATR is still NaN
+    if atr is None or atr == 0 or pd.isna(atr):
+        atr = 0.01  # Reasonable default or consider skipping the trade
+        print("⚠️ ATR calculation failed or is too small. Using fallback value.")
+
+    sl_distance = atr * atr_multiplier_sl
+    tp_distance = atr * atr_multiplier_tp
+
     if direction == 'long':
-        tp = price * (1 + tp_pct / 100)
-        sl = price * (1 - sl_pct / 100)
+        tp = float(price + tp_distance)
+        sl = float(price - sl_distance)
     else:
-        tp = price * (1 - tp_pct / 100)
-        sl = price * (1 + sl_pct / 100)
+        tp = float(price - tp_distance)
+        sl = float(price + sl_distance)
+
     return {
         'entry': round(price, 4),
         'take_profit': round(tp, 4),
         'stop_loss': round(sl, 4)
     }
 
+def is_near_support(df, buffer=0.01):
+    """
+    Returns True if the current price is near the support level within the given buffer percentage.
+    """
+    last = df.iloc[-1]
+    support = last['support']
+    price = last['close']
+
+    # Near support means price is within buffer % above support level
+    return price <= support * (1 + buffer)
 
 def is_near_resistance(df, threshold=0.005, lookahead=10):  # 0.5% proximity
     recent_high = df['high'].iloc[-lookahead:].max()
@@ -184,11 +235,39 @@ def is_early_breakout(df):
 
     return crossover and (under_ma50 or near_ma50)
 
-def is_ranging(df, window=50, threshold=0.02):
-    high = df['high'][-window:].max()
-    low = df['low'][-window:].min()
+def is_ranging(df, window=50, range_threshold=0.05, adx_threshold=20):
+    if len(df) < window:
+        return False  # Not enough data to decide
+
+    recent = df[-window:]
+    high = recent['high'].max()
+    low = recent['low'].min()
     range_pct = (high - low) / low
-    return range_pct < threshold  # e.g., less than 2% movement
+    adx_recent = df['adx'].iloc[-1]
+
+    # Must have low price movement AND weak trend
+    is_range = range_pct < range_threshold and adx_recent < adx_threshold
+
+    # Debugging (optional)
+    #print(f"[{df.iloc[-1]['timestamp']}] Range %: {range_pct:.4f}, ADX: {adx_recent:.2f} -> {'RANGE' if is_range else 'TREND'}")
+
+    return is_range
+
+
+def check_range_trade(df):
+    last = df.iloc[-1]
+
+    buy_signal = (
+        last['close'] <= last['support'] * 1.02 and  # Looser buffer
+        last['rsi'] < 35
+    )
+
+    sell_signal = (
+        last['close'] >= last['resistance'] * 0.98 and
+        last['rsi'] > 65
+    )
+    
+    return buy_signal, sell_signal
 
 def check_range_long(df):
     support = df['low'][-20:].min()
