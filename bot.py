@@ -11,7 +11,7 @@ from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
 from strategies.simulate_trades import run_backtest
 from utils.utils import (
     calculate_mas, check_long_signal, check_short_signal,
-    calculate_trade_levels,is_consolidating, check_range_trade, is_near_resistance
+    calculate_trade_levels,is_ranging, check_range_trade, is_near_resistance
 )
 
 from utils.kuCoinUtils import (
@@ -20,12 +20,9 @@ from utils.kuCoinUtils import (
 )
 
 
-
 # Global flag
 can_trade_event = threading.Event()
 can_trade_event.set()  # Initially allow trading
-
-
 
 kucoin_futures = init_kucoin_futures()
 EXCHANGE = ccxt.kucoin()
@@ -34,6 +31,10 @@ MAX_OPEN_TRADES = 3
 MAX_LOSSES = 3
 PAIRS = get_top_futures_tradable_pairs(kucoin_futures, quote='USDT', top_n=8)
 higher_timeframe_cache = {}
+
+filtered_pairs = []
+last_backtest_time = datetime.min  # very old time to force backtest on first run
+
 
 
 def fetch_data(symbol, timeframe=TIMEFRAME, limit=350):
@@ -137,12 +138,14 @@ def process_pair(symbol):
             handle_trade(symbol, 'long', lower_df, trend_up)
         elif check_short_signal(lower_df) and trend_down :
             handle_trade(symbol, 'short', lower_df, trend_down)
-        elif not trend_up and not trend_down:
-            if is_consolidating(lower_df):
-                if check_range_trade(lower_df):
-                    handle_trade(symbol, 'long', lower_df, True)
-                elif check_range_trade(lower_df):
-                    handle_trade(symbol, 'short', lower_df, True)
+        elif  is_ranging(lower_df):
+            buy_signal, sell_signal = check_range_trade(lower_df)
+            if buy_signal:
+                handle_trade(symbol, 'long', lower_df, True)
+            elif sell_signal:
+                handle_trade(symbol, 'short', lower_df, True)
+
+     
         else:
             log_event(f"✅ No confirmed signal for {symbol} this cycle.")
     else:
@@ -150,9 +153,18 @@ def process_pair(symbol):
 
 
 def main():
-    with ThreadPoolExecutor(max_workers=5) as executor:
+    global filtered_pairs, last_backtest_time
+    now = datetime.now()
+
+    # Run backtest once every 24 hours or if filtered_pairs empty (first run)
+    if not filtered_pairs or (now - last_backtest_time) > timedelta(days=1):
+        log_event("⏳ Running daily backtest...")
         filtered_pairs = run_backtest()
-        executor.map(process_pair, PAIRS)
+        last_backtest_time = now
+        log_event(f"✅ Backtest complete. {len(filtered_pairs)} pairs selected.")
+
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        executor.map(process_pair, filtered_pairs)
 
 
 if __name__ == '__main__':

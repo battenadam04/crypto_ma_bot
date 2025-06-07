@@ -15,7 +15,7 @@ from utils.utils import (
 from utils.kuCoinUtils import init_kucoin_futures, get_top_futures_tradable_pairs
 
 kucoin_futures = init_kucoin_futures()
-PAIRS = get_top_futures_tradable_pairs(kucoin_futures, quote='USDT', top_n=10)
+PAIRS = get_top_futures_tradable_pairs(kucoin_futures, quote='USDT', top_n=20)
 
 def fetch_data(pair, timeframe='1m', days=7):
     all_ohlcv = []
@@ -189,12 +189,17 @@ def run_backtest():
 
     for pair in PAIRS:
         try:
-            df = fetch_data(pair, '1m', days=7)
+            symbol = pair[0]
+            df = fetch_data(symbol, '1m', days=7)
             if len(df) > 300:
                 result = simulate_combined_strategy(pair, df)
                 if result['win_rate'] >= 60:
-                    good_pairs.append(pair)
+                    good_pairs.append(pair[0])
         except Exception as e:
                 print(f"❌ Error backtesting {pair}: {e}")
 
-        return good_pairs
+    return good_pairs
+
+if __name__ == "__main__":
+    results = run_backtest()
+    print("Backtest completed, good pairs:", results)

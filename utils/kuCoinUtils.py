@@ -145,11 +145,11 @@ def get_top_futures_tradable_pairs(exchange, quote='USDT', top_n=15, min_volume=
 
     # Sort by market cap descending, then volume descending
     sorted_pairs = sorted(filtered_pairs, key=lambda x: (x[1], x[2]), reverse=True)[:top_n]
+    print(f"{sorted_pairs}")
 
     print(f"🔥 Top {top_n} pairs filtered by market cap > {min_market_cap_usd} USD and volume > {min_volume} USD:")
-    for sym, cap, vol in sorted_pairs:
-        print(f"  {sym}: Market Cap = {cap:,}, Volume = {vol:,}")
-    return [pair[0] for pair in sorted_pairs]
+
+    return sorted_pairs
 
 
 def place_entry_order_with_fallback(exchange, symbol, side, amount, entry_price, leverage, tp_price, sl_price):
