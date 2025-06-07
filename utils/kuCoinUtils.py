@@ -98,7 +98,7 @@ def get_top_volume_pairs(exchange, quote='USDT', top_n=5):
     return [pair[0] for pair in top_pairs]
 
 
-def get_top_futures_tradable_pairs(exchange, quote='USDT', top_n=15, min_volume=1_000_000, min_market_cap_usd=4_000_000_000):
+def get_top_futures_tradable_pairs(exchange, quote='USDT', top_n=15, min_volume=1_000_000, min_market_cap_usd=1_000_000_000):
     print("⏳ Loading KuCoin Futures markets...")
     try:
         markets = exchange.load_markets()

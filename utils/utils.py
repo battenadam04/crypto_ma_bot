@@ -128,44 +128,36 @@ def check_short_signal(df, lookahead=10):
 #              title=f"{symbol} MA Crossover", savefig=path)
 #     return path
 
-def calculate_trade_levels(price, direction, df, atr_period=7, atr_multiplier_sl=2.0, atr_multiplier_tp=3.0):
-    """
-    Calculate TP/SL levels using real ATR.
+def add_atr_column(df, period=7):
+    df = df.copy()
+    df['H-L'] = df['high'] - df['low']
+    df['H-PC'] = abs(df['high'] - df['close'].shift(1))
+    df['L-PC'] = abs(df['low'] - df['close'].shift(1))
+    df['TR'] = df[['H-L', 'H-PC', 'L-PC']].max(axis=1)
+    df['ATR'] = df['TR'].rolling(window=period).mean()
+    df.drop(columns=['H-L', 'H-PC', 'L-PC', 'TR'], inplace=True)
+    return df
 
-    Parameters:
-    - price: Current price
-    - direction: 'long' or 'short'
-    - df: DataFrame with OHLCV
-    - atr_period: Period to use for ATR calculation
-    - atr_multiplier_sl: Multiplier for stop-loss distance
-    - atr_multiplier_tp: Multiplier for take-profit distance
-    """
-
+def calculate_trade_levels(price, direction, df, start_idx, atr_multiplier_sl=2.0, atr_multiplier_tp=2.5):
     if 'ATR' not in df.columns:
-        # Calculate True Range
-        df['H-L'] = df['high'] - df['low']
-        df['H-PC'] = abs(df['high'] - df['close'].shift(1))
-        df['L-PC'] = abs(df['low'] - df['close'].shift(1))
-        df['TR'] = df[['H-L', 'H-PC', 'L-PC']].max(axis=1)
-        df['ATR'] = df['TR'].rolling(window=atr_period).mean()
-        df.drop(columns=['H-L', 'H-PC', 'L-PC', 'TR'], inplace=True)
+        raise ValueError("ATR not computed. Call add_atr_column(df) first.")
 
-    atr = df['ATR'].iloc[-1]
+    atr = df['ATR'].iloc[start_idx]
 
-    # Fallback in case ATR is still NaN
-    if atr is None or atr == 0 or pd.isna(atr):
-        atr = 0.01  # Reasonable default or consider skipping the trade
-        print("⚠️ ATR calculation failed or is too small. Using fallback value.")
+    # Fallback if ATR isn't usable
+    if pd.isna(atr) or atr == 0:
+        atr = price * 0.005  # 0.5% of price as fallback
+        print(f"⚠️ Using fallback ATR at index {start_idx}: {atr:.5f}")
 
     sl_distance = atr * atr_multiplier_sl
     tp_distance = atr * atr_multiplier_tp
 
     if direction == 'long':
-        tp = float(price + tp_distance)
-        sl = float(price - sl_distance)
+        tp = price + tp_distance
+        sl = price - sl_distance
     else:
-        tp = float(price - tp_distance)
-        sl = float(price + sl_distance)
+        tp = price - tp_distance
+        sl = price + sl_distance
 
     return {
         'entry': round(price, 4),
@@ -184,10 +176,25 @@ def is_near_support(df, buffer=0.01):
     # Near support means price is within buffer % above support level
     return price <= support * (1 + buffer)
 
-def is_near_resistance(df, threshold=0.005, lookahead=10):  # 0.5% proximity
-    recent_high = df['high'].iloc[-lookahead:].max()
+def is_near_resistance(df, threshold=0.01, lookback=50, buffer_multiplier=1.0):
+    """
+    Checks if the current price is near recent resistance with volatility-adjusted buffer.
+    - threshold: percentage distance to consider "near"
+    - lookback: number of past candles to define resistance level
+    - buffer_multiplier: scales buffer zone based on ATR
+    """
+    if len(df) < lookback + 1:
+        return False  # not enough data
+
+    recent_high = df['high'].iloc[-lookback:].max()
     current_price = df.iloc[-1]['close']
-    return (recent_high - current_price) / recent_high < threshold
+
+    # Use ATR for dynamic buffer zone
+    atr = df['close'].rolling(14).apply(lambda x: max(x) - min(x)).iloc[-1]
+    dynamic_buffer = atr * buffer_multiplier if not pd.isna(atr) else current_price * threshold
+
+    return (recent_high - current_price) <= dynamic_buffer
+
 
 def is_weak_trend(df, period=14, threshold=20):
     adx = ADXIndicator(df['high'], df['low'], df['close'], window=period)
@@ -235,49 +242,50 @@ def is_early_breakout(df):
 
     return crossover and (under_ma50 or near_ma50)
 
-def is_ranging(df, window=50, range_threshold=0.05, adx_threshold=20):
-    if len(df) < window:
-        return False  # Not enough data to decide
+def is_ranging(df, window=50, range_threshold=0.05, adx_threshold=25):
+    if len(df) < window or 'adx' not in df.columns:
+        return False
 
     recent = df[-window:]
     high = recent['high'].max()
     low = recent['low'].min()
-    range_pct = (high - low) / low
+    range_pct = (high - low) / recent['close'].iloc[-1]
     adx_recent = df['adx'].iloc[-1]
 
-    # Must have low price movement AND weak trend
-    is_range = range_pct < range_threshold and adx_recent < adx_threshold
+    return range_pct < range_threshold and adx_recent < adx_threshold
 
-    # Debugging (optional)
-    #print(f"[{df.iloc[-1]['timestamp']}] Range %: {range_pct:.4f}, ADX: {adx_recent:.2f} -> {'RANGE' if is_range else 'TREND'}")
+# def check_range_trade(df):
+#     last = df.iloc[-1]
 
-    return is_range
+#     buy_signal = (
+#         last['close'] <= last['support'] * 1.02 and  # Looser buffer
+#         last['rsi'] < 35
+#     )
 
+#     sell_signal = (
+#         last['close'] >= last['resistance'] * 0.98 and
+#         last['rsi'] > 65
+#     )
+    
+#     return buy_signal, sell_signal
 
 def check_range_trade(df):
     last = df.iloc[-1]
 
+    support_buffer = 1.02  # changed from 1.01
+    resistance_buffer = 0.98  # changed from 0.99
     buy_signal = (
-        last['close'] <= last['support'] * 1.02 and  # Looser buffer
-        last['rsi'] < 35
+        last['close'] <= last['support'] * support_buffer
+        and last['rsi'] < 35
     )
 
     sell_signal = (
-        last['close'] >= last['resistance'] * 0.98 and
-        last['rsi'] > 65
+        last['close'] >= last['resistance'] * resistance_buffer
+        and last['rsi'] > 65
     )
     
     return buy_signal, sell_signal
 
-def check_range_long(df):
-    support = df['low'][-20:].min()
-    last_close = df.iloc[-1]['close']
-    return last_close <= support * 1.01  # near support
-
-def check_range_short(df):
-    resistance = df['high'][-20:].max()
-    last_close = df.iloc[-1]['close']
-    return last_close >= resistance * 0.99  # near resistance
 
 def check_trend_continuation(df):
     if len(df) < 51:

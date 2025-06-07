@@ -8,9 +8,10 @@ from concurrent.futures import ThreadPoolExecutor
 import threading
 
 from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
+from strategies.simulate_trades import run_backtest
 from utils.utils import (
     calculate_mas, check_long_signal, check_short_signal,
-    calculate_trade_levels,is_consolidating, check_range_short, check_range_long, is_near_resistance
+    calculate_trade_levels,is_consolidating, check_range_trade, is_near_resistance
 )
 
 from utils.kuCoinUtils import (
@@ -138,9 +139,9 @@ def process_pair(symbol):
             handle_trade(symbol, 'short', lower_df, trend_down)
         elif not trend_up and not trend_down:
             if is_consolidating(lower_df):
-                if check_range_long(lower_df):
+                if check_range_trade(lower_df):
                     handle_trade(symbol, 'long', lower_df, True)
-                elif check_range_short(lower_df):
+                elif check_range_trade(lower_df):
                     handle_trade(symbol, 'short', lower_df, True)
         else:
             log_event(f"✅ No confirmed signal for {symbol} this cycle.")
@@ -150,6 +151,7 @@ def process_pair(symbol):
 
 def main():
     with ThreadPoolExecutor(max_workers=5) as executor:
+        filtered_pairs = run_backtest()
         executor.map(process_pair, PAIRS)
 
 
