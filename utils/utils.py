@@ -138,7 +138,7 @@ def add_atr_column(df, period=7):
     df.drop(columns=['H-L', 'H-PC', 'L-PC', 'TR'], inplace=True)
     return df
 
-def calculate_trade_levels(price, direction, df, start_idx, atr_multiplier_sl=2.0, atr_multiplier_tp=2.5):
+def calculate_trade_levels(price, direction, df, start_idx, strategy_type="trend"):
     if 'ATR' not in df.columns:
         raise ValueError("ATR not computed. Call add_atr_column(df) first.")
 
@@ -148,6 +148,14 @@ def calculate_trade_levels(price, direction, df, start_idx, atr_multiplier_sl=2.
     if pd.isna(atr) or atr == 0:
         atr = price * 0.005  # 0.5% of price as fallback
         print(f"⚠️ Using fallback ATR at index {start_idx}: {atr:.5f}")
+
+    # Adjust TP/SL distances depending on the strategy
+    if strategy_type == "range":
+        atr_multiplier_sl = 1.2   # tighter stop loss
+        atr_multiplier_tp = 1.5   # tighter take profit
+    else:  # trend strategy
+        atr_multiplier_sl = 2.0
+        atr_multiplier_tp = 2.5
 
     sl_distance = atr * atr_multiplier_sl
     tp_distance = atr * atr_multiplier_tp
@@ -164,6 +172,7 @@ def calculate_trade_levels(price, direction, df, start_idx, atr_multiplier_sl=2.
         'take_profit': round(tp, 4),
         'stop_loss': round(sl, 4)
     }
+
 
 def is_near_support(df, buffer=0.01):
     """

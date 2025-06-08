@@ -74,12 +74,12 @@ def log_event(text):
         f.write(log_text + '\n')
 
 
-def handle_trade(symbol, direction, df, trend_confirmed):
+def handle_trade(symbol, direction, df, trend_confirmed, strategy_type="trend"):
     # if not trend_confirmed or not should_trade(df):
     #     return
 
     entry_price = df.iloc[-1]['close']
-    levels = calculate_trade_levels(entry_price, direction, df)
+    levels = calculate_trade_levels(entry_price, direction, df, strategy_type)
      ## path = save_chart(df, symbol)
     side = 'buy' if direction == 'long' else 'sell'
 
@@ -135,15 +135,15 @@ def process_pair(symbol):
 
             #and trend_down - add back to each IF
         if check_long_signal(lower_df) and trend_up and not is_near_resistance(higher_df):
-            handle_trade(symbol, 'long', lower_df, trend_up)
+            handle_trade(symbol, 'long', lower_df, trend_up,strategy_type="trend")
         elif check_short_signal(lower_df) and trend_down :
-            handle_trade(symbol, 'short', lower_df, trend_down)
+            handle_trade(symbol, 'short', lower_df, trend_down, strategy_type="trend")
         elif  is_ranging(lower_df):
             buy_signal, sell_signal = check_range_trade(lower_df)
             if buy_signal:
-                handle_trade(symbol, 'long', lower_df, True)
+                handle_trade(symbol, 'long', lower_df, True, strategy_type="range")
             elif sell_signal:
-                handle_trade(symbol, 'short', lower_df, True)
+                handle_trade(symbol, 'short', lower_df, True, strategy_type="range")
 
      
         else:
