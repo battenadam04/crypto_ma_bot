@@ -41,7 +41,7 @@ def fetch_data(symbol, timeframe=TIMEFRAME, limit=350):
     try:
 
         hours_back = 6 if timeframe == '1m' else 48
-        since_dt = datetime.now() - timedelta(hours=hours_back)
+        since_dt = datetime.now(datetime.timezone.utc) - timedelta(hours=hours_back)
         since_ms = int(since_dt.timestamp() * 1000)  # ✅ convert to ms
         ohlcv = kucoin_futures.fetch_ohlcv(symbol, timeframe=timeframe, since=since_ms, limit=limit)
         df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
@@ -68,19 +68,16 @@ def send_telegram(text, image_path=None):
 
 def log_event(text):
     os.makedirs('logs', exist_ok=True)  # Ensure 'logs/' directory exists
-    log_text = f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {text}"
+    log_text = f"[{datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}] {text}"
     print(log_text)
     with open('logs/trades.log', 'a') as f:
         f.write(log_text + '\n')
 
 
 def handle_trade(symbol, direction, df, trend_confirmed, strategy_type="trend"):
-    # if not trend_confirmed or not should_trade(df):
-    #     return
 
     entry_price = df.iloc[-1]['close']
     levels = calculate_trade_levels(entry_price, direction, df, strategy_type)
-     ## path = save_chart(df, symbol)
     side = 'buy' if direction == 'long' else 'sell'
 
     print(f"💰 starting kucoin trade.")
@@ -154,7 +151,7 @@ def process_pair(symbol):
 
 def main():
     global filtered_pairs, last_backtest_time
-    now = datetime.now()
+    now = datetime.now(datetime.timezone.utc)
 
     # Run backtest once every 24 hours or if filtered_pairs empty (first run)
     if not filtered_pairs or (now - last_backtest_time) > timedelta(days=1):
