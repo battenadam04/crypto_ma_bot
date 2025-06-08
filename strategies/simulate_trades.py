@@ -3,7 +3,6 @@ import os
 from datetime import datetime, timedelta
 import ccxt
 import pandas as pd
-import pandas_ta as ta
 import time
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
