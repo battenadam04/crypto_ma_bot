@@ -191,6 +191,7 @@ def run_backtest():
         try:
             symbol = pair[0]
             df = fetch_data(symbol, '1m', days=7)
+            print("fetching simulated data:", df)
             if len(df) > 300:
                 result = simulate_combined_strategy(pair, df)
                 if result['win_rate'] >= 54:

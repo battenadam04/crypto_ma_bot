@@ -46,6 +46,7 @@ def fetch_data(symbol, timeframe=TIMEFRAME, limit=350):
         ohlcv = kucoin_futures.fetch_ohlcv(symbol, timeframe=timeframe, since=since_ms, limit=limit)
         df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+        print(f"⏱️ Fetching data for {symbol} since {since_dt.isoformat()} ({since_ms})")
         return df
     except Exception as e:
         log_event(f"❌ Error fetching data for {symbol}: {str(e)}")

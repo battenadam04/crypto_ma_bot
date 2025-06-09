@@ -79,7 +79,7 @@ def check_long_signal(df, lookahead=10):
     # Combine conditions: crossover or continuation + momentum + alignment + bullish candle
     #  and not is_near_resistance(df)
     if (crossover or continuation) and alignment and momentum and bullish_candle:
-        #print(f"LONG SIGNAL TRIGGERED at {last['timestamp']}")
+        print(f"LONG SIGNAL TRIGGERED at {last['timestamp']}")
         return True
 
     return False
@@ -110,7 +110,7 @@ def check_short_signal(df, lookahead=10):
     not_near_support = not is_near_support(df)  # You need to implement this function
 
     if (crossover or continuation) and alignment and momentum and bearish_candle and not_near_support:
-       #print(f"SHORT SIGNAL TRIGGERED at {last['timestamp']}")
+        print(f"SHORT SIGNAL TRIGGERED at {last['timestamp']}")
         return True
 
     return False
