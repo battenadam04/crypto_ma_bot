@@ -132,9 +132,10 @@ def process_pair(symbol):
         trend_down = higher_df.iloc[-1]['ma20'] < higher_df.iloc[-1]['ma50']
 
             #and trend_down - add back to each IF
-        if check_long_signal(lower_df) and trend_up and not is_near_resistance(higher_df):
+            #and not is_near_resistance(higher_df)
+        if check_long_signal(lower_df) and trend_up:
             handle_trade(symbol, 'long', lower_df, trend_up,strategy_type="trend")
-        elif check_short_signal(lower_df) and trend_down :
+        elif check_short_signal(lower_df) and trend_down:
             handle_trade(symbol, 'short', lower_df, trend_down, strategy_type="trend")
         elif  is_ranging(lower_df):
             buy_signal, sell_signal = check_range_trade(lower_df)

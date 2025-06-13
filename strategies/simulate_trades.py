@@ -122,7 +122,8 @@ def simulate_combined_strategy(pair, df):
             ma20_slope < 0  # downward slope confirmation
         )
 
-        if check_long_signal(slice_df) and trend_up and not is_near_resistance(slice_df):
+            #and not is_near_resistance(slice_df)
+        if check_long_signal(slice_df) and trend_up:
                 result = check_trade_outcome(df, i, 'long', entry_price)
                 strategy_used.append('ma')
                 if result == 'win':
@@ -191,10 +192,10 @@ def run_backtest():
         try:
             symbol = pair[0]
             df = fetch_data(symbol, '1m', days=7)
-            print("fetching simulated data:", df)
+
             if len(df) > 300:
                 result = simulate_combined_strategy(pair, df)
-                if result['win_rate'] >= 54:
+                if result['win_rate'] >= 60:
                     good_pairs.append(pair[0])
         except Exception as e:
                 print(f"❌ Error backtesting {pair}: {e}")
