@@ -192,10 +192,10 @@ def run_backtest():
         try:
             symbol = pair[0]
             df = fetch_data(symbol, '1m', days=7)
-
+            print(f"CHECKING BACKTESTDF:{pair,len(df)}" )
             if len(df) > 300:
                 result = simulate_combined_strategy(pair, df)
-                print("CHECKING BACKTEST:", result)
+                print(f"CHECKING BACKTEST: {result}")
                 if result['win_rate'] >= 55:
                     good_pairs.append(pair[0])
         except Exception as e:
