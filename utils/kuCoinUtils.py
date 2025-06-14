@@ -1,11 +1,10 @@
 
 import ccxt
-from bot import log_event
 from config import KUCOIN_API_KEY, KUCOIN_SECRET_KEY, KUCOIN_PASSPHRASE
 import time
 
 from utils.coinGeckoData import fetch_market_caps
-from utils.utils import get_decimal_places
+from utils.utils import get_decimal_places, log_event
 
 
 
@@ -286,7 +285,7 @@ def place_futures_order(exchange, symbol, side, usdt_amount, tp_price, sl_price,
                     print(f"✅ Entry order {order_id} filled.")
                     break
                 else:
-                    print(f"⏳ Waiting for order {order_id} to fill, current status: {order_status['status']}")
+                    log_event(f"⏳ Waiting for order {order_id} to fill, current status: {order_status['status']}")
             except Exception as e:
                 print(f"❌ Error fetching order status: {e}")
             time.sleep(poll_interval)

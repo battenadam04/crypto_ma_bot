@@ -14,7 +14,7 @@ from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
 from strategies.simulate_trades import run_backtest
 from utils.utils import (
     add_atr_column, calculate_mas, check_long_signal, check_short_signal,
-    calculate_trade_levels,is_ranging, check_range_trade, is_near_resistance
+    calculate_trade_levels,is_ranging, check_range_trade, log_event
 )
 
 from utils.kuCoinUtils import (
@@ -72,12 +72,6 @@ def send_telegram(text, image_path=None):
         log_event(f"⚠️ Telegram error: {e}")
 
 
-def log_event(text):
-    os.makedirs('logs', exist_ok=True)  # Ensure 'logs/' directory exists
-    log_text = f"[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}] {text}"
-    print(log_text)
-    with open('logs/trades.log', 'a') as f:
-        f.write(log_text + '\n')
 
 
 def handle_trade(symbol, direction, df, trend_confirmed, strategy_type="trend"):

@@ -2,7 +2,9 @@ from ta.trend import SMAIndicator
 from ta.trend import ADXIndicator
 import pandas as pd
 
-from bot import log_event
+import time
+import os
+from datetime import datetime, timezone
 
     
 def set_leverage(exchange, symbol, leverage):
@@ -329,3 +331,10 @@ def check_short_signal(df, lookahead=10):
         return True
 
     return False
+
+def log_event(text):
+    os.makedirs('logs', exist_ok=True)  # Ensure 'logs/' directory exists
+    log_text = f"[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}] {text}"
+    print(log_text)
+    with open('logs/trades.log', 'a') as f:
+        f.write(log_text + '\n')

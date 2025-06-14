@@ -8,10 +8,8 @@ import time
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 
-from bot import log_event
 from utils.utils import (
-    check_long_signal, check_short_signal, calculate_trade_levels,add_atr_column,
-    is_near_resistance, check_range_trade, is_ranging,
+    check_long_signal, check_short_signal, calculate_trade_levels,add_atr_column, check_range_trade, is_ranging, log_event,
 )
 from utils.kuCoinUtils import init_kucoin_futures, get_top_futures_tradable_pairs
 
