@@ -288,12 +288,12 @@ def place_futures_order(exchange, symbol, side, usdt_amount, tp_price, sl_price,
         if tp_sl_result['status'] != 'success':
             print(f"❌ TP/SL placement failed: {tp_sl_result['message']}")
         else:
-            print("📈 TP and 📉 SL orders successfully placed.")
+            print(f"📈 TP and 📉 SL orders successfully placed.: {tp_sl_result}")
             return {
                     'status': 'success',
                     'entry_order': entry_order,
-                    'tp_order': entry_order['tp_order'],
-                    'sl_order': entry_order['sl_order']
+                    'tp_order': tp_sl_result['tp_order'],
+                    'sl_order': tp_sl_result['sl_order'],
                 }
 
     except Exception as e:

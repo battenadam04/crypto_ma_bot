@@ -149,17 +149,26 @@ def calculate_trade_levels(price, direction, df, start_idx, strategy_type="trend
         atr = price * 0.005
         print(f"⚠️ Using fallback ATR at index {start_idx}: {atr:.10f}")
 
+    # ATR-based multipliers
     if strategy_type == "range":
-        atr_multiplier_sl = 1.2
-        atr_multiplier_tp = 1.5
+        atr_multiplier_sl = 1.5
+        atr_multiplier_tp = 2.0
     else:
-        atr_multiplier_sl = 2.0
-        atr_multiplier_tp = 2.5
+        atr_multiplier_sl = 2.5
+        atr_multiplier_tp = 3.5
 
+    # Calculate ATR-based distances
     sl_distance = atr * atr_multiplier_sl
     tp_distance = atr * atr_multiplier_tp
 
-    # Determine decimal places based on price size
+    # 🛡️ Enforce minimum % moves for 10x leverage
+    min_sl_distance = price * 0.01  # 1% SL = ~10% capital loss
+    min_tp_distance = price * 0.02  # 2% TP = ~20% gain
+
+    sl_distance = max(sl_distance, min_sl_distance)
+    tp_distance = max(tp_distance, min_tp_distance)
+
+    # Precision based on price
     if price < 0.01:
         precision = 8
     elif price < 1:

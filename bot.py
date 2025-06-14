@@ -139,7 +139,7 @@ def process_pair(symbol):
             #and trend_down - add back to each IF
             #and not is_near_resistance(higher_df)
             #check_long_signal(lower_df) and trend_up
-        if check_long_signal(lower_df) and trend_up:
+        if True:
             handle_trade(symbol, 'long', lower_df, trend_up,strategy_type="trend")
         elif check_short_signal(lower_df) and trend_down:
             handle_trade(symbol, 'short', lower_df, trend_down, strategy_type="trend")
