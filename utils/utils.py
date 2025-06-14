@@ -2,6 +2,8 @@ from ta.trend import SMAIndicator
 from ta.trend import ADXIndicator
 import pandas as pd
 
+from bot import log_event
+
     
 def set_leverage(exchange, symbol, leverage):
     try:
@@ -292,7 +294,7 @@ def check_long_signal(df, lookahead=10):
     # Combine conditions: crossover or continuation + momentum + alignment + bullish candle
     #  and not is_near_resistance(df)
     if (crossover or continuation) and alignment and momentum and bullish_candle and not is_near_resistance(df):
-       # print(f"LONG SIGNAL TRIGGERED at {last['timestamp']}")
+        log_event(f"LONG SIGNAL TRIGGERED at {last['timestamp']}")
         return True
 
     return False
@@ -323,7 +325,7 @@ def check_short_signal(df, lookahead=10):
     # not_near_support = not is_near_support(df)  # You need to implement this function
 
     if (crossover or continuation) and alignment and momentum and bearish_candle and not is_near_support(df) :
-       # print(f"SHORT SIGNAL TRIGGERED at {last['timestamp']}")
+        log_event(f"SHORT SIGNAL TRIGGERED at {last['timestamp']}")
         return True
 
     return False

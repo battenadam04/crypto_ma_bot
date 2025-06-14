@@ -1,5 +1,6 @@
 
 import ccxt
+from bot import log_event
 from config import KUCOIN_API_KEY, KUCOIN_SECRET_KEY, KUCOIN_PASSPHRASE
 import time
 
@@ -296,9 +297,9 @@ def place_futures_order(exchange, symbol, side, usdt_amount, tp_price, sl_price,
         tp_sl_result = place_tp_sl_orders(exchange, symbol, side, amount, tp_price, sl_price)
 
         if tp_sl_result['status'] != 'success':
-            print(f"❌ TP/SL placement failed: {tp_sl_result['message']}")
+            log_event(f"❌ TP/SL placement failed: {tp_sl_result['message']}")
         else:
-            print(f"📈 TP and 📉 SL orders successfully placed.: {tp_sl_result}")
+            log_event(f"📈 TP and 📉 SL orders successfully placed.: {tp_sl_result}")
             return {
                     'status': 'success',
                     'entry_order': entry_order,
@@ -346,7 +347,7 @@ def place_tp_sl_orders(exchange, symbol, side, amount, tp_price, sl_price):
             }
         )
 
-        print("✅ TP and SL orders placed.")
+        log_event("✅ TP and SL orders placed.")
         return {
             'tp_order': tp_order,
             'sl_order': sl_order,

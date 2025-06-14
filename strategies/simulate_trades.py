@@ -8,6 +8,7 @@ import time
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 
+from bot import log_event
 from utils.utils import (
     check_long_signal, check_short_signal, calculate_trade_levels,add_atr_column,
     is_near_resistance, check_range_trade, is_ranging,
@@ -123,7 +124,7 @@ def simulate_combined_strategy(pair, df):
         )
 
             #and not is_near_resistance(slice_df)
-        if check_long_signal(slice_df):
+        if check_long_signal(slice_df) and trend_up:
                 result = check_trade_outcome(df, i, 'long', entry_price)
                 strategy_used.append('ma')
                 if result == 'win':
@@ -132,7 +133,7 @@ def simulate_combined_strategy(pair, df):
                     long_losses += 1
                 else:
                     long_none += 1
-        elif check_short_signal(slice_df):
+        elif check_short_signal(slice_df) and trend_down :
                 result = check_trade_outcome(df, i, 'short', entry_price)
                 strategy_used.append('ma')
                 if result == 'win':
@@ -170,13 +171,13 @@ def simulate_combined_strategy(pair, df):
     range_used = strategy_used.count('range')
     ma_used = strategy_used.count('ma')
 
-    print(f"\n--- Results for {pair} ---")
-    print(f"Total Trades: {total_trades}")
-    print(f"Wins: {total_wins} (Long: {long_wins}, Short: {short_wins})")
-    print(f"Losses: {long_losses + short_losses} (Long: {long_losses}, Short: {short_losses})")
-    print(f"Unresolved: {long_none + short_none} (Long: {long_none}, Short: {short_none})")
-    print(f"Win Rate: {win_rate}%")
-    print(f"MA Usage: {ma_used}, Range Usage: {range_used}")
+    log_event(f"\n--- Results for {pair} ---")
+    log_event(f"Total Trades: {total_trades}")
+    log_event(f"Wins: {total_wins} (Long: {long_wins}, Short: {short_wins})")
+    log_event(f"Losses: {long_losses + short_losses} (Long: {long_losses}, Short: {short_losses})")
+    log_event(f"Unresolved: {long_none + short_none} (Long: {long_none}, Short: {short_none})")
+    log_event(f"Win Rate: {win_rate}%")
+    log_event(f"MA Usage: {ma_used}, Range Usage: {range_used}")
 
     return {
                 'win_rate': win_rate,
@@ -195,7 +196,7 @@ def run_backtest():
             #print(f"CHECKING BACKTESTDF:{pair,len(df)}" )
             if len(df) > 300:
                 result = simulate_combined_strategy(pair, df)
-                #print(f"CHECKING BACKTEST: {result}")
+                log_event(f"CHECKING BACKTEST: {result}")
                 if result['win_rate'] >= 55:
                     good_pairs.append(pair[0])
         except Exception as e:
