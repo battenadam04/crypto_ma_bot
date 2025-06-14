@@ -176,17 +176,20 @@ def main():
     # Run backtest once every 24 hours or if filtered_pairs empty (first run)
     if not filtered_pairs or (now - last_backtest_time) > timedelta(days=1):
         log_event("⏳ Running daily backtest...")
-        filtered_pairs = run_backtest()
+        #filtered_pairs = run_backtest()
         last_backtest_time = now
         #save_last_backtest_time(now)
-        log_event(f"✅ Backtest complete. {len(filtered_pairs)} pairs selected.")
+        #log_event(f"✅ Backtest complete. {len(filtered_pairs)} pairs selected.")
         # test_pairs = [
         #     'NEAR/USDT:USDT',
         #     'PEPE/USDT:USDT',
         #     'TRX/USDT:USDT'
         # ]
 
-    for pair in filtered_pairs:
+        # from running backtest manually and updating here as server blocking api coingecko
+        generated_pairs = ['ONDO/USDT:USDT', 'ARB/USDT:USDT']
+
+    for pair in generated_pairs:
         process_pair(pair)
 
 
