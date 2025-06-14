@@ -195,6 +195,7 @@ def run_backtest():
 
             if len(df) > 300:
                 result = simulate_combined_strategy(pair, df)
+                print("CHECKING BACKTEST:", result)
                 if result['win_rate'] >= 55:
                     good_pairs.append(pair[0])
         except Exception as e:
