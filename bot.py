@@ -1,5 +1,6 @@
 import ccxt
 import pandas as pd
+import pandas_ta as ta
 import requests
 import time
 import os
@@ -134,8 +135,24 @@ def process_pair(symbol):
         else:
             higher_df = higher_timeframe_cache[symbol]['data']
 
-        trend_up = higher_df.iloc[-1]['ma20'] > higher_df.iloc[-1]['ma50']
-        trend_down = higher_df.iloc[-1]['ma20'] < higher_df.iloc[-1]['ma50']
+        ma20_slope = higher_df['ma20'].iloc[-1] - higher_df['ma20'].iloc[-4]
+
+        trend_up = (
+            higher_df['ma20'].iloc[-1] > higher_df['ma50'].iloc[-1] and
+            higher_df['ma20'].iloc[-1] > higher_df['ma20'].iloc[-5] and
+            ma20_slope > 0  # upward slope confirmation
+        )
+
+        trend_down = (
+            higher_df['ma20'].iloc[-1] < higher_df['ma50'].iloc[-1] and
+            higher_df['ma20'].iloc[-1] < higher_df['ma20'].iloc[-5] and
+            ma20_slope < 0  # downward slope confirmation
+        )
+
+        lower_df['rsi'] = lower_df.ta.rsi(length=14)
+        lower_df['adx'] = lower_df.ta.adx(length=14)['ADX_14']
+        lower_df['support'] = lower_df['low'].rolling(window=50).min()
+        lower_df['resistance'] = lower_df['high'].rolling(window=50).max()
 
             #and trend_down - add back to each IF
             #and not is_near_resistance(higher_df)

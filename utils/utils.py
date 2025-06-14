@@ -137,7 +137,6 @@ def is_near_support(df, buffer=0.01):
     """
     Returns True if the current price is near the support level within the given buffer percentage.
     """
-    df['support'] = df['low'].rolling(window=50).min()
 
     last = df.iloc[-1]
     support = last['support']
@@ -153,8 +152,7 @@ def is_near_resistance(df, threshold=0.01, lookback=20, buffer_multiplier=1.0):
     - lookback: number of past candles to define resistance level
     - buffer_multiplier: scales buffer zone based on ATR
     """
-    df['resistance'] = df['high'].rolling(window=50).max()
-    
+
     if len(df) < lookback + 1:
         return False  # not enough data
 
