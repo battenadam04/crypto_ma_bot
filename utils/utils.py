@@ -55,66 +55,7 @@ def confirm_trend(df, last_idx, ma_key, condition_func, lookahead):
             return True
     return False
 
-def check_long_signal(df, lookahead=10):
-    if len(df) < 51:
-        return False
 
-    last = df.iloc[-1]
-    prev = df.iloc[-2]
-
-    # Crossover condition: MA10 crosses above MA20
-    crossover = prev['ma10'] < prev['ma20'] and last['ma10'] > last['ma20']
-
-    # Continuation condition: MA10 remains above MA20
-    continuation = last['ma10'] > last['ma20']
-
-    # Trend alignment: MA20 above MA50 (higher timeframe trend)
-    alignment = last['ma20'] > last['ma50']
-
-    # Momentum: price above MA10 (showing bullish momentum)
-    momentum = last['close'] > last['ma10']
-
-    # Optional: bullish candle confirmation (price closed higher than open)
-    bullish_candle = last['close'] > last['open']
-
-    # Combine conditions: crossover or continuation + momentum + alignment + bullish candle
-    #  and not is_near_resistance(df)
-    if (crossover or continuation) and alignment and momentum and bullish_candle:
-       # print(f"LONG SIGNAL TRIGGERED at {last['timestamp']}")
-        return True
-
-    return False
-
-def check_short_signal(df, lookahead=10):
-    if len(df) < 51:
-        return False
-
-    last = df.iloc[-1]
-    prev = df.iloc[-2]
-
-    # Crossover condition: MA10 crosses below MA20
-    crossover = prev['ma10'] > prev['ma20'] and last['ma10'] < last['ma20']
-
-    # Continuation condition: MA10 remains below MA20
-    continuation = last['ma10'] < last['ma20']
-
-    # Trend alignment: MA20 below MA50 (higher timeframe bearish trend)
-    alignment = last['ma20'] < last['ma50']
-
-    # Momentum: price below MA10 (bearish momentum)
-    momentum = last['close'] < last['ma10']
-
-    # Optional: bearish candle confirmation (close < open)
-    bearish_candle = last['close'] < last['open']
-
-    # Avoid signals near support (you can define a function similar to `is_near_resistance`)
-    not_near_support = not is_near_support(df)  # You need to implement this function
-
-    if (crossover or continuation) and alignment and momentum and bearish_candle and not_near_support:
-       # print(f"SHORT SIGNAL TRIGGERED at {last['timestamp']}")
-        return True
-
-    return False
 
 # def save_chart(df, symbol):
 #     df = df.copy()
@@ -323,3 +264,64 @@ def check_trend_continuation(df):
         last['ma20'] > last['ma50'] and
         last['close'] > last['ma10']
     )
+
+def check_long_signal(df, lookahead=10):
+    if len(df) < 51:
+        return False
+
+    last = df.iloc[-1]
+    prev = df.iloc[-2]
+
+    # Crossover condition: MA10 crosses above MA20
+    crossover = prev['ma10'] < prev['ma20'] and last['ma10'] > last['ma20']
+
+    # Continuation condition: MA10 remains above MA20
+    continuation = last['ma10'] > last['ma20']
+
+    # Trend alignment: MA20 above MA50 (higher timeframe trend)
+    alignment = last['ma20'] > last['ma50']
+
+    # Momentum: price above MA10 (showing bullish momentum)
+    momentum = last['close'] > last['ma10']
+
+    # Optional: bullish candle confirmation (price closed higher than open)
+    bullish_candle = last['close'] > last['open']
+
+    # Combine conditions: crossover or continuation + momentum + alignment + bullish candle
+    #  and not is_near_resistance(df)
+    if (crossover or continuation) and alignment and momentum and bullish_candle:
+       # print(f"LONG SIGNAL TRIGGERED at {last['timestamp']}")
+        return True
+
+    return False
+
+def check_short_signal(df, lookahead=10):
+    if len(df) < 51:
+        return False
+
+    last = df.iloc[-1]
+    prev = df.iloc[-2]
+
+    # Crossover condition: MA10 crosses below MA20
+    crossover = prev['ma10'] > prev['ma20'] and last['ma10'] < last['ma20']
+
+    # Continuation condition: MA10 remains below MA20
+    continuation = last['ma10'] < last['ma20']
+
+    # Trend alignment: MA20 below MA50 (higher timeframe bearish trend)
+    alignment = last['ma20'] < last['ma50']
+
+    # Momentum: price below MA10 (bearish momentum)
+    momentum = last['close'] < last['ma10']
+
+    # Optional: bearish candle confirmation (close < open)
+    bearish_candle = last['close'] < last['open']
+
+    # Avoid signals near support (you can define a function similar to `is_near_resistance`)
+    not_near_support = not is_near_support(df)  # You need to implement this function
+
+    if (crossover or continuation) and alignment and momentum and bearish_candle and not_near_support:
+       # print(f"SHORT SIGNAL TRIGGERED at {last['timestamp']}")
+        return True
+
+    return False
