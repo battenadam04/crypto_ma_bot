@@ -163,16 +163,16 @@ def place_entry_order_with_fallback(exchange, symbol, side, amount, entry_price,
                 price=entry_price,
                 params={
                     'leverage': int(leverage),
-                            'takeProfit': {
-            'price': tp_price,            # Your TP price
-            'type': 'limit',
-            'reduceOnly': True
-        },
-        'stopLoss': {
-            'price': sl_price,            # Your SL price
-            'type': 'limit',
-            'reduceOnly': True
-        }
+        #                     'takeProfit': {
+        #     'price': tp_price,            # Your TP price
+        #     'type': 'limit',
+        #     'reduceOnly': True
+        # },
+        # 'stopLoss': {
+        #     'price': sl_price,            # Your SL price
+        #     'type': 'limit',
+        #     'reduceOnly': True
+        # }
                 }
             )
     except Exception as e:
@@ -204,7 +204,7 @@ def place_futures_order(exchange, symbol, side, usdt_amount, tp_price, sl_price,
 
         # Precision
         amount_precision = get_decimal_places(market['precision']['amount'])
-        price_precision = get_decimal_places(market['precision']['price'])
+        price_precision = min(max(get_decimal_places(market['precision']['price']), 6), 12)
 
         # Minimums
         min_price = market.get('limits', {}).get('price', {}).get('min', 0)
@@ -239,6 +239,8 @@ def place_futures_order(exchange, symbol, side, usdt_amount, tp_price, sl_price,
 
         if entry_price <= 0:
             return {'status': 'error', 'message': f"Final entry price is invalid: {entry_price}"}
+        
+        print(f"🧪 Raw TP: {tp_price}, Raw SL: {sl_price}, Precision: {price_precision}")
         # Round TP/SL
         tp_price = round(tp_price, price_precision)
         sl_price = round(sl_price, price_precision)
@@ -257,8 +259,17 @@ def place_futures_order(exchange, symbol, side, usdt_amount, tp_price, sl_price,
         # ✅ Place Entry Order
         entry_order = place_entry_order_with_fallback(exchange, symbol, side, amount, entry_price, leverage, tp_price, sl_price)
 
-        if not entry_order or not isinstance(entry_order, dict) or 'id' not in entry_order:
-            return {'status': 'error', 'message': f"Entry order failed: {entry_order}"}
+        # if not entry_order or not isinstance(entry_order, dict) or 'id' not in entry_order:
+        #     return {'status': 'error', 'message': f"Entry order failed: {entry_order}"}
+
+        # ✅ Wait for the entry order to fill
+        # for _ in range(15):
+        #     order_status = exchange.fetch_order(entry_order['id'], symbol)
+        #     if order_status['status'] == 'closed':
+        #         break
+        #     time.sleep(1)
+        # else:
+        #     return {'status': 'error', 'message': 'Entry order not filled in time'}
 
         order_id = entry_order['id']
 
@@ -270,51 +281,78 @@ def place_futures_order(exchange, symbol, side, usdt_amount, tp_price, sl_price,
             time.sleep(1)
         else:
             return {'status': 'error', 'message': 'Entry order not filled in time'}
+        time.sleep(20)
 
-        #close_side = 'sell' if side == 'buy' else 'buy'
+        tp_sl_result = place_tp_sl_orders(exchange, symbol, side, amount, tp_price, sl_price)
 
-        # # 📈 Take-Profit Order
-        # tp_order = exchange.create_order(
-        #     symbol=symbol,
-        #     type='limit',
-        #     side=close_side,
-        #     amount=amount,
-        #     price=tp_price,
-        #     params={
-        #           'reduceOnly': True,
-        #             'stop': True,
-        #             'stopPrice': tp_price,
-        #             'triggerPrice': tp_price,
-        #             'triggerType': 'last',
-        #     }
-        # )
-
-        # # 📉 Stop-Loss Order
-        # sl_order = exchange.create_order(
-        #     symbol=symbol,
-        #     type='limit',
-        #     side=close_side,
-        #     amount=amount,
-        #     price=sl_price,
-        #     params={
-        #          'reduceOnly': True,
-        #             'stop': True,
-        #             'stopPrice': sl_price,
-        #             'triggerPrice': sl_price,
-        #             'triggerType': 'last',
-        #     }
-        # )
-
-
-        print(f"✅ TP Order: {tp_order}")
-        print(f"✅ SL Order: {sl_order}")
-
-        return {
-            'status': 'success',
-            'entry_order': entry_order,
-            'tp_order': tp_order,
-            'sl_order': sl_order
-        }
+        if tp_sl_result['status'] != 'success':
+            print(f"❌ TP/SL placement failed: {tp_sl_result['message']}")
+        else:
+            print("📈 TP and 📉 SL orders successfully placed.")
+            return {
+                    'status': 'success',
+                    'entry_order': entry_order,
+                    'tp_order': entry_order['tp_order'],
+                    'sl_order': entry_order['sl_order']
+                }
 
     except Exception as e:
         return {'status': 'error', 'message': str(e)}
+
+
+def place_tp_sl_orders(exchange, symbol, side, amount, tp_price, sl_price):
+    close_side = 'sell' if side == 'buy' else 'buy'
+
+    try:
+        # 📈 Take-Profit Order (limit reduce-only)
+        tp_order = exchange.create_order(
+            symbol=symbol,
+            type='limit',
+            side=close_side,
+            amount=amount,
+            price=tp_price,
+            params={
+                'reduceOnly': True,
+
+            }
+        )
+
+        # # 📉 Stop-Loss Order (stop-market reduce-only)
+        # sl_order = exchange.create_order(
+        #     symbol=symbol,
+        #     type='limit',  # ✅ Stop-limit (not stop-market)
+        #     side=close_side,
+        #     amount=amount,
+        #     price=sl_price,  # Actual order price after trigger
+        #     params={
+        #         'reduceOnly': True,
+        #         'stop': True,
+        #         'stopPrice': sl_price,     # ✅ Trigger level
+        #         'triggerPrice': sl_price,  # ✅ Required duplicate
+        #         'triggerType': 'last'      # Or 'mark', depends on your preference
+        #     }
+        # )
+
+        sl_order = exchange.create_order(
+            symbol=symbol,
+            type='limit',  # stop-limit order
+            side='sell',   # or 'buy' if closing a short
+            amount=amount,
+            price=sl_price,  # order execution price once stop triggers
+            params={
+                'stop': 'down',                 # 'down' for stop-sell (long SL), 'up' for stop-buy (short SL)
+                'stopPrice': sl_price, # trigger level
+                'reduceOnly': True,
+                'triggerType': 'last'          # or 'mark' depending on your preference
+            }
+        )
+
+        print("✅ TP and SL orders placed.")
+        return {
+            'tp_order': tp_order,
+            'sl_order': sl_order,
+            'status': 'success'
+        }
+
+    except Exception as e:
+        return {'status': 'error', 'message': f"Failed to place TP/SL orders: {str(e)}"}

@@ -27,11 +27,12 @@ def get_decimal_places(value):
     if isinstance(value, int):
         return 0
     elif isinstance(value, float):
-        str_val = f"{value:.8f}".rstrip('0')  # limit to 8 decimals
+        if value == 0:
+            return 10  # default fallback for zero
+        str_val = f"{value:.12f}".rstrip('0')  # support very small floats
         if '.' in str_val:
-            return len(str_val.split('.')[1])
-    return 0
-
+            return max(len(str_val.split('.')[1]), 6)  # ensure minimum 6 decimals
+    return 6  # fallback default
 
 def calculate_mas(df):
     df['ma10'] = SMAIndicator(df['close'], window=10).sma_indicator()
@@ -144,21 +145,29 @@ def calculate_trade_levels(price, direction, df, start_idx, strategy_type="trend
 
     atr = df['ATR'].iloc[start_idx]
 
-    # Fallback if ATR isn't usable
     if pd.isna(atr) or atr == 0:
-        atr = price * 0.005  # 0.5% of price as fallback
-        print(f"⚠️ Using fallback ATR at index {start_idx}: {atr:.5f}")
+        atr = price * 0.005
+        print(f"⚠️ Using fallback ATR at index {start_idx}: {atr:.10f}")
 
-    # Adjust TP/SL distances depending on the strategy
     if strategy_type == "range":
-        atr_multiplier_sl = 1.2   # tighter stop loss
-        atr_multiplier_tp = 1.5   # tighter take profit
-    else:  # trend strategy
+        atr_multiplier_sl = 1.2
+        atr_multiplier_tp = 1.5
+    else:
         atr_multiplier_sl = 2.0
         atr_multiplier_tp = 2.5
 
     sl_distance = atr * atr_multiplier_sl
     tp_distance = atr * atr_multiplier_tp
+
+    # Determine decimal places based on price size
+    if price < 0.01:
+        precision = 8
+    elif price < 1:
+        precision = 6
+    elif price < 100:
+        precision = 4
+    else:
+        precision = 2
 
     if direction == 'long':
         tp = price + tp_distance
@@ -168,9 +177,9 @@ def calculate_trade_levels(price, direction, df, start_idx, strategy_type="trend
         sl = price + sl_distance
 
     return {
-        'entry': round(price, 4),
-        'take_profit': round(tp, 4),
-        'stop_loss': round(sl, 4)
+        'entry': round(price, precision),
+        'take_profit': round(tp, precision),
+        'stop_loss': round(sl, precision)
     }
 
 

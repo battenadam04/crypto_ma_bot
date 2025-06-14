@@ -3,14 +3,16 @@ import pandas as pd
 import requests
 import time
 import os
+import json
 from datetime import datetime,timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor
 import threading
 
+
 from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
 from strategies.simulate_trades import run_backtest
 from utils.utils import (
-    calculate_mas, check_long_signal, check_short_signal,
+    add_atr_column, calculate_mas, check_long_signal, check_short_signal,
     calculate_trade_levels,is_ranging, check_range_trade, is_near_resistance
 )
 
@@ -19,6 +21,8 @@ from utils.kuCoinUtils import (
     place_futures_order,can_place_order
 )
 
+
+BACKTEST_STATE_FILE = "last_backtest.json"
 
 # Global flag
 can_trade_event = threading.Event()
@@ -76,35 +80,36 @@ def log_event(text):
 
 
 def handle_trade(symbol, direction, df, trend_confirmed, strategy_type="trend"):
-
-    entry_price = df.iloc[-1]['close']
-    levels = calculate_trade_levels(entry_price, direction, df, strategy_type)
-    side = 'buy' if direction == 'long' else 'sell'
-
-    print(f"💰 starting kucoin trade.")
-    trade_result = place_futures_order(
-            exchange=kucoin_futures,
-            symbol=symbol,
-            side=side,
-            usdt_amount=3,
-            tp_price=levels['take_profit'],
-            sl_price=levels['stop_loss'],
-            leverage=10
-        )
-    print(f"🔍 KuCoin trade results:\n{trade_result}")
-    status = trade_result.get('status', 'unknown')
-    message = (
-            f"{'📈 LONG' if direction == 'long' else '📉 SHORT'} SIGNAL for {symbol} ({TIMEFRAME})\n"
-            f"Confirmed by 15m {'up' if direction == 'long' else 'down'}trend\n\n"
-            f" Entry: {levels['entry']}\n"
-            f"🎯 TP: {levels['take_profit']}\n"
-            f"🛑 SL: {levels['stop_loss']}\n"
-            f"⚙️ Trade Status: {status}"
-        )
-    send_telegram(message)
-     #send_telegram(message, image_path=path)
-    log_event(f"Trade: {message}")
-
+    try:
+        entry_price = df.iloc[-1]['close']
+        df = add_atr_column(df)
+        levels = calculate_trade_levels(entry_price, direction, df, len(df)-1, strategy_type)
+        side = 'buy' if direction == 'long' else 'sell'
+        print(f"💰 starting kucoin trade.")
+        trade_result = place_futures_order(
+                exchange=kucoin_futures,
+                symbol=symbol,
+                side=side,
+                usdt_amount=1,
+                tp_price=levels['take_profit'],
+                sl_price=levels['stop_loss'],
+                leverage=10
+            )
+        print(f"🔍 KuCoin trade results:\n{trade_result}")
+        status = trade_result.get('status', 'unknown')
+        message = (
+                f"{'📈 LONG' if direction == 'long' else '📉 SHORT'} SIGNAL for {symbol} ({TIMEFRAME})\n"
+                f"Confirmed by 15m {'up' if direction == 'long' else 'down'}trend\n\n"
+                f" Entry: {levels['entry']}\n"
+                f"🎯 TP: {levels['take_profit']}\n"
+                f"🛑 SL: {levels['stop_loss']}\n"
+                f"⚙️ Trade Status: {status}"
+            )
+        send_telegram(message)
+        #send_telegram(message, image_path=path)
+        log_event(f"Trade: {message}")
+    except Exception as e:
+        log_event(f"❌ Error in handle_trade for {symbol}: {e}")
 
 def process_pair(symbol):
     # Wait for global trade permission
@@ -116,7 +121,7 @@ def process_pair(symbol):
             log_event(f"⚠️ Skipping {symbol} — insufficient lower timeframe data.")
             return
         lower_df = calculate_mas(lower_df)
-
+ 
         now = time.time()
         if symbol not in higher_timeframe_cache or now - higher_timeframe_cache[symbol]['timestamp'] > 900:
             higher_df = fetch_data(symbol, '15m')
@@ -133,6 +138,7 @@ def process_pair(symbol):
 
             #and trend_down - add back to each IF
             #and not is_near_resistance(higher_df)
+            #check_long_signal(lower_df) and trend_up
         if check_long_signal(lower_df) and trend_up:
             handle_trade(symbol, 'long', lower_df, trend_up,strategy_type="trend")
         elif check_short_signal(lower_df) and trend_down:
@@ -160,6 +166,7 @@ def main():
         log_event("⏳ Running daily backtest...")
         filtered_pairs = run_backtest()
         last_backtest_time = now
+        #save_last_backtest_time(now)
         log_event(f"✅ Backtest complete. {len(filtered_pairs)} pairs selected.")
 
     with ThreadPoolExecutor(max_workers=5) as executor:
