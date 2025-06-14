@@ -71,7 +71,7 @@ def fetch_data(pair, timeframe='1m', days=7):
 
 
 
-def check_trade_outcome(df, start_idx, direction, entry_price, max_lookahead=100):
+def check_trade_outcome(df, start_idx, direction, entry_price, max_lookahead=50):
     df = add_atr_column(df, period=7)
     levels = calculate_trade_levels(entry_price, direction, df, start_idx)
     tp, sl = levels['take_profit'], levels['stop_loss']
@@ -123,7 +123,7 @@ def simulate_combined_strategy(pair, df):
         )
 
             #and not is_near_resistance(slice_df)
-        if check_long_signal(slice_df) and trend_up:
+        if check_long_signal(slice_df):
                 result = check_trade_outcome(df, i, 'long', entry_price)
                 strategy_used.append('ma')
                 if result == 'win':
@@ -132,7 +132,7 @@ def simulate_combined_strategy(pair, df):
                     long_losses += 1
                 else:
                     long_none += 1
-        elif check_short_signal(slice_df) and trend_down :
+        elif check_short_signal(slice_df):
                 result = check_trade_outcome(df, i, 'short', entry_price)
                 strategy_used.append('ma')
                 if result == 'win':
@@ -192,10 +192,10 @@ def run_backtest():
         try:
             symbol = pair[0]
             df = fetch_data(symbol, '1m', days=7)
-            print(f"CHECKING BACKTESTDF:{pair,len(df)}" )
+            #print(f"CHECKING BACKTESTDF:{pair,len(df)}" )
             if len(df) > 300:
                 result = simulate_combined_strategy(pair, df)
-                print(f"CHECKING BACKTEST: {result}")
+                #print(f"CHECKING BACKTEST: {result}")
                 if result['win_rate'] >= 55:
                     good_pairs.append(pair[0])
         except Exception as e:

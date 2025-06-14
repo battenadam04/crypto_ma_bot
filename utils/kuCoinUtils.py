@@ -102,7 +102,7 @@ def get_top_futures_tradable_pairs(exchange, quote='USDT', top_n=15, min_volume=
     print("⏳ Loading KuCoin Futures markets...")
     try:
         markets = exchange.load_markets()
-        print(f"✅ Loaded {len(markets)} markets.")
+        #print(f"✅ Loaded {len(markets)} markets.")
     except Exception as e:
         print("❌ Error loading markets:", e)
         return []

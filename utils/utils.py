@@ -92,22 +92,22 @@ def calculate_trade_levels(price, direction, df, start_idx, strategy_type="trend
 
     # ATR-based multipliers
     if strategy_type == "range":
-        atr_multiplier_sl = 1.5
-        atr_multiplier_tp = 2.0
+        atr_multiplier_sl = 1.2
+        atr_multiplier_tp = 1.5
     else:
-        atr_multiplier_sl = 2.5
-        atr_multiplier_tp = 3.5
+        atr_multiplier_sl = 2
+        atr_multiplier_tp = 2.5
 
     # Calculate ATR-based distances
     sl_distance = atr * atr_multiplier_sl
     tp_distance = atr * atr_multiplier_tp
 
     # 🛡️ Enforce minimum % moves for 10x leverage
-    min_sl_distance = price * 0.01  # 1% SL = ~10% capital loss
-    min_tp_distance = price * 0.02  # 2% TP = ~20% gain
+    # min_sl_distance = price * 0.005  # 1% SL = ~10% capital loss
+    # min_tp_distance = price * 0.01  # 2% TP = ~20% gain
 
-    sl_distance = max(sl_distance, min_sl_distance)
-    tp_distance = max(tp_distance, min_tp_distance)
+    # sl_distance = max(sl_distance, min_sl_distance)
+    # tp_distance = max(tp_distance, min_tp_distance)
 
     # Precision based on price
     if price < 0.01:
@@ -137,6 +137,8 @@ def is_near_support(df, buffer=0.01):
     """
     Returns True if the current price is near the support level within the given buffer percentage.
     """
+    df['support'] = df['low'].rolling(window=50).min()
+
     last = df.iloc[-1]
     support = last['support']
     price = last['close']
@@ -144,13 +146,15 @@ def is_near_support(df, buffer=0.01):
     # Near support means price is within buffer % above support level
     return price <= support * (1 + buffer)
 
-def is_near_resistance(df, threshold=0.01, lookback=50, buffer_multiplier=1.0):
+def is_near_resistance(df, threshold=0.01, lookback=20, buffer_multiplier=1.0):
     """
     Checks if the current price is near recent resistance with volatility-adjusted buffer.
     - threshold: percentage distance to consider "near"
     - lookback: number of past candles to define resistance level
     - buffer_multiplier: scales buffer zone based on ATR
     """
+    df['resistance'] = df['high'].rolling(window=50).max()
+    
     if len(df) < lookback + 1:
         return False  # not enough data
 
@@ -289,7 +293,7 @@ def check_long_signal(df, lookahead=10):
 
     # Combine conditions: crossover or continuation + momentum + alignment + bullish candle
     #  and not is_near_resistance(df)
-    if (crossover or continuation) and alignment and momentum and bullish_candle:
+    if (crossover or continuation) and alignment and momentum and bullish_candle and not is_near_resistance(df):
        # print(f"LONG SIGNAL TRIGGERED at {last['timestamp']}")
         return True
 
@@ -320,7 +324,7 @@ def check_short_signal(df, lookahead=10):
     # Avoid signals near support (you can define a function similar to `is_near_resistance`)
     # not_near_support = not is_near_support(df)  # You need to implement this function
 
-    if (crossover or continuation) and alignment and momentum and bearish_candle:
+    if (crossover or continuation) and alignment and momentum and bearish_candle and not is_near_support(df) :
        # print(f"SHORT SIGNAL TRIGGERED at {last['timestamp']}")
         return True
 
