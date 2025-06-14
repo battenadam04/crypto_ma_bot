@@ -165,17 +165,17 @@ def main():
     # Run backtest once every 24 hours or if filtered_pairs empty (first run)
     if not filtered_pairs or (now - last_backtest_time) > timedelta(days=1):
         log_event("⏳ Running daily backtest...")
-        #filtered_pairs = run_backtest()
+        filtered_pairs = run_backtest()
         last_backtest_time = now
         #save_last_backtest_time(now)
         log_event(f"✅ Backtest complete. {len(filtered_pairs)} pairs selected.")
-        test_pairs = [
-            'NEAR/USDT:USDT',
-            'PEPE/USDT:USDT',
-            'TRX/USDT:USDT'
-        ]
+        # test_pairs = [
+        #     'NEAR/USDT:USDT',
+        #     'PEPE/USDT:USDT',
+        #     'TRX/USDT:USDT'
+        # ]
 
-    for pair in test_pairs:
+    for pair in filtered_pairs:
         process_pair(pair)
 
 
