@@ -318,9 +318,9 @@ def check_short_signal(df, lookahead=10):
     bearish_candle = last['close'] < last['open']
 
     # Avoid signals near support (you can define a function similar to `is_near_resistance`)
-    not_near_support = not is_near_support(df)  # You need to implement this function
+    # not_near_support = not is_near_support(df)  # You need to implement this function
 
-    if (crossover or continuation) and alignment and momentum and bearish_candle and not_near_support:
+    if (crossover or continuation) and alignment and momentum and bearish_candle:
        # print(f"SHORT SIGNAL TRIGGERED at {last['timestamp']}")
         return True
 
