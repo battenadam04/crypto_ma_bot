@@ -97,13 +97,14 @@ def handle_trade(symbol, direction, df, trend_confirmed, strategy_type="trend"):
             )
         print(f"🔍 KuCoin trade results:\n{trade_result}")
         status = trade_result.get('status', 'unknown')
+        error = trade_result.get('message', 'unknown')
         message = (
                 f"{'📈 LONG' if direction == 'long' else '📉 SHORT'} SIGNAL for {symbol} ({TIMEFRAME})\n"
                 f"Confirmed by 15m {'up' if direction == 'long' else 'down'}trend\n\n"
                 f" Entry: {levels['entry']}\n"
                 f"🎯 TP: {levels['take_profit']}\n"
                 f"🛑 SL: {levels['stop_loss']}\n"
-                f"⚙️ Trade Status: {status}"
+                f"⚙️ Trade Status: {status, error}"
             )
         send_telegram(message)
         #send_telegram(message, image_path=path)
@@ -139,7 +140,7 @@ def process_pair(symbol):
             #and trend_down - add back to each IF
             #and not is_near_resistance(higher_df)
             #check_long_signal(lower_df) and trend_up
-        if True:
+        if check_long_signal(lower_df) and trend_up:
             handle_trade(symbol, 'long', lower_df, trend_up,strategy_type="trend")
         elif check_short_signal(lower_df) and trend_down:
             handle_trade(symbol, 'short', lower_df, trend_down, strategy_type="trend")
@@ -164,13 +165,18 @@ def main():
     # Run backtest once every 24 hours or if filtered_pairs empty (first run)
     if not filtered_pairs or (now - last_backtest_time) > timedelta(days=1):
         log_event("⏳ Running daily backtest...")
-        filtered_pairs = run_backtest()
+        #filtered_pairs = run_backtest()
         last_backtest_time = now
         #save_last_backtest_time(now)
         log_event(f"✅ Backtest complete. {len(filtered_pairs)} pairs selected.")
+        test_pairs = [
+            'NEAR/USDT:USDT',
+            'PEPE/USDT:USDT',
+            'TRX/USDT:USDT'
+        ]
 
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        executor.map(process_pair, filtered_pairs)
+    for pair in test_pairs:
+        process_pair(pair)
 
 
 if __name__ == '__main__':

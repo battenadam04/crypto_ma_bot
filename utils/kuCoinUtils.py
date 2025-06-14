@@ -273,16 +273,26 @@ def place_futures_order(exchange, symbol, side, usdt_amount, tp_price, sl_price,
 
         order_id = entry_order['id']
 
+        print(f"❌ CHECK ORDER ID BEFORE FETCHING: {entry_order}")
         # 🕒 Poll for order fill
-        for _ in range(15):
-            order_status = exchange.fetch_order(order_id, symbol)
-            if order_status['status'] == 'closed':
-                break
-            time.sleep(1)
+        max_wait_seconds = 100
+        poll_interval = 1
+
+        for _ in range(max_wait_seconds):
+            try:
+                order_status = exchange.fetch_order(order_id, symbol)
+                if order_status['status'] == 'closed':  # or 'done' depending on exchange
+                    print(f"✅ Entry order {order_id} filled.")
+                    break
+                else:
+                    print(f"⏳ Waiting for order {order_id} to fill, current status: {order_status['status']}")
+            except Exception as e:
+                print(f"❌ Error fetching order status: {e}")
+            time.sleep(poll_interval)
         else:
             return {'status': 'error', 'message': 'Entry order not filled in time'}
-        time.sleep(20)
 
+        print(f"❌ CHECK ORDER STATUS BEFORE TP/SL: {order_status}")
         tp_sl_result = place_tp_sl_orders(exchange, symbol, side, amount, tp_price, sl_price)
 
         if tp_sl_result['status'] != 'success':
@@ -307,43 +317,32 @@ def place_tp_sl_orders(exchange, symbol, side, amount, tp_price, sl_price):
         # 📈 Take-Profit Order (limit reduce-only)
         tp_order = exchange.create_order(
             symbol=symbol,
-            type='limit',
+            type='market',
             side=close_side,
             amount=amount,
             price=tp_price,
             params={
                 'reduceOnly': True,
+                'takeProfitPrice': tp_price,
+                'stopPriceType': 'TP'
 
             }
         )
 
         # # 📉 Stop-Loss Order (stop-market reduce-only)
-        # sl_order = exchange.create_order(
-        #     symbol=symbol,
-        #     type='limit',  # ✅ Stop-limit (not stop-market)
-        #     side=close_side,
-        #     amount=amount,
-        #     price=sl_price,  # Actual order price after trigger
-        #     params={
-        #         'reduceOnly': True,
-        #         'stop': True,
-        #         'stopPrice': sl_price,     # ✅ Trigger level
-        #         'triggerPrice': sl_price,  # ✅ Required duplicate
-        #         'triggerType': 'last'      # Or 'mark', depends on your preference
-        #     }
-        # )
-
         sl_order = exchange.create_order(
             symbol=symbol,
-            type='limit',  # stop-limit order
-            side='sell',   # or 'buy' if closing a short
+            type='market',  # stop-limit order
+            side=close_side,   # or 'buy' if closing a short
             amount=amount,
             price=sl_price,  # order execution price once stop triggers
             params={
-                'stop': 'down',                 # 'down' for stop-sell (long SL), 'up' for stop-buy (short SL)
+                'stop': 'down' if close_side == 'sell' else 'up',            # 'down' for stop-sell (long SL), 'up' for stop-buy (short SL)
                 'stopPrice': sl_price, # trigger level
                 'reduceOnly': True,
-                'triggerType': 'last'          # or 'mark' depending on your preference
+                "stopType": "loss",
+                #'stopPriceType': 'SL'
+                
             }
         )
 
