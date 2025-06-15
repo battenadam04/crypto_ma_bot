@@ -187,7 +187,7 @@ def main():
         # ]
 
         # from running backtest manually and updating here as server blocking api coingecko
-        generated_pairs = ['ONDO/USDT:USDT', 'ARB/USDT:USDT']
+        generated_pairs = ['XRP/USDT:USDT', 'ARB/USDT:USDT', 'WLD/USDT:USDT']
 
     for pair in generated_pairs:
         process_pair(pair)
