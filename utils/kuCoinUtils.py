@@ -251,10 +251,10 @@ def place_futures_order(exchange, symbol, side, usdt_amount, tp_price, sl_price,
         # Fetch balance
         balance = exchange.fetch_balance({'type': 'future'})
         available = balance['free'].get('USDT', 0)
-        print(f"💰 Available USDT Balance (Futures): {available}")
+        print(f"💰 Available USDT Balance (Futures): {balance}")
 
-        if available < usdt_amount:
-            return {'status': 'error', 'message': f"Insufficient balance. Required: {usdt_amount}, Available: {available}"}
+        # if available < usdt_amount:
+        #     return {'status': 'error', 'message': f"Insufficient balance. Required: {usdt_amount}, Available: {available}"}
 
         # ✅ Place Entry Order
         entry_order = place_entry_order_with_fallback(exchange, symbol, side, amount, entry_price, leverage, tp_price, sl_price)
