@@ -281,7 +281,7 @@ def place_futures_order(exchange, symbol, side, usdt_amount, tp_price, sl_price,
         for _ in range(max_wait_seconds):
             try:
                 order_status = exchange.fetch_order(order_id, symbol)
-                if order_status['status'] == 'closed':  # or 'done' depending on exchange
+                if order_status['status'] == 'done':  # or 'done' depending on exchange
                     print(f"✅ Entry order {order_id} filled.")
                     break
                 else:
