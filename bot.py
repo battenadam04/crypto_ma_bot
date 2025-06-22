@@ -6,7 +6,7 @@ import time
 import os
 import json
 from datetime import datetime,timedelta, timezone
-from concurrent.futures import ThreadPoolExecutor
+#from concurrent.futures import ThreadPoolExecutor
 import threading
 
 
@@ -34,7 +34,6 @@ EXCHANGE = ccxt.kucoin()
 TIMEFRAME = '1m'
 MAX_OPEN_TRADES = 3
 MAX_LOSSES = 3
-PAIRS = get_top_futures_tradable_pairs(kucoin_futures, quote='USDT', top_n=8)
 higher_timeframe_cache = {}
 
 filtered_pairs = []
@@ -76,33 +75,36 @@ def send_telegram(text, image_path=None):
 
 def handle_trade(symbol, direction, df, trend_confirmed, strategy_type="trend"):
     try:
-        entry_price = df.iloc[-1]['close']
         df = add_atr_column(df)
-        levels = calculate_trade_levels(entry_price, direction, df, len(df)-1, strategy_type)
         side = 'buy' if direction == 'long' else 'sell'
-        print(f"💰 starting kucoin trade.")
+        log_event(f"💰 starting kucoin trade: {strategy_type}")
         trade_result = place_futures_order(
                 exchange=kucoin_futures,
+                df=df,
                 symbol=symbol,
                 side=side,
-                usdt_amount=1,
-                tp_price=levels['take_profit'],
-                sl_price=levels['stop_loss'],
-                leverage=10
+                usdt_amount=0.9,
+                leverage=10,
+                trend_confirmed=trend_confirmed
             )
-        print(f"🔍 KuCoin trade results:\n{trade_result}")
+        log_event(f"🔍 KuCoin trade results:\n{trade_result}")
         status = trade_result.get('status', 'unknown')
         error = trade_result.get('message', 'unknown')
+        filledEntry = trade_result.get('filled_entry', 'false')
+        tp_order = trade_result.get('tp_order')
+        sl_order = trade_result.get('sl_order')
+
+        tp = tp_order.get('id') if tp_order else 'N/A'
+        sl = sl_order.get('id') if sl_order else 'N/A'
         message = (
                 f"{'📈 LONG' if direction == 'long' else '📉 SHORT'} SIGNAL for {symbol} ({TIMEFRAME})\n"
                 f"Confirmed by 15m {'up' if direction == 'long' else 'down'}trend\n\n"
-                f" Entry: {levels['entry']}\n"
-                f"🎯 TP: {levels['take_profit']}\n"
-                f"🛑 SL: {levels['stop_loss']}\n"
+                f" Filled Entry: {filledEntry}\n"
+                f"🎯 TP: {tp}\n"
+                f"🛑 SL: {sl}\n"
                 f"⚙️ Trade Status: {status, error}"
             )
         send_telegram(message)
-        #send_telegram(message, image_path=path)
         log_event(f"Trade: {message}")
     except Exception as e:
         log_event(f"❌ Error in handle_trade for {symbol}: {e}")
@@ -148,9 +150,6 @@ def process_pair(symbol):
         lower_df['support'] = lower_df['low'].rolling(window=50).min()
         lower_df['resistance'] = lower_df['high'].rolling(window=50).max()
 
-            #and trend_down - add back to each IF
-            #and not is_near_resistance(higher_df)
-            #check_long_signal(lower_df) and trend_up
         if check_long_signal(lower_df) and trend_up:
             handle_trade(symbol, 'long', lower_df, trend_up,strategy_type="trend")
         elif check_short_signal(lower_df) and trend_down:
@@ -166,7 +165,7 @@ def process_pair(symbol):
         else:
             log_event(f"✅ No confirmed signal for {symbol} this cycle.")
     else:
-        print(f"Max open order already exists. Skipping new order.")
+        log_event(f"Max open order already exists. Skipping new order.")
 
 
 def main():
@@ -187,7 +186,7 @@ def main():
         # ]
 
         # from running backtest manually and updating here as server blocking api coingecko
-        generated_pairs = ['SUI/USDT:USDT', 'XLM/USDT:USDT', 'HBAR/USDT:USDT', 'KAS/USDT:USDT', 'ARB/USDT:USDT']
+        generated_pairs = ['DOGE/USDT:USDT', 'HBAR/USDT:USDT', 'ONDO/USDT:USDT', 'KAS/USDT:USDT', 'ARB/USDT:USDT']
 
     for pair in generated_pairs:
         process_pair(pair)

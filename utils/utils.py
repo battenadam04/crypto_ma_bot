@@ -60,20 +60,6 @@ def confirm_trend(df, last_idx, ma_key, condition_func, lookahead):
     return False
 
 
-
-# def save_chart(df, symbol):
-#     df = df.copy()
-#     df.index = pd.to_datetime(df['timestamp'])
-#     add_plot = [
-#         mpf.make_addplot(df['ma10'], color='blue'),
-#         mpf.make_addplot(df['ma20'], color='orange'),
-#         mpf.make_addplot(df['ma50'], color='green')
-#     ]
-#     path = f'charts/{symbol.replace("/", "_")}.png'
-#     mpf.plot(df, type='candle', style='charles', addplot=add_plot, volume=True,
-#              title=f"{symbol} MA Crossover", savefig=path)
-#     return path
-
 def add_atr_column(df, period=7):
     df = df.copy()
     df['H-L'] = df['high'] - df['low']
@@ -85,35 +71,38 @@ def add_atr_column(df, period=7):
     return df
 
 def calculate_trade_levels(price, direction, df, start_idx, strategy_type="trend"):
+    if price is None or not isinstance(price, (int, float)):
+        raise ValueError(f"Invalid price passed to calculate_trade_levels: {price}")
+
+    if direction not in ["buy", "sell"]:
+        raise ValueError(f"Invalid direction: {direction}")
+
+    if start_idx >= len(df) or start_idx < 0:
+        raise IndexError(f"start_idx {start_idx} is out of range for DataFrame length {len(df)}")
+
     if 'ATR' not in df.columns:
         raise ValueError("ATR not computed. Call add_atr_column(df) first.")
 
     atr = df['ATR'].iloc[start_idx]
 
     if pd.isna(atr) or atr == 0:
-        atr = price * 0.005
+        atr = price * 0.003  # fallback ATR (0.3% of price)
         print(f"⚠️ Using fallback ATR at index {start_idx}: {atr:.10f}")
 
-    # ATR-based multipliers
-    if strategy_type == "range":
-        atr_multiplier_sl = 1.2
-        atr_multiplier_tp = 1.5
-    else:
-        atr_multiplier_sl = 2
-        atr_multiplier_tp = 2.5
+    # Strategy-specific configs
+    strategy_settings = {
+        "trend": {"atr_tp": 2.5, "atr_sl": 2.0, "min_tp_pct": 0.004, "min_sl_pct": 0.003},
+        "range": {"atr_tp": 1.5, "atr_sl": 1.2, "min_tp_pct": 0.003, "min_sl_pct": 0.002},
+        "scalp": {"atr_tp": 1.2, "atr_sl": 1.0, "min_tp_pct": 0.002, "min_sl_pct": 0.0015}
+    }
 
-    # Calculate ATR-based distances
-    sl_distance = atr * atr_multiplier_sl
-    tp_distance = atr * atr_multiplier_tp
+    config = strategy_settings.get(strategy_type, strategy_settings["trend"])
 
-    # 🛡️ Enforce minimum % moves for 10x leverage
-    # min_sl_distance = price * 0.005  # 1% SL = ~10% capital loss
-    # min_tp_distance = price * 0.01  # 2% TP = ~20% gain
+    # Calculate distances
+    sl_distance = max(atr * config["atr_sl"], price * config["min_sl_pct"])
+    tp_distance = max(atr * config["atr_tp"], price * config["min_tp_pct"])
 
-    # sl_distance = max(sl_distance, min_sl_distance)
-    # tp_distance = max(tp_distance, min_tp_distance)
-
-    # Precision based on price
+    # Precision logic
     if price < 0.01:
         precision = 8
     elif price < 1:
@@ -123,18 +112,41 @@ def calculate_trade_levels(price, direction, df, start_idx, strategy_type="trend
     else:
         precision = 2
 
+    # Compute levels (before rounding)
     if direction == 'long':
-        tp = price + tp_distance
-        sl = price - sl_distance
+        raw_tp = price + tp_distance
+        raw_sl = price - sl_distance
     else:
-        tp = price - tp_distance
-        sl = price + sl_distance
+        raw_tp = price - tp_distance
+        raw_sl = price + sl_distance
+
+    # Round levels
+    entry = round(price, precision)
+    tp = round(raw_tp, precision)
+    sl = round(raw_sl, precision)
+
+    # 🚨 Force stop-loss to be on the correct side of entry
+    if direction == 'long' and sl >= entry:
+        sl = round(entry - sl_distance, precision)
+    elif direction == 'short' and sl <= entry:
+        sl = round(entry + sl_distance, precision)
+
+    # Recalculate percentages for print
+    tp_pct = ((tp - entry) / entry) * 100
+    sl_pct = ((entry - sl) / entry) * 100 if direction == 'long' else ((sl - entry) / entry) * 100
+
+    # print(f"🎯 {strategy_type.upper()} trade:")
+    # print(f"• Entry: {entry}")
+    # print(f"• TP: {tp} ({tp_pct:.2f}%)")
+    # print(f"• SL: {sl} ({sl_pct:.2f}%)")
+    # print(f"• ATR: {atr:.6f}")
 
     return {
-        'entry': round(price, precision),
-        'take_profit': round(tp, precision),
-        'stop_loss': round(sl, precision)
+        'entry': entry,
+        'take_profit': tp,
+        'stop_loss': sl
     }
+
 
 
 def is_near_support(df, buffer=0.01):
@@ -228,20 +240,6 @@ def is_ranging(df, window=50, range_threshold=0.05, adx_threshold=25):
 
     return range_pct < range_threshold and adx_recent < adx_threshold
 
-# def check_range_trade(df):
-#     last = df.iloc[-1]
-
-#     buy_signal = (
-#         last['close'] <= last['support'] * 1.02 and  # Looser buffer
-#         last['rsi'] < 35
-#     )
-
-#     sell_signal = (
-#         last['close'] >= last['resistance'] * 0.98 and
-#         last['rsi'] > 65
-#     )
-    
-#     return buy_signal, sell_signal
 
 def check_range_trade(df):
     last = df.iloc[-1]
@@ -296,7 +294,7 @@ def check_long_signal(df, lookahead=10):
     # Combine conditions: crossover or continuation + momentum + alignment + bullish candle
     #  and not is_near_resistance(df)
     if (crossover or continuation) and alignment and momentum and bullish_candle and not is_near_resistance(df):
-        #log_event(f"LONG SIGNAL TRIGGERED at {last['timestamp']}")
+        log_event(f"LONG SIGNAL TRIGGERED at {last['timestamp']}")
         return True
 
     return False
@@ -327,7 +325,7 @@ def check_short_signal(df, lookahead=10):
     # not_near_support = not is_near_support(df)  # You need to implement this function
 
     if (crossover or continuation) and alignment and momentum and bearish_candle and not is_near_support(df) :
-        #log_event(f"SHORT SIGNAL TRIGGERED at {last['timestamp']}")
+        log_event(f"SHORT SIGNAL TRIGGERED at {last['timestamp']}")
         return True
 
     return False
