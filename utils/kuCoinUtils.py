@@ -279,7 +279,7 @@ def place_futures_order(exchange, df, symbol, side, usdt_amount, leverage=10, tr
             if tp_price < min_price or sl_price < min_price:
                 return {'status': 'error', 'message': f"TP/SL price too low. TP: {tp_price}, SL: {sl_price}, Min: {min_price}"}
 
-            tp_sl_result = place_tp_sl_orders(exchange, symbol, side, amount, tp_price, sl_price)
+            tp_sl_result = place_tp_sl_orders(exchange, symbol, side, amount, tp_price, sl_price, filled_price)
             if tp_sl_result['status'] == 'success':
                 print(f"✅ TP and SL successfully placed on attempt {attempt + 1}.")
                 return {
