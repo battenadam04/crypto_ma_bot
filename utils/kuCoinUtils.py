@@ -7,6 +7,8 @@ from utils.coinGeckoData import fetch_market_caps
 from utils.utils import calculate_trade_levels, get_decimal_places, log_event
 
 
+max_wait_seconds = 300
+poll_interval = 1
 
 EXCHANGE = ccxt.kucoin({
         'apiKey': KUCOIN_API_KEY,
@@ -233,7 +235,7 @@ def place_futures_order(exchange, df, symbol, side, usdt_amount, leverage=10, tr
         # Fetch balance
         balance = exchange.fetch_balance({'type': 'contract'})
         available = balance['free'].get('USDT', 0)
-        print(f"💰 Available USDT Balance (Futures): {balance}")
+        #print(f"💰 Available USDT Balance (Futures): {balance}")
 
         # if available < usdt_amount:
         #     return {'status': 'error', 'message': f"Insufficient balance. Required: {usdt_amount}, Available: {available}"}
@@ -242,12 +244,10 @@ def place_futures_order(exchange, df, symbol, side, usdt_amount, leverage=10, tr
 
         entry_order = place_entry_order_with_fallback(exchange, symbol, side, amount, entry_price, leverage)
 
-        if not entry_order or not isinstance(entry_order, dict) or 'id' not in entry_order:
-            return {'status': 'error', 'message': f"Entry order failed: {entry_order}"}
+        # if not entry_order or not isinstance(entry_order, dict) or 'id' not in entry_order:
+        #     return {'status': 'error', 'message': f"Entry order failed: {entry_order}"}
 
         # 🕒 Poll for order fill
-        max_wait_seconds = 300
-        poll_interval = 1
         filled_price = None
 
         for _ in range(max_wait_seconds):
@@ -273,8 +273,8 @@ def place_futures_order(exchange, df, symbol, side, usdt_amount, leverage=10, tr
 
             levels = calculate_trade_levels(filled_price, side, df, len(df)-1, trend_confirmed)
                                 # Round TP/SL
-            tp_price = round(levels['tp_price'], price_precision)
-            sl_price = round(levels['sl_price'], price_precision)
+            tp_price = round(levels['take_profit'], price_precision)
+            sl_price = round(levels['stop_loss'], price_precision)
 
             if tp_price < min_price or sl_price < min_price:
                 return {'status': 'error', 'message': f"TP/SL price too low. TP: {tp_price}, SL: {sl_price}, Min: {min_price}"}
@@ -297,17 +297,37 @@ def place_futures_order(exchange, df, symbol, side, usdt_amount, leverage=10, tr
     except Exception as e:
         return {'status': 'error', 'message': f"Unexpected error: {str(e)}"}
 
-def place_tp_sl_orders(exchange, symbol, side, amount, tp_price, sl_price, max_retries=3, delay=1):
+import time
+
+def place_tp_sl_orders(exchange, symbol, side, amount, tp_price, sl_price, filled_price, max_retries=3, delay=1, poll_interval=2, max_poll_time=60):
     close_side = 'sell' if side == 'buy' else 'buy'
-    tp_order = None
-    sl_order = None
 
-    # 🔁 Retry logic
+    def is_valid_tp_sl(tp, sl, filled, market, side):
+        if side == 'buy':
+            if tp <= filled or sl >= filled or sl >= market:
+                return False
+        else:  # sell
+            if tp >= filled or sl <= filled or sl <= market:
+                return False
+        return True
+
     for attempt in range(1, max_retries + 1):
-        try:
-            print(f"🔁 Attempt {attempt} to place TP/SL orders...")
+        print(f"🔁 Order attempt {attempt}: Creating TP/SL orders...")
 
-            # 📈 TP: Limit order with reduceOnly
+        try:
+            # Get current market price to validate SL placement
+            ticker = exchange.fetch_ticker(symbol)
+            last_price = ticker.get('last')
+            if last_price is None:
+                raise Exception("Couldn't fetch current market price.")
+
+            # 🚨 Validate TP/SL logic before placing
+            if not is_valid_tp_sl(tp_price, sl_price, filled_price, last_price, side):
+                print(f"🚫 Invalid TP/SL for market conditions. Skipping order.")
+                time.sleep(delay)
+                continue
+
+            # ✅ Place TP (limit order)
             tp_order = exchange.create_order(
                 symbol=symbol,
                 type='limit',
@@ -315,12 +335,11 @@ def place_tp_sl_orders(exchange, symbol, side, amount, tp_price, sl_price, max_r
                 amount=amount,
                 price=tp_price,
                 params={
-                    'reduceOnly': True,
-                    'stopPriceType': 'TP'  # optional, exchange-dependent
+                    'reduceOnly': True
                 }
             )
 
-            # 📉 SL: Stop-market order with stopPrice
+            # ✅ Place SL (stop-market order)
             sl_order = exchange.create_order(
                 symbol=symbol,
                 type='market',
@@ -334,67 +353,61 @@ def place_tp_sl_orders(exchange, symbol, side, amount, tp_price, sl_price, max_r
                 }
             )
 
-            # ✅ Check both orders exist and return IDs
-            if not tp_order or not sl_order or 'id' not in tp_order or 'id' not in sl_order:
-                raise Exception("Missing TP or SL order ID.")
+            tp_id = tp_order['id']
+            sl_id = sl_order['id']
+            print(f"✅ TP/SL orders successfully placed.")
+            print(f"• TP ID: {tp_id}, Price: {tp_price}")
+            print(f"• SL ID: {sl_id}, Stop Price: {sl_price}")
 
-            print(f"✅ TP/SL orders placed. TP ID: {tp_order['id']}, SL ID: {sl_order['id']}")
+            # 🔄 Step 2: Poll for one of the orders to fill
+            start_time = time.time()
+            while time.time() - start_time < max_poll_time:
+                tp_check = exchange.fetch_order(tp_id, symbol)
+                sl_check = exchange.fetch_order(sl_id, symbol)
+
+                print(f"🔍 TP Status: {tp_check.get('status')}, SL Status: {sl_check.get('status')}")
+
+                if tp_check.get('status') == 'closed':
+                    filled_tp_price = tp_check.get('average') or tp_check.get('price')
+                    print(f"🎯 TP filled at {filled_tp_price}")
+                    return {
+                        'tp_order': tp_check,
+                        'sl_order': sl_check,
+                        'status': 'tp_filled',
+                        'filled_price': filled_tp_price
+                    }
+
+                if sl_check.get('status') == 'closed':
+                    filled_sl_price = sl_check.get('average') or sl_check.get('price')
+                    print(f"🛑 SL filled at {filled_sl_price}")
+                    return {
+                        'tp_order': tp_check,
+                        'sl_order': sl_check,
+                        'status': 'sl_filled',
+                        'filled_price': filled_sl_price
+                    }
+
+                print(f"⏳ Polling... waiting for TP or SL to fill (every {poll_interval}s)")
+                time.sleep(poll_interval)
+
+            # Timeout
+            print("⚠️ TP/SL orders not filled within polling window.")
             return {
-                'tp_order': tp_order,
-                'sl_order': sl_order,
-                'status': 'success'
+                'tp_order': tp_check,
+                'sl_order': sl_check,
+                'status': 'timeout',
+                'filled_price': None
             }
 
         except Exception as e:
-            print(f"❌ Error placing TP/SL orders (attempt {attempt}): {e}")
+            print(f"❌ Error placing TP/SL: {e}")
             time.sleep(delay)
 
+    # All retries failed
+    print("❌ Max retries reached. TP/SL placement failed.")
     return {
+        'tp_order': None,
+        'sl_order': None,
         'status': 'error',
-        'message': 'Failed to place TP/SL orders after retries'
+        'filled_price': None
     }
-
-
-# def place_tp_sl_orders(exchange, symbol, side, amount, tp_price, sl_price):
-#     close_side = 'sell' if side == 'buy' else 'buy'
-
-#     try:
-#         # 📈 Take-Profit Order (limit reduce-only)
-#         tp_order = exchange.create_order(
-#             symbol=symbol,
-#             type='market',
-#             side=close_side,
-#             amount=amount,
-#             price=tp_price,
-#             params={
-#                 'reduceOnly': True,
-#                 'takeProfitPrice': tp_price,
-#                 'stopPriceType': 'TP'
-
-#             }
-#         )
-
-#         # # 📉 Stop-Loss Order (stop-market reduce-only)
-#         sl_order = exchange.create_order(
-#             symbol=symbol,
-#             type='market',  # stop-limit order
-#             side=close_side,   # or 'buy' if closing a short
-#             amount=amount,
-#             price=sl_price,  # order execution price once stop triggers
-#             params={
-#                 'stop': 'down' if close_side == 'sell' else 'up',            # 'down' for stop-sell (long SL), 'up' for stop-buy (short SL)
-#                 'stopPrice': sl_price, # trigger level
-#                 'reduceOnly': True,
-#                 "stopType": "loss",         
-#             }
-#         )
-
-#         log_event("✅ TP and SL orders placed.")
-#         return {
-#             'tp_order': tp_order,
-#             'sl_order': sl_order,
-#             'status': 'success'
-#         }
-
-#     except Exception as e:
-#         return {'status': 'error', 'message': f"Failed to place TP/SL orders: {str(e)}"}

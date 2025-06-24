@@ -13,8 +13,7 @@ import threading
 from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
 from strategies.simulate_trades import run_backtest
 from utils.utils import (
-    add_atr_column, calculate_mas, check_long_signal, check_short_signal,
-    calculate_trade_levels,is_ranging, check_range_trade, log_event
+    add_atr_column, calculate_mas, check_long_signal, check_short_signal,is_ranging, check_range_trade, log_event
 )
 
 from utils.kuCoinUtils import (
@@ -186,7 +185,7 @@ def main():
         # ]
 
         # from running backtest manually and updating here as server blocking api coingecko
-        generated_pairs = ['DOGE/USDT:USDT', 'HBAR/USDT:USDT', 'ONDO/USDT:USDT', 'KAS/USDT:USDT', 'ARB/USDT:USDT']
+        generated_pairs = ['SOL/USDT:USDT', 'ONDO/USDT:USDT', 'KAS/USDT:USDT', 'HBAR/USDT:USDT']
 
     for pair in generated_pairs:
         process_pair(pair)
@@ -195,5 +194,5 @@ def main():
 if __name__ == '__main__':
     while True:
         main()
-        log_event("🕒 Waiting 1 minute until next cycle...\n")
-        time.sleep(60)
+        log_event("🕒 Waiting 5 minutes until next cycle...\n")
+        time.sleep(300)
