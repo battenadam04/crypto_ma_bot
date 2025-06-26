@@ -341,6 +341,10 @@ def place_futures_order(exchange, df, symbol, side, usdt_amount, leverage=10, st
         return {'status': 'error', 'message': f"Unexpected error: {str(e)}"}
 
 
+def is_order_valid(order):
+    if not order:
+        return False
+    return order['status'] in ['open', 'triggered', 'active', 'new', 'live']
 
 def place_tp_sl_orders(exchange, symbol, side, amount, tp_price, sl_price, filled_price, max_retries=3, delay=1, poll_interval=2, max_poll_time=60):
     close_side = 'sell' if side == 'buy' else 'buy'
@@ -386,9 +390,11 @@ def place_tp_sl_orders(exchange, symbol, side, amount, tp_price, sl_price, fille
                 type='market',
                 side=close_side,
                 amount=amount,
-                price=tp_price,
                 params={
-                    'reduceOnly': True
+                    'stop': 'up',
+                    'reduceOnly': True,
+                    'stopPrice': tp_price,
+                    'stopPriceType': 'TP'
                 }
             )
 
@@ -399,7 +405,7 @@ def place_tp_sl_orders(exchange, symbol, side, amount, tp_price, sl_price, fille
                 side=close_side,
                 amount=amount,
                 params={
-                    'stop': 'down' if close_side == 'sell' else 'up',
+                    'stop': 'down',
                     'stopPrice': sl_price,
                     'reduceOnly': True,
                     'stopType': 'loss',
@@ -420,7 +426,7 @@ def place_tp_sl_orders(exchange, symbol, side, amount, tp_price, sl_price, fille
 
                 print(f"🔍 TP Status: {tp_check.get('status')}, SL Status: {sl_check.get('status')}")
 
-                if tp_check.get('status') == 'closed':
+                if is_order_valid(tp_check.get('status')):
                     filled_tp_price = tp_check.get('average') or tp_check.get('price')
                     print(f"🎯 TP filled at {filled_tp_price}")
                     return {
@@ -430,7 +436,7 @@ def place_tp_sl_orders(exchange, symbol, side, amount, tp_price, sl_price, fille
                         'filled_price': filled_tp_price
                     }
 
-                if sl_check.get('status') == 'closed':
+                if is_order_valid(sl_check.get('status')):
                     filled_sl_price = sl_check.get('average') or sl_check.get('price')
                     print(f"🛑 SL filled at {filled_sl_price}")
                     return {
