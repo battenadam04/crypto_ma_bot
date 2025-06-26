@@ -93,8 +93,9 @@ def handle_trade(symbol, direction, df, trend_confirmed, strategy_type="trend"):
         tp_order = trade_result.get('tp_order')
         sl_order = trade_result.get('sl_order')
 
-        tp = tp_order.get('id') if tp_order else 'N/A'
-        sl = sl_order.get('id') if sl_order else 'N/A'
+        tp = tp_order.get('id') if isinstance(tp_order, dict) else tp_order if tp_order is not None else 'N/A'
+        sl = sl_order.get('id') if isinstance(sl_order, dict) else sl_order if sl_order is not None else 'N/A'
+
         message = (
                 f"{'📈 LONG' if direction == 'long' else '📉 SHORT'} SIGNAL for {symbol} ({TIMEFRAME})\n"
                 f"Confirmed by 15m {'up' if direction == 'long' else 'down'}trend\n\n"
@@ -178,11 +179,6 @@ def main():
         last_backtest_time = now
         #save_last_backtest_time(now)
         #log_event(f"✅ Backtest complete. {len(filtered_pairs)} pairs selected.")
-        # test_pairs = [
-        #     'NEAR/USDT:USDT',
-        #     'PEPE/USDT:USDT',
-        #     'TRX/USDT:USDT'
-        # ]
 
         # from running backtest manually and updating here as server blocking api coingecko
         generated_pairs = ['SOL/USDT:USDT', 'ONDO/USDT:USDT', 'KAS/USDT:USDT', 'HBAR/USDT:USDT']
