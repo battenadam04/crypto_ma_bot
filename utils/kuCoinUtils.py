@@ -247,8 +247,8 @@ def place_futures_order(exchange, df, symbol, side, usdt_amount, leverage=10, st
         if not TRADING_SIGNALS_ONLY:
             entry_order = place_entry_order_with_fallback(exchange, symbol, side, amount, entry_price, leverage)
 
-            # if not entry_order or not isinstance(entry_order, dict) or 'id' not in entry_order:
-            #     return {'status': 'error', 'message': f"Entry order failed: {entry_order}"}
+            if not entry_order or not isinstance(entry_order, dict) or 'id' not in entry_order:
+                return {'status': 'error', 'message': f"Entry order failed: {entry_order}"}
 
             # 🕒 Poll for order fill
             filled_price = None
