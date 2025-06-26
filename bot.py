@@ -76,7 +76,7 @@ def handle_trade(symbol, direction, df, trend_confirmed, strategy_type="trend"):
     try:
         df = add_atr_column(df)
         side = 'buy' if direction == 'long' else 'sell'
-        log_event(f"💰 starting kucoin trade: {strategy_type}")
+        log_event(f"💰 starting kucoin trade: {strategy_type} for {direction}")
         trade_result = place_futures_order(
                 exchange=kucoin_futures,
                 df=df,

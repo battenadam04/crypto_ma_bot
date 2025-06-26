@@ -295,30 +295,30 @@ def place_futures_order(exchange, df, symbol, side, usdt_amount, leverage=10, tr
                     }
 
                 # ⏳ Timeout after 90 seconds
-                if time.time() - start_time > 200:
-                    print(f"⚠️ TP/SL placement window exceeded. Placing SL only for safety.")
-                    try:
-                        close_side = 'sell' if side == 'buy' else 'buy'
-                        fallback_sl = exchange.create_order(
-                            symbol=symbol,
-                            type='market',
-                            side=close_side,
-                            amount=amount,
-                            params={
-                                'stop': 'down' if close_side == 'sell' else 'up',
-                                'stopPrice': sl_price,
-                                'reduceOnly': True,
-                                'stopType': 'loss',
-                            }
-                        )
-                        return {
-                            'status': 'partial',
-                            'filled_entry': filled_price,
-                            'tp_order': None,
-                            'sl_order': fallback_sl
-                        }
-                    except Exception as e:
-                        return {'status': 'error', 'message': f"SL fallback failed: {e}"}
+                # if time.time() - start_time > 200:
+                #     print(f"⚠️ TP/SL placement window exceeded. Placing SL only for safety.")
+                #     try:
+                #         close_side = 'sell' if side == 'buy' else 'buy'
+                #         fallback_sl = exchange.create_order(
+                #             symbol=symbol,
+                #             type='market',
+                #             side=close_side,
+                #             amount=amount,
+                #             params={
+                #                 'stop': 'down' if close_side == 'sell' else 'up',
+                #                 'stopPrice': sl_price,
+                #                 'reduceOnly': True,
+                #                 'stopType': 'loss',
+                #             }
+                #         )
+                #         return {
+                #             'status': 'partial',
+                #             'filled_entry': filled_price,
+                #             'tp_order': None,
+                #             'sl_order': fallback_sl
+                #         }
+                #     except Exception as e:
+                #         return {'status': 'error', 'message': f"SL fallback failed: {e}"}
 
                 attempt += 1
                 print(f"🔁 Retry #{attempt} in 2 seconds...")

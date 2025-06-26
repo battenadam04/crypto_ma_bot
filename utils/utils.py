@@ -91,11 +91,25 @@ def calculate_trade_levels(price, direction, df, start_idx, strategy_type="trend
 
     # Strategy-specific configs
     strategy_settings = {
-        "trend": {"atr_tp": 2.5, "atr_sl": 2.0, "min_tp_pct": 0.004, "min_sl_pct": 0.003},
-        "range": {"atr_tp": 1.5, "atr_sl": 1.2, "min_tp_pct": 0.003, "min_sl_pct": 0.002},
-        "scalp": {"atr_tp": 1.2, "atr_sl": 1.0, "min_tp_pct": 0.002, "min_sl_pct": 0.0015}
+        "trend": {
+            "atr_tp": 3.5,
+            "atr_sl": 2.8,
+            "min_tp_pct": 0.006,
+            "min_sl_pct": 0.0045
+        },
+        "range": {
+            "atr_tp": 2.5,
+            "atr_sl": 2.0,
+            "min_tp_pct": 0.0045,
+            "min_sl_pct": 0.003
+        },
+        "scalp": {
+            "atr_tp": 2.0,
+            "atr_sl": 1.5,
+            "min_tp_pct": 0.003,
+            "min_sl_pct": 0.002
+        }
     }
-
     config = strategy_settings.get(strategy_type, strategy_settings["trend"])
 
     # Calculate distances
@@ -113,7 +127,7 @@ def calculate_trade_levels(price, direction, df, start_idx, strategy_type="trend
         precision = 2
 
     # Compute levels (before rounding)
-    if direction == 'long':
+    if direction == 'buy':
         raw_tp = price + tp_distance
         raw_sl = price - sl_distance
     else:
@@ -126,14 +140,14 @@ def calculate_trade_levels(price, direction, df, start_idx, strategy_type="trend
     sl = round(raw_sl, precision)
 
     # 🚨 Force stop-loss to be on the correct side of entry
-    if direction == 'long' and sl >= entry:
+    if direction == 'buy' and sl >= entry:
         sl = round(entry - sl_distance, precision)
-    elif direction == 'short' and sl <= entry:
+    elif direction == 'sell' and sl <= entry:
         sl = round(entry + sl_distance, precision)
 
     # Recalculate percentages for print
     tp_pct = ((tp - entry) / entry) * 100
-    sl_pct = ((entry - sl) / entry) * 100 if direction == 'long' else ((sl - entry) / entry) * 100
+    sl_pct = ((entry - sl) / entry) * 100 if direction == 'buy' else ((sl - entry) / entry) * 100
 
     # print(f"🎯 {strategy_type.upper()} trade:")
     # print(f"• Entry: {entry}")
