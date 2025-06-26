@@ -188,7 +188,7 @@ def place_entry_order_with_fallback(exchange, symbol, side, amount, entry_price,
             print(f"❌ Failed placing order: {e}")
             return None
 
-def place_futures_order(exchange, df, symbol, side, usdt_amount, leverage=10, trend_confirmed="range"):
+def place_futures_order(exchange, df, symbol, side, usdt_amount, leverage=10, strategy_type="range"):
     try:
         exchange.load_markets()
         market = exchange.market(symbol)
@@ -274,7 +274,7 @@ def place_futures_order(exchange, df, symbol, side, usdt_amount, leverage=10, tr
             attempt = 1
             start_time = time.time()
             while True:
-                levels = calculate_trade_levels(filled_price, side, df, len(df)-1, trend_confirmed)
+                levels = calculate_trade_levels(filled_price, side, df, len(df)-1, strategy_type)
                 tp_price = round(levels['take_profit'], price_precision)
                 sl_price = round(levels['stop_loss'], price_precision)
 
@@ -327,7 +327,7 @@ def place_futures_order(exchange, df, symbol, side, usdt_amount, leverage=10, tr
             #return {'status': 'error', 'message': f"Failed to place TP/SL after {max_attempts} attempts."}
         else:
             print(f"🔁TRADING SIGNALS ONLY...")
-            levels = calculate_trade_levels(price, side, df, len(df)-1, trend_confirmed)
+            levels = calculate_trade_levels(price, side, df, len(df)-1, strategy_type)
             tp_price = round(levels['take_profit'], price_precision)
             sl_price = round(levels['stop_loss'], price_precision)
             return {
