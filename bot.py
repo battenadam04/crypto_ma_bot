@@ -72,7 +72,7 @@ def send_telegram(text, image_path=None):
 
 
 
-def handle_trade(symbol, direction, df, trend_confirmed, strategy_type="trend"):
+def handle_trade(symbol, direction, df, strategy_type="trend"):
     try:
         df = add_atr_column(df)
         side = 'buy' if direction == 'long' else 'sell'
@@ -151,15 +151,15 @@ def process_pair(symbol):
         lower_df['resistance'] = lower_df['high'].rolling(window=50).max()
 
         if check_long_signal(lower_df) and trend_up:
-            handle_trade(symbol, 'long', lower_df, trend_up,strategy_type="trend")
+            handle_trade(symbol, 'long', lower_df,strategy_type="trend")
         elif check_short_signal(lower_df) and trend_down:
-            handle_trade(symbol, 'short', lower_df, trend_down, strategy_type="trend")
+            handle_trade(symbol, 'short', lower_df, strategy_type="trend")
         elif  is_ranging(lower_df):
             buy_signal, sell_signal = check_range_trade(lower_df)
             if buy_signal:
-                handle_trade(symbol, 'long', lower_df, True, strategy_type="range")
+                handle_trade(symbol, 'long', lower_df, strategy_type="range")
             elif sell_signal:
-                handle_trade(symbol, 'short', lower_df, True, strategy_type="range")
+                handle_trade(symbol, 'short', lower_df, strategy_type="range")
 
      
         else:
@@ -181,7 +181,7 @@ def main():
         #log_event(f"✅ Backtest complete. {len(filtered_pairs)} pairs selected.")
 
         # from running backtest manually and updating here as server blocking api coingecko
-        generated_pairs = ['SOL/USDT:USDT', 'ONDO/USDT:USDT', 'KAS/USDT:USDT', 'HBAR/USDT:USDT']
+        generated_pairs = ['XRP/USDT:USDT', 'TRX/USDT:USDT', 'DOGE/USDT:USDT', 'ADA/USDT:USDT', 'SUI/USDT:USDT', 'LINK/USDT:USDT', 'XLM/USDT:USDT', 'SHIB/USDT:USDT', 'HBAR/USDT:USDT', 'DOT/USDT:USDT', 'UNI/USDT:USDT', 'PEPE/USDT:USDT', 'APT/USDT:USDT', 'NEAR/USDT:USDT', 'CRO/USDT:USDT', 'ONDO/USDT:USDT', 'KAS/USDT:USDT', 'VET/USDT:USDT', 'SEI/USDT:USDT', 'POL/USDT:USDT']
 
     for pair in generated_pairs:
         process_pair(pair)
