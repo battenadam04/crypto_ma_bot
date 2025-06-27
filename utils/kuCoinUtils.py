@@ -356,7 +356,7 @@ def is_valid_tp_sl(tp, sl, filled, market, side):
     return True
 
 def place_tp_sl_orders(exchange, symbol, side, amount, tp_price, sl_price, filled_price, max_retries=3, delay=1, poll_interval=2, max_poll_time=60):
-    close_side = 'sell' if side == 'buy' else 'buy
+    close_side = 'sell' if side == 'buy' else 'buy'
 
     for attempt in range(1, max_retries + 1):
         print(f"🔁 Order attempt {attempt}: Creating TP/SL orders...")
