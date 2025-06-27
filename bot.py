@@ -83,7 +83,7 @@ def handle_trade(symbol, direction, df, strategy_type="trend"):
                 symbol=symbol,
                 side=side,
                 usdt_amount=0.9,
-                leverage=12,
+                leverage=15,
                 strategy_type=strategy_type
             )
         log_event(f"🔍 KuCoin trade results:\n{trade_result}")
