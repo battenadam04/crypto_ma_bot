@@ -346,17 +346,17 @@ def is_order_valid(order):
         return False
     return order['status'] in ['open', 'triggered', 'active', 'new', 'live']
 
-def place_tp_sl_orders(exchange, symbol, side, amount, tp_price, sl_price, filled_price, max_retries=3, delay=1, poll_interval=2, max_poll_time=60):
-    close_side = 'sell' if side == 'buy' else 'buy'
-
-    def is_valid_tp_sl(tp, sl, filled, market, side):
-        if side == 'buy':
-            if tp <= filled or sl >= filled or sl >= market:
-                return False
+def is_valid_tp_sl(tp, sl, filled, market, side):
+    if side == 'buy':
+        if tp <= filled or sl >= filled or sl >= market:
+            return False
         else:  # sell
             if tp >= filled or sl <= filled or sl <= market:
                 return False
-        return True
+    return True
+
+def place_tp_sl_orders(exchange, symbol, side, amount, tp_price, sl_price, filled_price, max_retries=3, delay=1, poll_interval=2, max_poll_time=60):
+    close_side = 'sell' if side == 'buy' else 'buy
 
     for attempt in range(1, max_retries + 1):
         print(f"🔁 Order attempt {attempt}: Creating TP/SL orders...")
@@ -420,13 +420,32 @@ def place_tp_sl_orders(exchange, symbol, side, amount, tp_price, sl_price, fille
 
             # 🔄 Step 2: Poll for one of the orders to fill
             start_time = time.time()
+            tp_check, sl_check = None, None
+
             while time.time() - start_time < max_poll_time:
-                tp_check = exchange.fetch_order(tp_id, symbol)
-                sl_check = exchange.fetch_order(sl_id, symbol)
+                try:
+                    tp_check = exchange.fetch_order(tp_id, symbol)
+                except Exception as e:
+                    if 'orderNotExist' in str(e):
+                        print(f"⏳ TP order not found yet, retrying...")
+                        time.sleep(0.5)
+                        continue
+                    else:
+                        raise
+
+                try:
+                    sl_check = exchange.fetch_order(sl_id, symbol)
+                except Exception as e:
+                    if 'orderNotExist' in str(e):
+                        print(f"⏳ SL order not found yet, retrying...")
+                        time.sleep(0.5)
+                        continue
+                    else:
+                        raise
 
                 print(f"🔍 TP Status: {tp_check.get('status')}, SL Status: {sl_check.get('status')}")
 
-                if is_order_valid(tp_check):
+                if tp_check.get('status') == 'closed':
                     filled_tp_price = tp_check.get('average') or tp_check.get('price')
                     print(f"🎯 TP filled at {filled_tp_price}")
                     return {
@@ -436,7 +455,7 @@ def place_tp_sl_orders(exchange, symbol, side, amount, tp_price, sl_price, fille
                         'filled_price': filled_tp_price
                     }
 
-                if is_order_valid(sl_check):
+                if sl_check.get('status') == 'closed':
                     filled_sl_price = sl_check.get('average') or sl_check.get('price')
                     print(f"🛑 SL filled at {filled_sl_price}")
                     return {
@@ -449,7 +468,7 @@ def place_tp_sl_orders(exchange, symbol, side, amount, tp_price, sl_price, fille
                 print(f"⏳ Polling... waiting for TP or SL to fill (every {poll_interval}s)")
                 time.sleep(poll_interval)
 
-            # Timeout
+            # Timeout fallback
             print("⚠️ TP/SL orders not filled within polling window.")
             return {
                 'tp_order': tp_check,
@@ -457,6 +476,7 @@ def place_tp_sl_orders(exchange, symbol, side, amount, tp_price, sl_price, fille
                 'status': 'timeout',
                 'filled_price': None
             }
+
 
         except Exception as e:
             print(f"❌ Error placing TP/SL: {e}")
