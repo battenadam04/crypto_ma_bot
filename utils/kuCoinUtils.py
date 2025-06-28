@@ -407,6 +407,7 @@ def place_tp_sl_orders(exchange, symbol, side, amount, tp_price, sl_price, fille
                     'stopPrice': sl_price,
                     'reduceOnly': True,
                     'stopType': 'loss',
+                    'stopPriceType': 'TP'
                 }
             )
 
