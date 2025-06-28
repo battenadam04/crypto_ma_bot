@@ -93,24 +93,25 @@ def calculate_trade_levels(price, direction, df, start_idx, strategy_type="trend
         print(f"⚠️ Using fallback ATR at index {start_idx}: {atr:.10f}")
 
     # Strategy-specific configs
+    # Strategy-specific configs for 5m timeframe
     strategy_settings = {
         "trend": {
-            "atr_tp": 3.5,
-            "atr_sl": 2.8,
-            "min_tp_pct": 0.006,
-            "min_sl_pct": 0.0045
+            "atr_tp": 4.0,
+            "atr_sl": 3.0,
+            "min_tp_pct": 0.012,  # 1.2%
+            "min_sl_pct": 0.009   # 0.9%
         },
         "range": {
-            "atr_tp": 2.5,
-            "atr_sl": 2.0,
-            "min_tp_pct": 0.0045,
-            "min_sl_pct": 0.003
+            "atr_tp": 3.0,
+            "atr_sl": 2.5,
+            "min_tp_pct": 0.009,  # 0.9%
+            "min_sl_pct": 0.006   # 0.6%
         },
         "scalp": {
-            "atr_tp": 2.0,
-            "atr_sl": 1.5,
-            "min_tp_pct": 0.003,
-            "min_sl_pct": 0.002
+            "atr_tp": 2.2,
+            "atr_sl": 1.8,
+            "min_tp_pct": 0.006,  # 0.6%
+            "min_sl_pct": 0.004   # 0.4%
         }
     }
     config = strategy_settings.get(strategy_type, strategy_settings["trend"])
