@@ -96,22 +96,22 @@ def calculate_trade_levels(price, direction, df, start_idx, strategy_type="trend
     # Strategy-specific configs for 5m timeframe
     strategy_settings = {
         "trend": {
-            "atr_tp": 4.0,
-            "atr_sl": 3.0,
-            "min_tp_pct": 0.012,  # 1.2%
-            "min_sl_pct": 0.009   # 0.9%
+            "atr_tp": 4.2,
+            "atr_sl": 3.2,
+            "min_tp_pct": 0.018,  # 1.8%
+            "min_sl_pct": 0.012   # 1.2%
         },
         "range": {
-            "atr_tp": 3.0,
-            "atr_sl": 2.5,
-            "min_tp_pct": 0.009,  # 0.9%
-            "min_sl_pct": 0.006   # 0.6%
+            "atr_tp": 3.5,
+            "atr_sl": 2.8,
+            "min_tp_pct": 0.015,  # 1.5%
+            "min_sl_pct": 0.010   # 1.0%
         },
         "scalp": {
-            "atr_tp": 2.2,
-            "atr_sl": 1.8,
-            "min_tp_pct": 0.006,  # 0.6%
-            "min_sl_pct": 0.004   # 0.4%
+            "atr_tp": 2.5,
+            "atr_sl": 2.0,
+            "min_tp_pct": 0.010,  # 1.0%
+            "min_sl_pct": 0.007   # 0.7%
         }
     }
     config = strategy_settings.get(strategy_type, strategy_settings["trend"])
@@ -368,3 +368,30 @@ def send_telegram(text, image_path=None):
             log_event(f"Posted to Telegram")
     except Exception as e:
         log_event(f"⚠️ Telegram error: {e}")
+
+
+def get_filled_price(order):
+    """
+    Returns the actual filled price from a KuCoin order object.
+
+    Priority:
+    1. Use 'average' if available
+    2. If not, calculate using 'cost' / 'filled' if filled > 0
+    3. Fallback to 'price' if no fill info
+    """
+    if not order:
+        return None
+
+    avg = order.get('average')
+    filled = float(order.get('filled', 0))
+    cost = float(order.get('cost', 0))
+    price = order.get('price')
+
+    if avg:
+        return float(avg)
+    elif filled > 0 and cost > 0:
+        return round(cost / filled, 8)  # Rounded for consistency
+    elif price:
+        return float(price)
+    else:
+        return None

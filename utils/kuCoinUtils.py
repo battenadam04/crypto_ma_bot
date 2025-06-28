@@ -5,7 +5,7 @@ import time
 from datetime import datetime, timezone
 
 from utils.coinGeckoData import fetch_market_caps
-from utils.utils import calculate_trade_levels, get_decimal_places, log_event, send_telegram
+from utils.utils import calculate_trade_levels, get_decimal_places, get_filled_price, log_event, send_telegram
 
 
 max_wait_seconds = 300
@@ -264,13 +264,18 @@ def place_futures_order(exchange, df, symbol, side, usdt_amount, leverage=10, st
                 try:
                     order_id = entry_order['id']
                     order_status = exchange.fetch_order(order_id, symbol)
-                    if order_status['status'] == 'closed':
-                        price_value = order_status['price']
-                        filled_price = price_value
-                        print(f"✅ Entry order {order_id} filled with filled price:{price_value}")
+                    status = order_status.get('status')
+                    filled = float(order_status.get('filled', 0))
+                    amount = float(order_status.get('amount', 1))
+
+
+                    if status == 'closed' or (status == 'open' and filled >= amount):
+                        filled_price_fetched = get_filled_price(order_status)
+                        filled_price = filled_price_fetched
+                        print(f"✅ Entry order {order_id} filled with filled price:{filled_price}")
                         break
                     else:
-                        log_event(f"⏳ Waiting for order {order_id} to fill, current status: {order_status['status']}")
+                        log_event(f"⏳ Waiting for order {order_id} to fill, current status: {status}")
                 except Exception as e:
                     print(f"❌ Error fetching order status: {e}")
                 time.sleep(poll_interval)
