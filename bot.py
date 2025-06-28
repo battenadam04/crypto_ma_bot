@@ -1,23 +1,21 @@
 import ccxt
 import pandas as pd
 import pandas_ta as ta
-import requests
 import time
-import os
-import json
 from datetime import datetime,timedelta, timezone
 #from concurrent.futures import ThreadPoolExecutor
 import threading
+import schedule
 
 
 from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
 from strategies.simulate_trades import run_backtest
 from utils.utils import (
-    add_atr_column, calculate_mas, check_long_signal, check_short_signal,is_ranging, check_range_trade, log_event
+    add_atr_column, calculate_mas, check_long_signal, check_short_signal,is_ranging, check_range_trade, log_event, send_telegram
 )
 
 from utils.kuCoinUtils import (
-    get_top_futures_tradable_pairs, init_kucoin_futures,
+    fetch_kucoin_balance_and_notify, get_top_futures_tradable_pairs, init_kucoin_futures,
     place_futures_order,can_place_order
 )
 
@@ -54,21 +52,6 @@ def fetch_data(symbol, timeframe=TIMEFRAME, limit=350):
     except Exception as e:
         log_event(f"❌ Error fetching data for {symbol}: {str(e)}")
         return None
-
-def send_telegram(text, image_path=None):
-    try:
-        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        log_event(f"Posting to Telegram")
-        requests.post(url, data={'chat_id': TELEGRAM_CHAT_ID, 'text': text})
-
-        if image_path:
-            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
-            with open(image_path, 'rb') as img:
-                requests.post(url, files={'photo': img}, data={'chat_id': TELEGRAM_CHAT_ID})
-            log_event(f"Posted to Telegram")
-    except Exception as e:
-        log_event(f"⚠️ Telegram error: {e}")
-
 
 
 
@@ -183,6 +166,8 @@ def main():
         # from running backtest manually and updating here as server blocking api coingecko
         generated_pairs = ['XRP/USDT:USDT', 'TRX/USDT:USDT', 'DOGE/USDT:USDT', 'ADA/USDT:USDT', 'SUI/USDT:USDT', 'LINK/USDT:USDT', 'XLM/USDT:USDT', 'SHIB/USDT:USDT', 'HBAR/USDT:USDT', 'DOT/USDT:USDT', 'UNI/USDT:USDT', 'PEPE/USDT:USDT', 'APT/USDT:USDT', 'NEAR/USDT:USDT', 'CRO/USDT:USDT', 'ONDO/USDT:USDT', 'KAS/USDT:USDT', 'VET/USDT:USDT', 'SEI/USDT:USDT', 'POL/USDT:USDT']
 
+        # === Schedule the task at 22:00 UTC ===
+        schedule.every().day.at("22:00").do(fetch_kucoin_balance_and_notify)
     for pair in generated_pairs:
         process_pair(pair)
 

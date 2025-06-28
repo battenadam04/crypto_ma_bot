@@ -1,3 +1,4 @@
+import requests
 from ta.trend import SMAIndicator
 from ta.trend import ADXIndicator
 import pandas as pd
@@ -5,6 +6,8 @@ import pandas as pd
 import time
 import os
 from datetime import datetime, timezone
+
+from config import TELEGRAM_CHAT_ID, TELEGRAM_TOKEN
 
     
 def set_leverage(exchange, symbol, leverage):
@@ -149,11 +152,11 @@ def calculate_trade_levels(price, direction, df, start_idx, strategy_type="trend
     tp_pct = ((tp - entry) / entry) * 100
     sl_pct = ((entry - sl) / entry) * 100 if direction == 'buy' else ((sl - entry) / entry) * 100
 
-    # print(f"🎯 {strategy_type.upper()} trade:")
-    # print(f"• Entry: {entry}")
-    # print(f"• TP: {tp} ({tp_pct:.2f}%)")
-    # print(f"• SL: {sl} ({sl_pct:.2f}%)")
-    # print(f"• ATR: {atr:.6f}")
+    print(f"🎯 {strategy_type.upper()} trade:")
+    print(f"• Entry: {entry}")
+    print(f"• TP: {tp} ({tp_pct:.2f}%)")
+    print(f"• SL: {sl} ({sl_pct:.2f}%)")
+    print(f"• ATR: {atr:.6f}")
 
     return {
         'entry': entry,
@@ -350,3 +353,17 @@ def log_event(text):
     print(log_text)
     with open('logs/trades.log', 'a') as f:
         f.write(log_text + '\n')
+
+def send_telegram(text, image_path=None):
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        log_event(f"Posting to Telegram")
+        requests.post(url, data={'chat_id': TELEGRAM_CHAT_ID, 'text': text})
+
+        if image_path:
+            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
+            with open(image_path, 'rb') as img:
+                requests.post(url, files={'photo': img}, data={'chat_id': TELEGRAM_CHAT_ID})
+            log_event(f"Posted to Telegram")
+    except Exception as e:
+        log_event(f"⚠️ Telegram error: {e}")
