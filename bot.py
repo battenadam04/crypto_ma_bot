@@ -66,13 +66,13 @@ def handle_trade(symbol, direction, df, strategy_type="trend"):
                 symbol=symbol,
                 side=side,
                 usdt_amount=0.9,
-                leverage=15,
+                leverage=17,
                 strategy_type=strategy_type
             )
         log_event(f"🔍 KuCoin trade results:\n{trade_result}")
         status = trade_result.get('status', 'unknown')
-        error = trade_result.get('message', 'unknown')
-        filledEntry = trade_result.get('filled_entry', 'false')
+        error = trade_result.get('message', 'none')
+        filledEntry = trade_result.get('filled_entry', 'none')
         tp_order = trade_result.get('tp_order')
         sl_order = trade_result.get('sl_order')
 
@@ -85,7 +85,8 @@ def handle_trade(symbol, direction, df, strategy_type="trend"):
                 f" Filled Entry: {filledEntry}\n"
                 f"🎯 TP: {tp}\n"
                 f"🛑 SL: {sl}\n"
-                f"⚙️ Trade Status: {status, error}"
+                f"⚙️ Trade Status: {status}"
+                f"⚙️ Trade Error: {error}"
             )
         send_telegram(message)
         log_event(f"Trade: {message}")
