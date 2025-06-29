@@ -95,22 +95,22 @@ def calculate_trade_levels(price, direction, df, start_idx, strategy_type="trend
     # Strategy-specific configs
     strategy_settings = {
         "trend": {
+            "atr_tp": 6.0,
+            "atr_sl": 4.0,
+            "min_tp_pct": 0.03,   # 3.0%
+            "min_sl_pct": 0.018   # 1.8%
+        },
+        "range": {
             "atr_tp": 5.0,
-            "atr_sl": 3.5,
+            "atr_sl": 3.8,
             "min_tp_pct": 0.025,  # 2.5%
             "min_sl_pct": 0.015   # 1.5%
         },
-        "range": {
-            "atr_tp": 4.0,
-            "atr_sl": 3.2,
-            "min_tp_pct": 0.02,   # 2.0%
-            "min_sl_pct": 0.013   # 1.3%
-        },
         "scalp": {
-            "atr_tp": 2.8,
-            "atr_sl": 2.2,
-            "min_tp_pct": 0.015,  # 1.5%
-            "min_sl_pct": 0.01    # 1.0%
+            "atr_tp": 3.2,
+            "atr_sl": 2.5,
+            "min_tp_pct": 0.018,  # 1.8%
+            "min_sl_pct": 0.012   # 1.2%
         }
     }
     config = strategy_settings.get(strategy_type, strategy_settings["trend"])
@@ -393,4 +393,58 @@ def get_filled_price(order):
     elif price:
         return float(price)
     else:
+        return None
+
+MIN_ABS_DISTANCE = 0.005  # Minimum absolute distance from entry
+MIN_SL_PCT = 0.012        # Minimum % distance for SL (1.2%)
+MIN_TP_PCT = 0.015        # Minimum % distance for TP (1.5%)
+
+def safe_place_tp_sl(tp_price, sl_price, entry_price, direction, symbol):
+    try:
+        # Basic checks
+        if not tp_price or not sl_price:
+            print(f"❌ Missing TP or SL. TP: {tp_price}, SL: {sl_price}")
+            return None
+
+        # Ensure values are floats
+        tp_price = float(tp_price)
+        sl_price = float(sl_price)
+        entry_price = float(entry_price)
+
+        # Calculate % distances
+        sl_dist = abs(sl_price - entry_price)
+        tp_dist = abs(tp_price - entry_price)
+        sl_pct = (sl_dist / entry_price) * 100
+        tp_pct = (tp_dist / entry_price) * 100
+
+        # Directional check (must be on correct side of entry)
+        if direction == 'buy' and (tp_price <= entry_price or sl_price >= entry_price):
+            print(f"❌ Invalid TP/SL for LONG: TP={tp_price}, SL={sl_price}, Entry={entry_price}")
+            return None
+        elif direction == 'sell' and (tp_price >= entry_price or sl_price <= entry_price):
+            print(f"❌ Invalid TP/SL for SHORT: TP={tp_price}, SL={sl_price}, Entry={entry_price}")
+            return None
+
+        # Minimum distance checks
+        if sl_dist < MIN_ABS_DISTANCE or sl_pct < MIN_SL_PCT * 100:
+            print(f"⛔ SL too tight: {sl_price} (Diff: {sl_dist:.5f}, {sl_pct:.2f}%)")
+            return None
+        if tp_dist < MIN_ABS_DISTANCE or tp_pct < MIN_TP_PCT * 100:
+            print(f"⛔ TP too tight: {tp_price} (Diff: {tp_dist:.5f}, {tp_pct:.2f}%)")
+            return None
+
+        print(f"✅ TP/SL validated for {symbol}:")
+        print(f"• Entry: {entry_price}")
+        print(f"• TP: {tp_price} ({tp_pct:.2f}%)")
+        print(f"• SL: {sl_price} ({sl_pct:.2f}%)")
+
+        # Return safely validated values
+        return {
+            'take_profit': tp_price,
+            'stop_loss': sl_price,
+            'valid': True
+        }
+
+    except Exception as e:
+        print(f"❌ Error validating TP/SL for {symbol}: {e}")
         return None

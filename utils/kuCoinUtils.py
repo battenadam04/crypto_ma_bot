@@ -5,7 +5,7 @@ import time
 from datetime import datetime, timezone
 
 from utils.coinGeckoData import fetch_market_caps
-from utils.utils import calculate_trade_levels, get_decimal_places, get_filled_price, log_event, send_telegram
+from utils.utils import calculate_trade_levels, get_decimal_places, get_filled_price, log_event, safe_place_tp_sl, send_telegram
 
 
 max_wait_seconds = 300
@@ -289,25 +289,31 @@ def place_futures_order(exchange, df, symbol, side, usdt_amount, leverage=10, st
                 tp_price = round(levels['take_profit'], price_precision)
                 sl_price = round(levels['stop_loss'], price_precision)
 
-                if tp_price < min_price or sl_price < min_price:
-                    print(f"⚠️ TP/SL price too low (TP: {tp_price}, SL: {sl_price}). Retrying...")
+                # if tp_price < min_price or sl_price < min_price:
+                #     print(f"⚠️ TP/SL price too low (TP: {tp_price}, SL: {sl_price}). Retrying...")
+                #     time.sleep(2)
+                #     continue
+
+
+                result = safe_place_tp_sl(tp_price, sl_price, filled_price, side, symbol)
+                if result:
+
+                    tp_sl_result = place_tp_sl_orders(exchange, symbol, side, amount, result['tp_price'], result['sl_price'], filled_price)
+
+                    if tp_sl_result['status'] in ['tp_filled', 'sl_filled', 'success']:
+                        print(f"✅ TP and SL successfully placed on attempt {attempt}.")
+                        return {
+                            'status': 'success',
+                            'filled_entry': filled_price,
+                            'tp_order': tp_sl_result['tp_order'],
+                            'sl_order': tp_sl_result['sl_order']
+                        }
+
+                    attempt += 1
+                    print(f"🔁 Retry #{attempt} in 2 seconds...")
                     time.sleep(2)
-                    continue
-
-                tp_sl_result = place_tp_sl_orders(exchange, symbol, side, amount, tp_price, sl_price, filled_price)
-
-                if tp_sl_result['status'] in ['tp_filled', 'sl_filled', 'success']:
-                    print(f"✅ TP and SL successfully placed on attempt {attempt}.")
-                    return {
-                        'status': 'success',
-                        'filled_entry': filled_price,
-                        'tp_order': tp_sl_result['tp_order'],
-                        'sl_order': tp_sl_result['sl_order']
-                    }
-
-                attempt += 1
-                print(f"🔁 Retry #{attempt} in 2 seconds...")
-                time.sleep(2)
+                else:
+                    print("🚫 Skipping order due to unsafe TP/SL values.")
 
             #return {'status': 'error', 'message': f"Failed to place TP/SL after {max_attempts} attempts."}
         else:
@@ -344,14 +350,14 @@ def is_order_valid(order):
     return False
 
 
-def is_valid_tp_sl(tp, sl, filled, market, side):
-    if side == 'buy':
-        if tp <= filled or sl >= filled or sl >= market:
-            return False
-        else:  # sell
-            if tp >= filled or sl <= filled or sl <= market:
-                return False
-    return True
+# def is_valid_tp_sl(tp, sl, filled, market, side):
+#     if side == 'buy':
+#         if tp <= filled or sl >= filled or sl >= market:
+#             return False
+#         else:  # sell
+#             if tp >= filled or sl <= filled or sl <= market:
+#                 return False
+#     return True
 
 def place_tp_sl_orders(exchange, symbol, side, amount, tp_price, sl_price, filled_price, max_retries=3, delay=1, poll_interval=2, max_poll_time=60):
     close_side = 'sell' if side == 'buy' else 'buy'
@@ -367,19 +373,19 @@ def place_tp_sl_orders(exchange, symbol, side, amount, tp_price, sl_price, fille
                 raise Exception("Couldn't fetch current market price.")
 
             # 🚨 Validate TP/SL logic before placing
-            if not is_valid_tp_sl(tp_price, sl_price, filled_price, last_price, side):
-                print(f"⚠️ Invalid TP/SL for current conditions. Adjusting...")
+            # if not is_valid_tp_sl(tp_price, sl_price, filled_price, last_price, side):
+            #     print(f"⚠️ Invalid TP/SL for current conditions. Adjusting..TP:{tp_price}, SL:{sl_price}")
 
-                # Apply minimal offset adjustment to make them valid
-                adjust_pct = 1  #1% nudge
-                if side == 'buy':
-                    tp_price = max(filled_price * (1 + adjust_pct), tp_price)
-                    sl_price = min(filled_price * (1 - adjust_pct), sl_price)
-                else:
-                    tp_price = min(filled_price * (1 - adjust_pct), tp_price)
-                    sl_price = max(filled_price * (1 + adjust_pct), sl_price)
+            #     # Apply minimal offset adjustment to make them valid
+            #     adjust_pct = 1  #1% nudge
+            #     if side == 'buy':
+            #         tp_price = max(filled_price * (1 + adjust_pct), tp_price)
+            #         sl_price = min(filled_price * (1 - adjust_pct), sl_price)
+            #     else:
+            #         tp_price = min(filled_price * (1 - adjust_pct), tp_price)
+            #         sl_price = max(filled_price * (1 + adjust_pct), sl_price)
 
-                print(f"🛠️ Adjusted TP: {tp_price}, SL: {sl_price}")
+            #     print(f"🛠️ Adjusted TP: {tp_price}, SL: {sl_price}")
 
 
             # ✅ Place TP (limit order)
