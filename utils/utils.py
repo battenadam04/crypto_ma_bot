@@ -1,3 +1,4 @@
+import requests
 from ta.trend import SMAIndicator
 from ta.trend import ADXIndicator
 import pandas as pd
@@ -5,6 +6,8 @@ import pandas as pd
 import time
 import os
 from datetime import datetime, timezone
+from utils.configUtils import strategy_settings
+from config import TELEGRAM_CHAT_ID, TELEGRAM_TOKEN
 
     
 def set_leverage(exchange, symbol, leverage):
@@ -89,13 +92,6 @@ def calculate_trade_levels(price, direction, df, start_idx, strategy_type="trend
         atr = price * 0.003  # fallback ATR (0.3% of price)
         print(f"⚠️ Using fallback ATR at index {start_idx}: {atr:.10f}")
 
-    # Strategy-specific configs
-    strategy_settings = {
-        "trend": {"atr_tp": 2.5, "atr_sl": 2.0, "min_tp_pct": 0.004, "min_sl_pct": 0.003},
-        "range": {"atr_tp": 1.5, "atr_sl": 1.2, "min_tp_pct": 0.003, "min_sl_pct": 0.002},
-        "scalp": {"atr_tp": 1.2, "atr_sl": 1.0, "min_tp_pct": 0.002, "min_sl_pct": 0.0015}
-    }
-
     config = strategy_settings.get(strategy_type, strategy_settings["trend"])
 
     # Calculate distances
@@ -113,7 +109,7 @@ def calculate_trade_levels(price, direction, df, start_idx, strategy_type="trend
         precision = 2
 
     # Compute levels (before rounding)
-    if direction == 'long':
+    if direction == 'buy':
         raw_tp = price + tp_distance
         raw_sl = price - sl_distance
     else:
@@ -126,20 +122,20 @@ def calculate_trade_levels(price, direction, df, start_idx, strategy_type="trend
     sl = round(raw_sl, precision)
 
     # 🚨 Force stop-loss to be on the correct side of entry
-    if direction == 'long' and sl >= entry:
+    if direction == 'buy' and sl >= entry:
         sl = round(entry - sl_distance, precision)
-    elif direction == 'short' and sl <= entry:
+    elif direction == 'sell' and sl <= entry:
         sl = round(entry + sl_distance, precision)
 
     # Recalculate percentages for print
     tp_pct = ((tp - entry) / entry) * 100
-    sl_pct = ((entry - sl) / entry) * 100 if direction == 'long' else ((sl - entry) / entry) * 100
+    sl_pct = ((entry - sl) / entry) * 100 if direction == 'buy' else ((sl - entry) / entry) * 100
 
-    # print(f"🎯 {strategy_type.upper()} trade:")
-    # print(f"• Entry: {entry}")
-    # print(f"• TP: {tp} ({tp_pct:.2f}%)")
-    # print(f"• SL: {sl} ({sl_pct:.2f}%)")
-    # print(f"• ATR: {atr:.6f}")
+    print(f"🎯 {strategy_type.upper()} trade:")
+    print(f"• Entry: {entry}")
+    print(f"• TP: {tp} ({tp_pct:.2f}%)")
+    print(f"• SL: {sl} ({sl_pct:.2f}%)")
+    print(f"• ATR: {atr:.6f}")
 
     return {
         'entry': entry,
@@ -294,7 +290,7 @@ def check_long_signal(df, lookahead=10):
     # Combine conditions: crossover or continuation + momentum + alignment + bullish candle
     #  and not is_near_resistance(df)
     if (crossover or continuation) and alignment and momentum and bullish_candle and not is_near_resistance(df):
-        log_event(f"LONG SIGNAL TRIGGERED at {last['timestamp']}")
+        #log_event(f"LONG SIGNAL TRIGGERED at {last['timestamp']}")
         return True
 
     return False
@@ -325,7 +321,7 @@ def check_short_signal(df, lookahead=10):
     # not_near_support = not is_near_support(df)  # You need to implement this function
 
     if (crossover or continuation) and alignment and momentum and bearish_candle and not is_near_support(df) :
-        log_event(f"SHORT SIGNAL TRIGGERED at {last['timestamp']}")
+        #log_event(f"SHORT SIGNAL TRIGGERED at {last['timestamp']}")
         return True
 
     return False
@@ -336,3 +332,110 @@ def log_event(text):
     print(log_text)
     with open('logs/trades.log', 'a') as f:
         f.write(log_text + '\n')
+
+def send_telegram(text, image_path=None):
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        log_event(f"Posting to Telegram")
+        requests.post(url, data={'chat_id': TELEGRAM_CHAT_ID, 'text': text})
+
+        if image_path:
+            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
+            with open(image_path, 'rb') as img:
+                requests.post(url, files={'photo': img}, data={'chat_id': TELEGRAM_CHAT_ID})
+            log_event(f"Posted to Telegram")
+    except Exception as e:
+        log_event(f"⚠️ Telegram error: {e}")
+
+
+def get_filled_price(order):
+    """
+    Returns the actual filled price from a KuCoin order object.
+
+    Priority:
+    1. Use 'average' if available
+    2. If not, calculate using 'cost' / 'filled' if filled > 0
+    3. Fallback to 'price' if no fill info
+    """
+    if not order:
+        return None
+
+    avg = order.get('average')
+    filled = float(order.get('filled', 0))
+    cost = float(order.get('cost', 0))
+    price = order.get('price')
+
+    if avg:
+        return float(avg)
+    elif filled > 0 and cost > 0:
+        return round(cost / filled, 8)  # Rounded for consistency
+    elif price:
+        return float(price)
+    else:
+        return None
+
+MIN_ABS_DISTANCE = 0.005  # Minimum absolute distance from entry
+MIN_SL_PCT = 0.10      # Minimum % distance for SL (10%)
+MIN_TP_PCT = 0.15       # Minimum % distance for TP (15%)
+
+def safe_place_tp_sl(tp_price, sl_price, entry_price, direction, symbol, strategy_type, max_attempts=3):
+   try:
+        if not tp_price or not sl_price:
+            print(f"❌ Missing TP or SL. TP: {tp_price}, SL: {sl_price}")
+            return None
+
+        tp_price = float(tp_price)
+        sl_price = float(sl_price)
+        entry_price = float(entry_price)
+
+        # Default to "trend" config if none passed
+        config = strategy_settings[strategy_type or "trend"]
+
+        base_sl_pct = config["min_sl_pct"] * 100
+        base_tp_pct = config["min_tp_pct"] * 100
+
+        min_abs = entry_price * min(config["min_sl_pct"], config["min_tp_pct"])
+
+        for attempt in range(1, max_attempts + 1):
+            multiplier = 1 + 0.1 * (attempt - 1)
+
+            if direction == 'buy':
+                tp_price_adj = entry_price * (1 + (base_tp_pct / 100) * multiplier)
+                sl_price_adj = entry_price * (1 - (base_sl_pct / 100) * multiplier)
+            else:
+                tp_price_adj = entry_price * (1 - (base_tp_pct / 100) * multiplier)
+                sl_price_adj = entry_price * (1 + (base_sl_pct / 100) * multiplier)
+
+            tp_dist = abs(tp_price_adj - entry_price)
+            sl_dist = abs(sl_price_adj - entry_price)
+            tp_pct = (tp_dist / entry_price) * 100
+            sl_pct = (sl_dist / entry_price) * 100
+
+            if direction == 'buy' and (tp_price_adj <= entry_price or sl_price_adj >= entry_price):
+                print(f"❌ Invalid TP/SL for LONG: TP={tp_price_adj}, SL={sl_price_adj}, Entry={entry_price}")
+                return None
+            elif direction == 'sell' and (tp_price_adj >= entry_price or sl_price_adj <= entry_price):
+                print(f"❌ Invalid TP/SL for SHORT: TP={tp_price_adj}, SL={sl_price_adj}, Entry={entry_price}")
+                return None
+
+            if sl_dist >= min_abs and sl_pct >= base_sl_pct and tp_dist >= min_abs and tp_pct >= base_tp_pct:
+                print(f"✅ TP/SL validated on attempt {attempt} for {symbol}:")
+                print(f"• Entry: {entry_price}")
+                print(f"• TP: {tp_price_adj} ({tp_pct:.2f}%)")
+                print(f"• SL: {sl_price_adj} ({sl_pct:.2f}%)")
+                return {
+                    'take_profit': round(tp_price_adj, 8),
+                    'stop_loss': round(sl_price_adj, 8),
+                    'valid': True
+                }
+
+            print(f"⛔ Attempt {attempt}: TP/SL too tight.")
+            print(f"• TP: {tp_price_adj} ({tp_pct:.2f}%) | Required: {base_tp_pct}%+")
+            print(f"• SL: {sl_price_adj} ({sl_pct:.2f}%) | Required: {base_sl_pct}%+")
+
+        print(f"❌ Failed to generate safe TP/SL after {max_attempts} attempts.")
+        return None
+   
+   except Exception as e:
+        print(f"❌ Error validating TP/SL for {symbol}: {e}")
+        return None

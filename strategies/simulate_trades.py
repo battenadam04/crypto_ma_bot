@@ -106,9 +106,9 @@ def fetch_higher_timeframe_data(pair, timeframe='1h', days=90):
 
 
 
-def check_trade_outcome(df, start_idx, direction, entry_price, max_lookahead=50):
+def check_trade_outcome(df, start_idx, direction, entry_price, max_lookahead=50, strategy="trend"):
     df = add_atr_column(df, period=7)
-    levels = calculate_trade_levels(entry_price, direction, df, start_idx)
+    levels = calculate_trade_levels(entry_price, direction, df, start_idx, strategy)
     tp, sl = levels['take_profit'], levels['stop_loss']
 
     for j in range(1, max_lookahead + 1):
@@ -159,7 +159,7 @@ def simulate_combined_strategy(pair, df_5m,df_1h):
         )
             #and not is_near_resistance(slice_df)
         if check_long_signal(slice_df) and trend_up:
-                result = check_trade_outcome(df_5m, i, 'long', entry_price)
+                result = check_trade_outcome(df_5m, i, 'buy', entry_price, 50, 'trend')
                 strategy_used.append('ma')
                 if result == 'win':
                     long_wins += 1
@@ -168,7 +168,7 @@ def simulate_combined_strategy(pair, df_5m,df_1h):
                 else:
                     long_none += 1
         elif check_short_signal(slice_df) and trend_down :
-                result = check_trade_outcome(df_5m, i, 'short', entry_price)
+                result = check_trade_outcome(df_5m, i, 'sell', entry_price, 50, 'trend')
                 strategy_used.append('ma')
                 if result == 'win':
                     short_wins += 1
@@ -179,7 +179,7 @@ def simulate_combined_strategy(pair, df_5m,df_1h):
         elif is_ranging(slice_df):
             buy_signal, sell_signal = check_range_trade(slice_df)
             if buy_signal:
-                result = check_trade_outcome(df_5m, i, 'long', entry_price)
+                result = check_trade_outcome(df_5m, i, 'buy', entry_price, 50, 'range')
                 strategy_used.append('range')
                 if result == 'win':
                     long_wins += 1
@@ -188,7 +188,7 @@ def simulate_combined_strategy(pair, df_5m,df_1h):
                 else:
                     long_none += 1
             elif sell_signal:
-                result = check_trade_outcome(df_5m, i, 'short', entry_price)
+                result = check_trade_outcome(df_5m, i, 'sell', entry_price, 50, 'range')
                 strategy_used.append('range')
                 if result == 'win':
                     short_wins += 1
@@ -232,7 +232,7 @@ def run_backtest():
             if len(df) > 300:
                 result = simulate_combined_strategy(pair, df, df_1h)
                 log_event(f"CHECKING BACKTEST: {result}")
-                if result['win_rate'] >= 58:
+                if result['win_rate'] >= 65:
                     good_pairs.append(pair[0])
         except Exception as e:
                 print(f"❌ Error backtesting {pair}: {e}")
