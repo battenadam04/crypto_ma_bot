@@ -172,7 +172,7 @@ def main():
         #log_event(f"✅ Backtest complete. {len(filtered_pairs)} pairs selected.")
 
         # from running backtest manually and updating here as server blocking api coingecko
-        generated_pairs = ['XRP/USDT:USDT', 'DOGE/USDT:USDT', 'ADA/USDT:USDT', 'SUI/USDT:USDT', 'XLM/USDT:USDT', 'SHIB/USDT:USDT', 'HBAR/USDT:USDT', 'DOT/USDT:USDT', 'UNI/USDT:USDT', 'PEPE/USDT:USDT', 'NEAR/USDT:USDT', 'CRO/USDT:USDT', 'ONDO/USDT:USDT', 'KAS/USDT:USDT', 'VET/USDT:USDT', 'POL/USDT:USDT', 'ENA/USDT:USDT', 'ARB/USDT:USDT', 'ALGO/USDT:USDT']
+        generated_pairs = ['XRP/USDT:USDT', 'DOGE/USDT:USDT', 'ADA/USDT:USDT', 'SUI/USDT:USDT', 'XLM/USDT:USDT', 'SHIB/USDT:USDT', 'PEPE/USDT:USDT', 'NEAR/USDT:USDT', 'ONDO/USDT:USDT', 'KAS/USDT:USDT', 'VET/USDT:USDT', 'ENA/USDT:USDT', 'ARB/USDT:USDT', 'ALGO/USDT:USDT', 'WLD/USDT:USDT', 'JUP/USDT:USDT']
 
         schedule.every().day.at("21:00").do(fetch_kucoin_balance_and_notify)
     else:
