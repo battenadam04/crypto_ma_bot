@@ -68,7 +68,7 @@ def fetch_data(pair, timeframe='5m', days=90):
 
     return df
 
-def fetch_higher_timeframe_data(pair, timeframe='1h', days=90):
+def fetch_higher_timeframe_data(pair, timeframe='15m', days=90):
     all_ohlcv = []
     now = datetime.now()
     since = int((now - timedelta(days=days)).timestamp() * 1000)
@@ -81,7 +81,7 @@ def fetch_higher_timeframe_data(pair, timeframe='1h', days=90):
             break
         all_ohlcv.extend(ohlcv)
         last_timestamp = ohlcv[-1][0]
-        since = last_timestamp + 60_000 * 60  # advance 1h
+        since = last_timestamp + 60_000 * 15  # advance 1h
         loops += 1
         time.sleep(0.3)
         if len(all_ohlcv) >= 1000:
@@ -227,7 +227,7 @@ def run_backtest():
         try:
             symbol = pair[0]
             df = fetch_data(symbol, '5m', days=90)
-            df_1h = fetch_higher_timeframe_data(symbol, '1h', days=90)
+            df_1h = fetch_higher_timeframe_data(symbol, '15m', days=90)
             #print(f"CHECKING BACKTESTDF:{pair,len(df)}" )
             if len(df) > 300:
                 result = simulate_combined_strategy(pair, df, df_1h)
