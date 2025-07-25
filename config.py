@@ -17,3 +17,5 @@ SL_PERCENT = float(os.getenv('SL_PERCENT', 1.0))
 KUCOIN_API_KEY = os.getenv('KUCOIN_API_KEY')
 KUCOIN_SECRET_KEY = os.getenv('KUCOIN_SECRET_KEY')
 KUCOIN_PASSPHRASE = os.getenv('KUCOIN_PASSPHRASE')
+
+TRADING_SIGNALS_ONLY = os.getenv('TRADING_SIGNALS_ONLY', 'false').lower() == 'true'

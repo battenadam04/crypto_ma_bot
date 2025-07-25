@@ -1,24 +1,27 @@
 import ccxt
 import pandas as pd
-import requests
+import pandas_ta as ta
 import time
-import os
-from datetime import datetime,timedelta
-from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime,timedelta, timezone
+#from concurrent.futures import ThreadPoolExecutor
 import threading
+import schedule
 
-from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
+
+from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, TRADING_SIGNALS_ONLY
 from strategies.simulate_trades import run_backtest
+from utils.dailyChecksUtils import check_daily_loss_limit
 from utils.utils import (
-    calculate_mas, check_long_signal, check_short_signal,
-    calculate_trade_levels,is_ranging, check_range_trade, is_near_resistance
+    add_atr_column, calculate_mas, check_long_signal, check_short_signal,is_ranging, check_range_trade, log_event, send_telegram
 )
 
 from utils.kuCoinUtils import (
-    get_top_futures_tradable_pairs, init_kucoin_futures,
+    fetch_kucoin_balance_and_notify, get_top_futures_tradable_pairs, init_kucoin_futures,
     place_futures_order,can_place_order
 )
 
+
+BACKTEST_STATE_FILE = "last_backtest.json"
 
 # Global flag
 can_trade_event = threading.Event()
@@ -26,10 +29,9 @@ can_trade_event.set()  # Initially allow trading
 
 kucoin_futures = init_kucoin_futures()
 EXCHANGE = ccxt.kucoin()
-TIMEFRAME = '1m'
+TIMEFRAME = '5m'
 MAX_OPEN_TRADES = 3
 MAX_LOSSES = 3
-PAIRS = get_top_futures_tradable_pairs(kucoin_futures, quote='USDT', top_n=8)
 higher_timeframe_cache = {}
 
 filtered_pairs = []
@@ -40,85 +42,74 @@ last_backtest_time = datetime.min  # very old time to force backtest on first ru
 def fetch_data(symbol, timeframe=TIMEFRAME, limit=350):
     try:
 
-        hours_back = 6 if timeframe == '1m' else 48
-        since_dt = datetime.now() - timedelta(hours=hours_back)
+        hours_back = 6 if timeframe == '5m' else 48
+        since_dt = datetime.now(timezone.utc) - timedelta(hours=hours_back)
         since_ms = int(since_dt.timestamp() * 1000)  # ✅ convert to ms
         ohlcv = kucoin_futures.fetch_ohlcv(symbol, timeframe=timeframe, since=since_ms, limit=limit)
         df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+        print(f"⏱️ Fetching data for {symbol} since {since_dt.isoformat()} ({since_ms})")
         return df
     except Exception as e:
         log_event(f"❌ Error fetching data for {symbol}: {str(e)}")
         return None
 
-def send_telegram(text, image_path=None):
+
+
+def handle_trade(symbol, direction, df, strategy_type="trend"):
     try:
-        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        log_event(f"Posting to Telegram")
-        requests.post(url, data={'chat_id': TELEGRAM_CHAT_ID, 'text': text})
+        df = add_atr_column(df)
+        side = 'buy' if direction == 'long' else 'sell'
+        log_event(f"💰 starting kucoin trade: {strategy_type} for {direction}")
+        trade_result = place_futures_order(
+                exchange=kucoin_futures,
+                df=df,
+                symbol=symbol,
+                side=side,
+                capital=10,
+                leverage=10,
+                strategy_type=strategy_type
+            )
+        log_event(f"🔍 KuCoin trade results:\n{trade_result}")
+        status = trade_result.get('status', 'unknown')
+        error = trade_result.get('message', 'none')
+        filledEntry = trade_result.get('filled_entry', 'none')
+        tp_order = trade_result.get('tp_order')
+        sl_order = trade_result.get('sl_order')
 
-        if image_path:
-            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
-            with open(image_path, 'rb') as img:
-                requests.post(url, files={'photo': img}, data={'chat_id': TELEGRAM_CHAT_ID})
-            log_event(f"Posted to Telegram")
+        tp = tp_order.get('id') if isinstance(tp_order, dict) else tp_order if tp_order is not None else 'N/A'
+        sl = sl_order.get('id') if isinstance(sl_order, dict) else sl_order if sl_order is not None else 'N/A'
+
+        message = (
+                f"{'📈 LONG' if direction == 'long' else '📉 SHORT'} SIGNAL for {symbol} ({TIMEFRAME})\n"
+                f"Confirmed by 15m {'up' if direction == 'long' else 'down'}{strategy_type}\n\n"
+                f" Filled Entry: {filledEntry}\n"
+                f"🎯 TP: {tp}\n"
+                f"🛑 SL: {sl}\n"
+                f"⚙️ Trade Status: {status}"
+                f"⚙️ Trade Error: {error}"
+            )
+        send_telegram(message)
+        log_event(f"Trade: {message}")
     except Exception as e:
-        log_event(f"⚠️ Telegram error: {e}")
-
-
-def log_event(text):
-    os.makedirs('logs', exist_ok=True)  # Ensure 'logs/' directory exists
-    log_text = f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {text}"
-    print(log_text)
-    with open('logs/trades.log', 'a') as f:
-        f.write(log_text + '\n')
-
-
-def handle_trade(symbol, direction, df, trend_confirmed):
-    # if not trend_confirmed or not should_trade(df):
-    #     return
-
-    entry_price = df.iloc[-1]['close']
-    levels = calculate_trade_levels(entry_price, direction, df)
-     ## path = save_chart(df, symbol)
-    side = 'buy' if direction == 'long' else 'sell'
-
-    print(f"💰 starting kucoin trade.")
-    trade_result = place_futures_order(
-            exchange=kucoin_futures,
-            symbol=symbol,
-            side=side,
-            usdt_amount=3,
-            tp_price=levels['take_profit'],
-            sl_price=levels['stop_loss'],
-            leverage=10
-        )
-    print(f"🔍 KuCoin trade results:\n{trade_result}")
-    status = trade_result.get('status', 'unknown')
-    message = (
-            f"{'📈 LONG' if direction == 'long' else '📉 SHORT'} SIGNAL for {symbol} ({TIMEFRAME})\n"
-            f"Confirmed by 15m {'up' if direction == 'long' else 'down'}trend\n\n"
-            f" Entry: {levels['entry']}\n"
-            f"🎯 TP: {levels['take_profit']}\n"
-            f"🛑 SL: {levels['stop_loss']}\n"
-            f"⚙️ Trade Status: {status}"
-        )
-    send_telegram(message)
-     #send_telegram(message, image_path=path)
-    log_event(f"Trade: {message}")
-
+        log_event(f"❌ Error in handle_trade for {symbol}: {e}")
 
 def process_pair(symbol):
-    # Wait for global trade permission
-    can_trade_event.wait()
-    if can_place_order(symbol, can_trade_event):
+    allowed, reason = can_place_order(symbol)
+    if allowed or TRADING_SIGNALS_ONLY:
+        if not allowed:
+            log_event(f"⚠️ Trading anyway (signals only): {reason}")
+        else:
+            log_event(f"✅ {symbol} passed trade checks.")
+
+        log_event(f"🔍 Checking {symbol} on {TIMEFRAME} timeframe...")
         log_event(f"🔍 Checking {symbol} on {TIMEFRAME} timeframe...")
         lower_df = fetch_data(symbol, TIMEFRAME)
         if lower_df is None or len(lower_df) < 51:
             log_event(f"⚠️ Skipping {symbol} — insufficient lower timeframe data.")
             return
         lower_df = calculate_mas(lower_df)
-
+ 
         now = time.time()
         if symbol not in higher_timeframe_cache or now - higher_timeframe_cache[symbol]['timestamp'] > 900:
             higher_df = fetch_data(symbol, '15m')
@@ -130,45 +121,68 @@ def process_pair(symbol):
         else:
             higher_df = higher_timeframe_cache[symbol]['data']
 
-        trend_up = higher_df.iloc[-1]['ma20'] > higher_df.iloc[-1]['ma50']
-        trend_down = higher_df.iloc[-1]['ma20'] < higher_df.iloc[-1]['ma50']
+        ma20_slope = higher_df['ma20'].iloc[-1] - higher_df['ma20'].iloc[-4]
 
-            #and trend_down - add back to each IF
-        if check_long_signal(lower_df) and trend_up and not is_near_resistance(higher_df):
-            handle_trade(symbol, 'long', lower_df, trend_up)
-        elif check_short_signal(lower_df) and trend_down :
-            handle_trade(symbol, 'short', lower_df, trend_down)
-        elif  is_ranging(lower_df):
+        trend_up = (
+            higher_df['ma20'].iloc[-1] > higher_df['ma50'].iloc[-1] and
+            higher_df['ma20'].iloc[-1] > higher_df['ma20'].iloc[-5] and
+            ma20_slope > 0  # upward slope confirmation
+        )
+
+        trend_down = (
+            higher_df['ma20'].iloc[-1] < higher_df['ma50'].iloc[-1] and
+            higher_df['ma20'].iloc[-1] < higher_df['ma20'].iloc[-5] and
+            ma20_slope < 0  # downward slope confirmation
+        )
+
+        lower_df['rsi'] = lower_df.ta.rsi(length=14)
+        lower_df['adx'] = lower_df.ta.adx(length=14)['ADX_14']
+        lower_df['support'] = lower_df['low'].rolling(window=50).min()
+        lower_df['resistance'] = lower_df['high'].rolling(window=50).max()
+
+        if check_long_signal(lower_df) and trend_up:
+            handle_trade(symbol, 'long', lower_df,strategy_type="trend")
+        elif check_short_signal(lower_df) and trend_down:
+            handle_trade(symbol, 'short', lower_df, strategy_type="trend")
+        elif  is_ranging(lower_df) and not trend_up and not trend_down:
             buy_signal, sell_signal = check_range_trade(lower_df)
             if buy_signal:
-                handle_trade(symbol, 'long', lower_df, True)
+                handle_trade(symbol, 'long', lower_df, strategy_type="range")
             elif sell_signal:
-                handle_trade(symbol, 'short', lower_df, True)
+                handle_trade(symbol, 'short', lower_df, strategy_type="range")
 
      
         else:
             log_event(f"✅ No confirmed signal for {symbol} this cycle.")
     else:
-        print(f"Max open order already exists. Skipping new order.")
+        log_event(f"⛔ Skipping {symbol}: {reason}")
 
 
 def main():
     global filtered_pairs, last_backtest_time
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
+
 
     # Run backtest once every 24 hours or if filtered_pairs empty (first run)
-    if not filtered_pairs or (now - last_backtest_time) > timedelta(days=1):
+    if not filtered_pairs or (now - last_backtest_time) > timedelta(days=1) and check_daily_loss_limit():
         log_event("⏳ Running daily backtest...")
-        filtered_pairs = run_backtest()
+        #filtered_pairs = run_backtest()
         last_backtest_time = now
-        log_event(f"✅ Backtest complete. {len(filtered_pairs)} pairs selected.")
+        #save_last_backtest_time(now)
+        #log_event(f"✅ Backtest complete. {len(filtered_pairs)} pairs selected.")
 
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        executor.map(process_pair, filtered_pairs)
+        # from running backtest manually and updating here as server blocking api coingecko
+        generated_pairs = ['XRP/USDT:USDT', 'TRX/USDT:USDT', 'ADA/USDT:USDT', 'XLM/USDT:USDT', 'LINK/USDT:USDT', 'HBAR/USDT:USDT', 'SHIB/USDT:USDT', 'UNI/USDT:USDT', 'PEPE/USDT:USDT', 'CRO/USDT:USDT', 'APT/USDT:USDT', 'ALGO/USDT:USDT']
+
+        schedule.every().day.at("21:00").do(fetch_kucoin_balance_and_notify)
+    else:
+        log_event("🕒 Skipping pair processing due to loss of balance  ...\n")
+    for pair in generated_pairs:
+        process_pair(pair)
 
 
 if __name__ == '__main__':
     while True:
         main()
-        log_event("🕒 Waiting 1 minute until next cycle...\n")
-        time.sleep(60)
+        log_event("🕒 Waiting 5 minutes until next cycle...\n")
+        time.sleep(300)

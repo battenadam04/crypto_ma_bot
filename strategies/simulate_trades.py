@@ -3,20 +3,20 @@ import os
 from datetime import datetime, timedelta
 import ccxt
 import pandas as pd
+import pandas_ta as ta
 import time
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 
 from utils.utils import (
-    check_long_signal, check_short_signal, calculate_trade_levels,add_atr_column,
-    is_near_resistance, check_range_trade, is_ranging,
+    check_long_signal, check_short_signal, calculate_trade_levels,add_atr_column, check_range_trade, is_ranging, log_event,
 )
 from utils.kuCoinUtils import init_kucoin_futures, get_top_futures_tradable_pairs
 
 kucoin_futures = init_kucoin_futures()
 PAIRS = get_top_futures_tradable_pairs(kucoin_futures, quote='USDT', top_n=20)
 
-def fetch_data(pair, timeframe='1m', days=7):
+def fetch_data(pair, timeframe='5m', days=90):
     all_ohlcv = []
     now = datetime.now()
     since = int((now - timedelta(days=days)).timestamp() * 1000)
@@ -68,11 +68,47 @@ def fetch_data(pair, timeframe='1m', days=7):
 
     return df
 
+def fetch_higher_timeframe_data(pair, timeframe='15m', days=90):
+    all_ohlcv = []
+    now = datetime.now()
+    since = int((now - timedelta(days=days)).timestamp() * 1000)
+
+    limit = 200
+    loops = 0
+    while loops < 30:
+        ohlcv = kucoin_futures.fetch_ohlcv(pair, timeframe=timeframe, since=since, limit=limit)
+        if not ohlcv:
+            break
+        all_ohlcv.extend(ohlcv)
+        last_timestamp = ohlcv[-1][0]
+        since = last_timestamp + 60_000 * 15  # advance 1h
+        loops += 1
+        time.sleep(0.3)
+        if len(all_ohlcv) >= 1000:
+            break
+
+    if not all_ohlcv:
+        return pd.DataFrame()
+
+    seen = set()
+    unique_ohlcv = []
+    for row in all_ohlcv:
+        if row[0] not in seen:
+            unique_ohlcv.append(row)
+            seen.add(row[0])
+
+    df = pd.DataFrame(unique_ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+    df['ma20'] = df['close'].rolling(20).mean()
+    df['ma50'] = df['close'].rolling(50).mean()
+    return df
 
 
-def check_trade_outcome(df, start_idx, direction, entry_price, max_lookahead=100):
+
+
+def check_trade_outcome(df, start_idx, direction, entry_price, max_lookahead=50, strategy="trend"):
     df = add_atr_column(df, period=7)
-    levels = calculate_trade_levels(entry_price, direction, df, start_idx)
+    levels = calculate_trade_levels(entry_price, direction, df, start_idx, strategy)
     tp, sl = levels['take_profit'], levels['stop_loss']
 
     for j in range(1, max_lookahead + 1):
@@ -93,36 +129,39 @@ def check_trade_outcome(df, start_idx, direction, entry_price, max_lookahead=100
     else:
         return 'win' if final_close < entry_price else 'loss'
 
-def simulate_combined_strategy(pair, df):
+def simulate_combined_strategy(pair, df_5m,df_1h):
     long_wins = long_losses = long_none = 0
     short_wins = short_losses = short_none = 0
     strategy_used = []
 
-    for i in range(60, len(df) - 10):
-        slice_df = df.iloc[:i+1]
-        current = df.iloc[i]
+    for i in range(60, len(df_5m) - 10):
+        slice_df = df_5m.iloc[:i+1]
+        current = df_5m.iloc[i]
         entry_price = float(current['close'])
 
-        # Higher timeframe (~15m from 1m candles)
-        higher_df = df.iloc[max(0, i - 60):i + 1]
+        # Find nearest 1h candle for current 5m timestamp
+        curr_time = df_5m.iloc[i]['timestamp']
+        htf_slice = df_1h[df_1h['timestamp'] <= curr_time].iloc[-5:]
 
-# Calculate MA20 slope over the last 3 candles
-        ma20_slope = higher_df['ma20'].iloc[-1] - higher_df['ma20'].iloc[-4]
+        if len(htf_slice) < 5:
+            continue  # not enough higher timeframe data
+
+        ma20_slope = htf_slice['ma20'].iloc[-1] - htf_slice['ma20'].iloc[0]
 
         trend_up = (
-            higher_df['ma20'].iloc[-1] > higher_df['ma50'].iloc[-1] and
-            higher_df['ma20'].iloc[-1] > higher_df['ma20'].iloc[-5] and
-            ma20_slope > 0  # upward slope confirmation
+            htf_slice['ma20'].iloc[-1] > htf_slice['ma50'].iloc[-1] and
+            htf_slice['ma20'].iloc[-1] > htf_slice['ma20'].iloc[-5] and
+            ma20_slope > 0
         )
 
         trend_down = (
-            higher_df['ma20'].iloc[-1] < higher_df['ma50'].iloc[-1] and
-            higher_df['ma20'].iloc[-1] < higher_df['ma20'].iloc[-5] and
-            ma20_slope < 0  # downward slope confirmation
+            htf_slice['ma20'].iloc[-1] < htf_slice['ma50'].iloc[-1] and
+            htf_slice['ma20'].iloc[-1] < htf_slice['ma20'].iloc[-5] and
+            ma20_slope < 0
         )
-
-        if check_long_signal(slice_df) and trend_up and not is_near_resistance(slice_df):
-                result = check_trade_outcome(df, i, 'long', entry_price)
+            #and not is_near_resistance(slice_df)
+        if check_long_signal(slice_df) and trend_up:
+                result = check_trade_outcome(df_5m, i, 'buy', entry_price, 50, 'trend')
                 strategy_used.append('ma')
                 if result == 'win':
                     long_wins += 1
@@ -131,7 +170,7 @@ def simulate_combined_strategy(pair, df):
                 else:
                     long_none += 1
         elif check_short_signal(slice_df) and trend_down :
-                result = check_trade_outcome(df, i, 'short', entry_price)
+                result = check_trade_outcome(df_5m, i, 'sell', entry_price, 50, 'trend')
                 strategy_used.append('ma')
                 if result == 'win':
                     short_wins += 1
@@ -139,10 +178,10 @@ def simulate_combined_strategy(pair, df):
                     short_losses += 1
                 else:
                     short_none += 1
-        elif is_ranging(slice_df):
+        elif is_ranging(slice_df) and not trend_up and not trend_down:
             buy_signal, sell_signal = check_range_trade(slice_df)
             if buy_signal:
-                result = check_trade_outcome(df, i, 'long', entry_price)
+                result = check_trade_outcome(df_5m, i, 'buy', entry_price, 50, 'range')
                 strategy_used.append('range')
                 if result == 'win':
                     long_wins += 1
@@ -151,7 +190,7 @@ def simulate_combined_strategy(pair, df):
                 else:
                     long_none += 1
             elif sell_signal:
-                result = check_trade_outcome(df, i, 'short', entry_price)
+                result = check_trade_outcome(df_5m, i, 'sell', entry_price, 50, 'range')
                 strategy_used.append('range')
                 if result == 'win':
                     short_wins += 1
@@ -168,13 +207,13 @@ def simulate_combined_strategy(pair, df):
     range_used = strategy_used.count('range')
     ma_used = strategy_used.count('ma')
 
-    print(f"\n--- Results for {pair} ---")
-    print(f"Total Trades: {total_trades}")
-    print(f"Wins: {total_wins} (Long: {long_wins}, Short: {short_wins})")
-    print(f"Losses: {long_losses + short_losses} (Long: {long_losses}, Short: {short_losses})")
-    print(f"Unresolved: {long_none + short_none} (Long: {long_none}, Short: {short_none})")
-    print(f"Win Rate: {win_rate}%")
-    print(f"MA Usage: {ma_used}, Range Usage: {range_used}")
+    log_event(f"\n--- Results for {pair} ---")
+    log_event(f"Total Trades: {total_trades}")
+    log_event(f"Wins: {total_wins} (Long: {long_wins}, Short: {short_wins})")
+    log_event(f"Losses: {long_losses + short_losses} (Long: {long_losses}, Short: {short_losses})")
+    log_event(f"Unresolved: {long_none + short_none} (Long: {long_none}, Short: {short_none})")
+    log_event(f"Win Rate: {win_rate}%")
+    log_event(f"MA Usage: {ma_used}, Range Usage: {range_used}")
 
     return {
                 'win_rate': win_rate,
@@ -189,10 +228,13 @@ def run_backtest():
     for pair in PAIRS:
         try:
             symbol = pair[0]
-            df = fetch_data(symbol, '1m', days=7)
+            df = fetch_data(symbol, '5m', days=90)
+            df_1h = fetch_higher_timeframe_data(symbol, '15m', days=90)
+            #print(f"CHECKING BACKTESTDF:{pair,len(df)}" )
             if len(df) > 300:
-                result = simulate_combined_strategy(pair, df)
-                if result['win_rate'] >= 60:
+                result = simulate_combined_strategy(pair, df, df_1h)
+                log_event(f"CHECKING BACKTEST: {result}")
+                if result['win_rate'] >= 65:
                     good_pairs.append(pair[0])
         except Exception as e:
                 print(f"❌ Error backtesting {pair}: {e}")
