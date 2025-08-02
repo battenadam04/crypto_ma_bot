@@ -66,7 +66,7 @@ def handle_trade(symbol, direction, df, strategy_type="trend"):
                 df=df,
                 symbol=symbol,
                 side=side,
-                capital=10,
+                capital=50,
                 leverage=10,
                 strategy_type=strategy_type
             )
@@ -172,7 +172,7 @@ def main():
         #log_event(f"✅ Backtest complete. {len(filtered_pairs)} pairs selected.")
 
         # from running backtest manually and updating here as server blocking api coingecko
-        generated_pairs = ['XRP/USDT:USDT', 'TRX/USDT:USDT', 'ADA/USDT:USDT', 'XLM/USDT:USDT', 'LINK/USDT:USDT', 'HBAR/USDT:USDT', 'SHIB/USDT:USDT', 'UNI/USDT:USDT', 'PEPE/USDT:USDT', 'CRO/USDT:USDT', 'APT/USDT:USDT', 'ALGO/USDT:USDT']
+        generated_pairs = ['XRP/USDT:USDT', 'SOL/USDT:USDT', 'TRX/USDT:USDT', 'SUI/USDT:USDT', 'LINK/USDT:USDT', 'HBAR/USDT:USDT', 'SHIB/USDT:USDT', 'DOT/USDT:USDT', 'UNI/USDT:USDT', 'PEPE/USDT:USDT', 'ENA/USDT:USDT', 'NEAR/USDT:USDT', 'APT/USDT:USDT', 'ONDO/USDT:USDT']
 
         schedule.every().day.at("21:00").do(fetch_kucoin_balance_and_notify)
     else:
