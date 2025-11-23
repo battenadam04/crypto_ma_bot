@@ -1,8 +1,8 @@
 # Strategy-specific configs
 strategy_settings = {
     "trend": {
-        "atr_tp": 3.0,          # More generous profit target
-        "atr_sl": 1.5,          # Keep same or slightly lower
+        "atr_tp": 3.0,          
+        "atr_sl": 1.5,         
         "min_tp_pct": 0.012,    # 1.2%
         "min_sl_pct": 0.006     # 0.6%
     },

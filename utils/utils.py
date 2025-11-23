@@ -15,7 +15,6 @@ def set_leverage(exchange, symbol, leverage):
         exchange.set_leverage(
             leverage=leverage,
             symbol=symbol,
-            #params={"marginMode": "cross"}  # ✅ Required for KuCoin Futures
         )
     except Exception as e:
         print(f"⚠️ Failed to set leverage for {symbol}: {str(e)}")

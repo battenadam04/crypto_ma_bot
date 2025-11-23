@@ -1,5 +1,6 @@
 
 import ccxt
+import os
 from config import KUCOIN_API_KEY, KUCOIN_SECRET_KEY, KUCOIN_PASSPHRASE, TRADING_SIGNALS_ONLY
 import time
 from datetime import datetime, timezone
@@ -11,22 +12,41 @@ from utils.utils import calculate_trade_levels, get_decimal_places, get_filled_p
 max_wait_seconds = 300
 poll_interval = 1
 
-EXCHANGE = ccxt.kucoin({
-        'apiKey': KUCOIN_API_KEY,
-        'secret': KUCOIN_SECRET_KEY,
-        'password': KUCOIN_PASSPHRASE,
-        'enableRateLimit': True
-})
+EXCHANGE_NAME = os.getenv("EXCHANGE", "kucoin")  # default kucoin
 
-def init_kucoin_futures():
-    futures = ccxt.kucoinfutures({
-        'apiKey': KUCOIN_API_KEY,
-        'secret': KUCOIN_SECRET_KEY,
-        'password': KUCOIN_PASSPHRASE,
-        'enableRateLimit': True
-    })
-    futures.load_markets()
-    return futures
+def init_exchange():
+    if EXCHANGE_NAME == "kucoin":
+        exchange = ccxt.kucoin({
+            'apiKey': os.getenv("KUCOIN_API_KEY"),
+            'secret': os.getenv("KUCOIN_SECRET_KEY"),
+            'password': os.getenv("KUCOIN_PASSPHRASE"),
+            'enableRateLimit': True
+        })
+    
+    elif EXCHANGE_NAME == "kucoin_futures":
+        exchange = ccxt.kucoinfutures({
+            'apiKey': os.getenv("KUCOIN_API_KEY"),
+            'secret': os.getenv("KUCOIN_SECRET_KEY"),
+            'password': os.getenv("KUCOIN_PASSPHRASE"),
+            'enableRateLimit': True
+        })
+    
+    elif EXCHANGE_NAME == "binance_margin":
+        exchange = ccxt.binance({
+            'apiKey': os.getenv("BINANCE_API_KEY"),
+            'secret': os.getenv("BINANCE_SECRET_KEY"),
+            'enableRateLimit': True,
+            'options': {
+                'defaultType': 'margin'  # very important for margin trading
+            }
+        })
+    
+    else:
+        raise ValueError(f"Unsupported exchange: {EXCHANGE_NAME}")
+
+    exchange.load_markets()
+    return exchange
+
 
 loss_tracker = {}
 MAX_LOSSES = 5
@@ -36,8 +56,8 @@ MAX_OPEN_ORDERS = 3
 # TODO: update loss tracker
 def can_place_order(symbol):
     try:
-        kucoin_futures = init_kucoin_futures()
-        positions = kucoin_futures.fetch_positions()
+        exchange = init_exchange()
+        positions = exchange.fetch_positions()
 
         open_positions = [
             p for p in positions if float(p['contracts']) > 0
@@ -98,57 +118,136 @@ def get_top_volume_pairs(exchange, quote='USDT', top_n=5):
     return [pair[0] for pair in top_pairs]
 
 
-def get_top_futures_tradable_pairs(exchange, quote='USDT', top_n=15, min_volume=1_000_000, min_market_cap_usd=1_000_000_000):
-    print("⏳ Loading KuCoin Futures markets...")
+def _binance_quote_volumes(exchange):
+    """
+    Build {symbol: quote_volume_float} using Binance public 24h ticker.
+    No reliance on markets_by_id; we map ids -> unified symbols via safe_symbol().
+    """
+    if exchange is None:
+        return {}
+
+    volumes = {}
     try:
-        markets = exchange.load_markets()
-    except Exception as e:
-        print("❌ Error loading markets:", e)
-        return []
+        raw = exchange.publicGetTicker24hr()  # public spot endpoint (works for margin routing too)
+    except Exception:
+        raw = []
+
+    markets = getattr(exchange, "markets", {}) or {}
+
+    for item in raw or []:
+        market_id = item.get("symbol")  # e.g., 'BTCUSDT'
+        if not market_id:
+            continue
+
+        # Get a unified symbol like 'BTC/USDT'
+        try:
+            sym = exchange.safe_symbol(market_id)
+        except Exception:
+            sym = None
+        if not sym or sym not in markets:
+            continue  # skip symbols not in the loaded markets
+
+        qv = item.get("quoteVolume") or item.get("quoteAssetVolume") or item.get("volume")
+        try:
+            volumes[sym] = float(qv) if qv is not None else 0.0
+        except Exception:
+            volumes[sym] = 0.0
+
+    return volumes
+
+
+def get_top_tradable_pairs(
+    exchange_or_markets,
+    quote='USDT',
+    top_n=15,
+    min_volume=1_000_000,
+    min_market_cap_usd=1_000_000_000,
+):
+    """
+    If EXCHANGE contains 'binance' -> use a Binance-specific clause (no 'linear' check,
+    volumes from public 24h ticker). Otherwise keep original KuCoin-style logic.
+    Assumes markets are already loaded by the caller.
+    """
+    ex_env = (os.getenv("EXCHANGE", "") or "").lower()
     market_caps = fetch_market_caps(min_market_cap_usd)
-    stablecoins = {'USDT', 'USDC', 'BUSD', 'TUSD', 'DAI', 'FDUSD', 'UST'}
+    stablecoins = {'USDT', 'USDC', 'BUSD', 'TUSD', 'DAI', 'FDUSD', 'UST','USDE', 'USD1'}
     filtered_pairs = []
 
-    for symbol, market in markets.items():
-        # Filter for futures markets with the specified quote currency
-        if market.get('future', False):
-            continue
-        if market.get('quote') != quote:
-            continue
-        if not market.get('linear', False):
-            continue
-        if not market.get('active', False):
-            continue
+    # Allow passing either the markets dict, or the CCXT exchange object
+    if isinstance(exchange_or_markets, dict):
+        markets = exchange_or_markets
+        exchange_obj = None
+    else:
+        exchange_obj = exchange_or_markets
+        markets = getattr(exchange_obj, "markets", {}) or {}
 
-        base = market.get('base')
-        if base in stablecoins:
-            continue  # Skip stablecoin-to-stablecoin pairs
+    # -------------------------
+    # BINANCE PATH (spot/margin)
+    # -------------------------
+    if "binance" in ex_env:
+        volumes_by_symbol = _binance_quote_volumes(exchange_obj) if exchange_obj else {}
 
-        if base not in market_caps:
-            # Skip pairs whose base coin market cap is below threshold
-            continue
+        for symbol, market in markets.items():
+            if market.get('quote') != quote:
+                continue
+            if not market.get('active', True):
+                continue
+            if not market.get('spot', False):
+                continue  # margin routes through spot symbols
 
-               # Check 24h volume
-        vol_value = market.get('info', {}).get('volumeOf24h')
-        if vol_value is None:
-            continue
-        try:
-            volume = float(vol_value)
-        except Exception:
-            continue
+            base = market.get('base')
+            if not base or base in stablecoins:
+                continue
+            if base not in market_caps:
+                continue
 
-        if volume < min_volume:
-            continue
+            volume = volumes_by_symbol.get(symbol, 0.0)
+            if volume < float(min_volume):
+                continue
 
-        filtered_pairs.append((symbol, market_caps[base], volume))
+            filtered_pairs.append((symbol, market_caps[base], volume))
 
-    # Sort by market cap descending, then volume descending
-    sorted_pairs = sorted(filtered_pairs, key=lambda x: (x[1], x[2]), reverse=True)[:top_n]
-    print(f"{sorted_pairs}")
+    # -------------------------
+    # DEFAULT (KUCOIN) PATH —
+    # -------------------------
+    else:
+        for symbol, market in markets.items():
+            # Filter for futures markets with the specified quote currency
+            if market.get('future', False):
+                continue
+            if market.get('quote') != quote:
+                continue
+            if not market.get('linear', False):
+                continue
+            if not market.get('active', False):
+                continue
 
-    #print(f"🔥 Top {top_n} pairs filtered by market cap > {min_market_cap_usd} USD and volume > {min_volume} USD:")
+            base = market.get('base')
+            if base in stablecoins:
+                continue  # Skip stablecoin-to-stablecoin pairs
 
-    return sorted_pairs
+            if base not in market_caps:
+                continue  # below market-cap threshold
+
+            # KuCoin-specific volume field
+            vol_value = market.get('info', {}).get('volumeOf24h')
+            if vol_value is None:
+                continue
+            try:
+                volume = float(vol_value)
+            except Exception:
+                continue
+
+            if volume < min_volume:
+                continue
+
+            filtered_pairs.append((symbol, market_caps[base], volume))
+
+    # Sort by market cap, then volume
+    filtered_pairs.sort(key=lambda x: (x[1], x[2]), reverse=True)
+    return filtered_pairs[:top_n]
+
+
 
 
 def place_entry_order_with_fallback(exchange, symbol, side, amount, entry_price, leverage):
@@ -496,17 +595,17 @@ def place_tp_sl_orders(exchange, symbol, side, amount, tp_price, sl_price, fille
         'filled_price': None
     }
 
-def fetch_kucoin_balance_and_notify():
+def fetch_balance_and_notify():
     try:
         global start_of_day_balance
-        balance = init_kucoin_futures().fetch_balance()
+        balance = init_exchange().fetch_balance()
         start_of_day_balance = balance
         usdt = balance['total'].get('USDT', 0)
         available = balance['free'].get('USDT', 0)
         timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
 
         message = (
-            f"📊 KuCoin Futures Balance at {timestamp}:\n"
+            f"📊 Balance at {timestamp}:\n"
             f"Total USDT: {usdt:.2f}\n"
             f"Available USDT: {available:.2f}"
         )

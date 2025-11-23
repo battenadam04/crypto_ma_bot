@@ -15,8 +15,8 @@ from utils.utils import (
     add_atr_column, calculate_mas, check_long_signal, check_short_signal,is_ranging, check_range_trade, log_event, send_telegram
 )
 
-from utils.kuCoinUtils import (
-    fetch_kucoin_balance_and_notify, get_top_futures_tradable_pairs, init_kucoin_futures,
+from utils.exchangeUtils import (
+    fetch_balance_and_notify, get_top_tradable_pairs, init_exchange,
     place_futures_order,can_place_order
 )
 
@@ -27,8 +27,7 @@ BACKTEST_STATE_FILE = "last_backtest.json"
 can_trade_event = threading.Event()
 can_trade_event.set()  # Initially allow trading
 
-kucoin_futures = init_kucoin_futures()
-EXCHANGE = ccxt.kucoin()
+exchange = init_exchange()
 TIMEFRAME = '5m'
 MAX_OPEN_TRADES = 3
 MAX_LOSSES = 3
@@ -45,7 +44,7 @@ def fetch_data(symbol, timeframe=TIMEFRAME, limit=350):
         hours_back = 6 if timeframe == '5m' else 48
         since_dt = datetime.now(timezone.utc) - timedelta(hours=hours_back)
         since_ms = int(since_dt.timestamp() * 1000)  # ✅ convert to ms
-        ohlcv = kucoin_futures.fetch_ohlcv(symbol, timeframe=timeframe, since=since_ms, limit=limit)
+        ohlcv = exchange.fetch_ohlcv(symbol, timeframe=timeframe, since=since_ms, limit=limit)
         df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
         print(f"⏱️ Fetching data for {symbol} since {since_dt.isoformat()} ({since_ms})")
@@ -60,9 +59,9 @@ def handle_trade(symbol, direction, df, strategy_type="trend"):
     try:
         df = add_atr_column(df)
         side = 'buy' if direction == 'long' else 'sell'
-        log_event(f"💰 starting kucoin trade: {strategy_type} for {direction}")
+        log_event(f"💰 Starting trade: {strategy_type} for {direction}")
         trade_result = place_futures_order(
-                exchange=kucoin_futures,
+                exchange=exchange,
                 df=df,
                 symbol=symbol,
                 side=side,
@@ -70,7 +69,7 @@ def handle_trade(symbol, direction, df, strategy_type="trend"):
                 leverage=10,
                 strategy_type=strategy_type
             )
-        log_event(f"🔍 KuCoin trade results:\n{trade_result}")
+        log_event(f"🔍 Trade results:\n{trade_result}")
         status = trade_result.get('status', 'unknown')
         error = trade_result.get('message', 'none')
         filledEntry = trade_result.get('filled_entry', 'none')
@@ -172,9 +171,9 @@ def main():
         #log_event(f"✅ Backtest complete. {len(filtered_pairs)} pairs selected.")
 
         # from running backtest manually and updating here as server blocking api coingecko
-        generated_pairs = ['XRP/USDT:USDT', 'SOL/USDT:USDT', 'TRX/USDT:USDT', 'SUI/USDT:USDT', 'LINK/USDT:USDT', 'HBAR/USDT:USDT', 'SHIB/USDT:USDT', 'DOT/USDT:USDT', 'UNI/USDT:USDT', 'PEPE/USDT:USDT', 'ENA/USDT:USDT', 'NEAR/USDT:USDT', 'APT/USDT:USDT', 'ONDO/USDT:USDT']
+        generated_pairs = ['WBETH/USDT', 'WBTC/USDT', 'USDE/USDT', 'SHIB/USDT', 'BNSOL/USDT', 'USD1/USDT', 'BONK/USDT', 'BFUSD/USDT', 'NEXO/USDT']
 
-        schedule.every().day.at("21:00").do(fetch_kucoin_balance_and_notify)
+        schedule.every().day.at("21:00").do(fetch_balance_and_notify)
     else:
         log_event("🕒 Skipping pair processing due to loss of balance  ...\n")
     for pair in generated_pairs:

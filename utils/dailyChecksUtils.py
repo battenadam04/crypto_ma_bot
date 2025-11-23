@@ -1,4 +1,4 @@
-from utils.kuCoinUtils import fetch_kucoin_balance_and_notify
+from utils.exchangeUtils import fetch_balance_and_notify
 from utils.utils import send_telegram
 
 
@@ -12,7 +12,7 @@ def check_daily_loss_limit():
         print("🚨 Trading disabled due to previous loss trigger.")
         return False
 
-    current_balance = fetch_kucoin_balance_and_notify()
+    current_balance = fetch_balance_and_notify()
 
     if start_of_day_balance is None:
         print("⚠️ No start-of-day balance set, skipping check.")

@@ -1,7 +1,7 @@
 import sys
 import os
 from datetime import datetime, timedelta
-import ccxt
+
 import pandas as pd
 import pandas_ta as ta
 import time
@@ -11,22 +11,23 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 from utils.utils import (
     check_long_signal, check_short_signal, calculate_trade_levels,add_atr_column, check_range_trade, is_ranging, log_event,
 )
-from utils.kuCoinUtils import init_kucoin_futures, get_top_futures_tradable_pairs
+from utils.exchangeUtils import init_exchange, get_top_tradable_pairs
 
-kucoin_futures = init_kucoin_futures()
-PAIRS = get_top_futures_tradable_pairs(kucoin_futures, quote='USDT', top_n=20)
+exchange = init_exchange()
+PAIRS = get_top_tradable_pairs(exchange, quote='USDT', top_n=20)
+
 
 def fetch_data(pair, timeframe='5m', days=90):
     all_ohlcv = []
     now = datetime.now()
     since = int((now - timedelta(days=days)).timestamp() * 1000)
 
-    limit = 200  # KuCoin hard limit
-    max_tries = 30  # You can increase this if needed
+    limit = 200  # hard limit
+    max_tries = 30  #increase this if needed
     loops = 0
 
     while loops < max_tries:
-        ohlcv = kucoin_futures.fetch_ohlcv(pair, timeframe=timeframe, since=since, limit=limit)
+        ohlcv = exchange.fetch_ohlcv(pair, timeframe=timeframe, since=since, limit=limit)
 
         if not ohlcv:
             break
@@ -76,7 +77,7 @@ def fetch_higher_timeframe_data(pair, timeframe='15m', days=90):
     limit = 200
     loops = 0
     while loops < 30:
-        ohlcv = kucoin_futures.fetch_ohlcv(pair, timeframe=timeframe, since=since, limit=limit)
+        ohlcv = exchange.fetch_ohlcv(pair, timeframe=timeframe, since=since, limit=limit)
         if not ohlcv:
             break
         all_ohlcv.extend(ohlcv)
@@ -233,8 +234,9 @@ def run_backtest():
             #print(f"CHECKING BACKTESTDF:{pair,len(df)}" )
             if len(df) > 300:
                 result = simulate_combined_strategy(pair, df, df_1h)
+                print(f"CHECKING:{result}" )
                 log_event(f"CHECKING BACKTEST: {result}")
-                if result['win_rate'] >= 65:
+                if result['win_rate'] >= 55:
                     good_pairs.append(pair[0])
         except Exception as e:
                 print(f"❌ Error backtesting {pair}: {e}")
