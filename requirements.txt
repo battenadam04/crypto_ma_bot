@@ -8,5 +8,4 @@ ta>=0.10.0                   # if you use ta-lib (e.g., RSI, MACD) via pandas-ta
 pandas-ta
 python-dotenv>=1.0.0
 mplfinance>=0.12.10b0
-pandas-ta==0.3.14b0
 schedule==1.2.1
