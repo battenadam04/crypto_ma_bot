@@ -226,6 +226,7 @@ def simulate_combined_strategy(pair, df_5m,df_1h):
 def run_backtest():
     good_pairs = []
 
+    print(f"PAIRS: {PAIRS}")
     for pair in PAIRS:
         try:
             symbol = pair[0]
