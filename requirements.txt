@@ -9,3 +9,4 @@ pandas-ta==0.4.71b0
 python-dotenv>=1.0.0
 mplfinance>=0.12.10b
 schedule==1.2.1
+setuptools>=67.0.0
