@@ -332,7 +332,7 @@ def place_futures_order(exchange, df, symbol, side, capital, leverage=10, strate
         if price is None or price <= 0:
             return {'status': 'error', 'message': f"Invalid ticker data for {symbol}: {ticker}"}
 
-        contract_value = float(market.get('contractSize', 1))
+        contract_value = float(market.get('contractSize') or 1.0)
 
         balance = exchange.fetch_balance()
         usdt_balance = balance['free'].get('USDT', 0)
