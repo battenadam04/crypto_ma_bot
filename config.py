@@ -19,3 +19,6 @@ KUCOIN_SECRET_KEY = os.getenv('KUCOIN_SECRET_KEY')
 KUCOIN_PASSPHRASE = os.getenv('KUCOIN_PASSPHRASE')
 
 TRADING_SIGNALS_ONLY = os.getenv('TRADING_SIGNALS_ONLY', 'false').lower() == 'true'
+
+# Runtime-controlled (Telegram)
+TRADING_ENABLED = False   # default OFF

@@ -1,5 +1,5 @@
 from utils.exchangeUtils import fetch_balance_and_notify
-from utils.utils import send_telegram
+from utils.telegramUtils import send_telegram
 
 
 DAILY_LOSS_LIMIT = 0.30  # 30%

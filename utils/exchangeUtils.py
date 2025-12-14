@@ -1,12 +1,14 @@
 
 import ccxt
+import config
 import os
 from config import KUCOIN_API_KEY, KUCOIN_SECRET_KEY, KUCOIN_PASSPHRASE, TRADING_SIGNALS_ONLY
 import time
 from datetime import datetime, timezone
 
 from utils.coinGeckoData import fetch_market_caps
-from utils.utils import calculate_trade_levels, get_decimal_places, get_filled_price, log_event, safe_place_tp_sl, send_telegram
+from utils.telegramUtils import send_telegram
+from utils.utils import calculate_trade_levels, get_decimal_places, get_filled_price, log_event, safe_place_tp_sl
 
 
 max_wait_seconds = 300
@@ -314,6 +316,10 @@ def place_entry_order_with_fallback(exchange, symbol, side, amount, entry_price,
 
 def place_futures_order(exchange, df, symbol, side, capital, leverage=10, strategy_type="range"):
     try:
+
+        if not config.TRADING_ENABLED:
+         return {"status": "skipped", "reason": "Trading disabled"}
+    
         exchange.load_markets()
         market = exchange.market(symbol)
 

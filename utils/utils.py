@@ -332,19 +332,7 @@ def log_event(text):
     with open('logs/trades.log', 'a') as f:
         f.write(log_text + '\n')
 
-def send_telegram(text, image_path=None):
-    try:
-        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        log_event(f"Posting to Telegram")
-        requests.post(url, data={'chat_id': TELEGRAM_CHAT_ID, 'text': text})
 
-        if image_path:
-            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
-            with open(image_path, 'rb') as img:
-                requests.post(url, files={'photo': img}, data={'chat_id': TELEGRAM_CHAT_ID})
-            log_event(f"Posted to Telegram")
-    except Exception as e:
-        log_event(f"⚠️ Telegram error: {e}")
 
 
 def get_filled_price(order):

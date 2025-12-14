@@ -1,22 +1,25 @@
 import ccxt
+import config
 import pandas as pd
 import pandas_ta as ta
 import time
 from datetime import datetime,timedelta, timezone
-#from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor
 import threading
 import schedule
 
 
-from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, TRADING_SIGNALS_ONLY
+
+from config import TRADING_SIGNALS_ONLY
 from strategies.simulate_trades import run_backtest
 from utils.dailyChecksUtils import check_daily_loss_limit
+from utils.telegramUtils import poll_telegram, send_telegram
 from utils.utils import (
-    add_atr_column, calculate_mas, check_long_signal, check_short_signal,is_ranging, check_range_trade, log_event, send_telegram
+    add_atr_column, calculate_mas, check_long_signal, check_short_signal,is_ranging, check_range_trade, log_event
 )
 
 from utils.exchangeUtils import (
-    fetch_balance_and_notify, get_top_tradable_pairs, init_exchange,
+    fetch_balance_and_notify, init_exchange,
     place_futures_order,can_place_order
 )
 
@@ -56,7 +59,7 @@ def fetch_data(symbol, timeframe=TIMEFRAME, limit=350):
 
 
 def handle_trade(symbol, direction, df, strategy_type="trend"):
-    try:
+    try:    
         df = add_atr_column(df)
         side = 'buy' if direction == 'long' else 'sell'
         log_event(f"💰 Starting trade: {strategy_type} for {direction}")
@@ -101,7 +104,6 @@ def process_pair(symbol):
         else:
             log_event(f"✅ {symbol} passed trade checks.")
 
-        log_event(f"🔍 Checking {symbol} on {TIMEFRAME} timeframe...")
         log_event(f"🔍 Checking {symbol} on {TIMEFRAME} timeframe...")
         lower_df = fetch_data(symbol, TIMEFRAME)
         if lower_df is None or len(lower_df) < 51:
@@ -179,9 +181,19 @@ def main():
     for pair in generated_pairs:
         process_pair(pair)
 
-
 if __name__ == '__main__':
+    # Start Telegram polling in a background thread
+    executor = ThreadPoolExecutor(max_workers=2)  # 1 for Telegram, 1 for other tasks
+    executor.submit(poll_telegram)
+
     while True:
+        # 🔒 MASTER GATE (Telegram ON/OFF)
+        if not config.TRADING_ENABLED:
+            log_event("🚫 Trading disabled. Sleeping 10 seconds...")
+            time.sleep(10)  # prevent CPU spin and log flooding
+            continue
+
+        # ✅ Trading enabled
         main()
         log_event("🕒 Waiting 5 minutes until next cycle...\n")
         time.sleep(300)
