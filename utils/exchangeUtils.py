@@ -362,19 +362,19 @@ def place_futures_order(exchange, df, symbol, side, capital, leverage=10, strate
         print(f"• Price: {price} | Notional: {notional:.2f} | Amount: {amount}")
 
         # Skip if amount is below minimum
-        if amount < min_amount:
+        if amount < min_amount and not TRADING_SIGNALS_ONLY:
             return {'status': 'error', 'message': f"Amount {amount} is below min allowed: {min_amount}"}
 
         # Entry price (with buffer)
         buffer = 0.05
         raw_entry_price = price * (1 + buffer / 100) if side == 'buy' else price * (1 - buffer / 100)
 
-        if raw_entry_price <= min_price:
+        if raw_entry_price <= min_price and not TRADING_SIGNALS_ONLY:
             return {'status': 'error', 'message': f"Raw entry price {raw_entry_price} is below min allowed: {min_price}"}
 
         entry_price = round(raw_entry_price, price_precision)
 
-        if entry_price <= 0:
+        if entry_price <= 0 and not TRADING_SIGNALS_ONLY:
             return {'status': 'error', 'message': f"Final entry price is invalid: {entry_price}"}
         
 
