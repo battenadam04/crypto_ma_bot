@@ -97,7 +97,12 @@ def handle_trade(symbol, direction, df, strategy_type="trend"):
         log_event(f"❌ Error in handle_trade for {symbol}: {e}")
 
 def process_pair(symbol):
-    allowed, reason = can_place_order(symbol)
+    # Skip exchange position checks in signals-only mode (no API calls to Binance/etc)
+    if TRADING_SIGNALS_ONLY:
+        allowed, reason = True, "Signals only (skipping position check)"
+    else:
+        allowed, reason = can_place_order(symbol)
+
     if allowed or TRADING_SIGNALS_ONLY:
         if not allowed:
             log_event(f"⚠️ Trading anyway (signals only): {reason}")
