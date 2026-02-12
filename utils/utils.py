@@ -325,8 +325,32 @@ def check_short_signal(df, lookahead=10):
 
     return False
 
+# Log rotation: max size before rotating (5 MB), keep this many old logs
+MAX_LOG_BYTES = 5 * 1024 * 1024
+LOG_BACKUP_COUNT = 2
+
+def _rotate_log_if_needed():
+    """Rotate logs/trades.log if it exceeds MAX_LOG_BYTES."""
+    log_path = 'logs/trades.log'
+    if not os.path.exists(log_path):
+        return
+    if os.path.getsize(log_path) < MAX_LOG_BYTES:
+        return
+    # Remove oldest backup if it exists
+    oldest = f'{log_path}.{LOG_BACKUP_COUNT}'
+    if os.path.exists(oldest):
+        os.remove(oldest)
+    # Shift backups: .2 -> .3, .1 -> .2, current -> .1
+    for i in range(LOG_BACKUP_COUNT - 1, 0, -1):
+        src = f'{log_path}.{i}'
+        dst = f'{log_path}.{i + 1}'
+        if os.path.exists(src):
+            os.rename(src, dst)
+    os.rename(log_path, f'{log_path}.1')
+
 def log_event(text):
-    os.makedirs('logs', exist_ok=True)  # Ensure 'logs/' directory exists
+    os.makedirs('logs', exist_ok=True)
+    _rotate_log_if_needed()
     log_text = f"[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}] {text}"
     print(log_text)
     with open('logs/trades.log', 'a') as f:

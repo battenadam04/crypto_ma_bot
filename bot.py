@@ -189,8 +189,8 @@ if __name__ == '__main__':
     while True:
         # 🔒 MASTER GATE (Telegram ON/OFF)
         if not config.TRADING_ENABLED:
-            log_event("🚫 Trading disabled. Sleeping 10 seconds...")
-            time.sleep(10)  # prevent CPU spin and log flooding
+            log_event("🚫 Trading disabled. Sleeping 60 seconds...")
+            time.sleep(60)  # reduce CPU/log load when idle (Telegram thread handles /on)
             continue
 
         # ✅ Trading enabled

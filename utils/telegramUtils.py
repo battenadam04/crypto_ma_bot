@@ -16,18 +16,12 @@ def get_updates():
         log_event("❌ TELEGRAM_TOKEN is not set")
         return []
 
-    log_event(f"🔍 Trying to check Telegram updates...")
-
-    url = f"https://api.telegram.org/bot{config.TELEGRAM_TOKEN}/getUpdates?timeout=10&offset={last_update_id + 1}"
-    log_event(f"URL being called: {url}")
-
+    url = f"https://api.telegram.org/bot{config.TELEGRAM_TOKEN}/getUpdates?timeout=30&offset={last_update_id + 1}"
     try:
-        response = requests.get(url, timeout=15)
-        log_event(f"HTTP Status Code: {response.status_code}")
+        response = requests.get(url, timeout=35)  # slightly longer than API timeout
         response.raise_for_status()  # raises HTTPError if 4xx/5xx
 
         data = response.json()
-        log_event(f"Full Telegram response: {data}")
 
         # 2️⃣ Check if response is valid
         if "ok" not in data or not data["ok"]:
@@ -58,12 +52,15 @@ def send_telegram(text, image_path=None):
     except Exception as e:
         log_event(f"⚠️ Telegram error: {e}")
 
+# Seconds to wait between polls when no updates (reduces memory/CPU on limited environments)
+TELEGRAM_POLL_IDLE_SECONDS = 90
+
 def poll_telegram():
     global last_update_id
     while True:
         updates = get_updates()
         if not updates:
-            time.sleep(1)
+            time.sleep(TELEGRAM_POLL_IDLE_SECONDS)
             continue
 
         # Take the last (latest) update
