@@ -178,7 +178,7 @@ def main():
         #log_event(f"✅ Backtest complete. {len(filtered_pairs)} pairs selected.")
 
         # from running backtest manually and updating here as server blocking api coingecko
-        generated_pairs = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'XRP/USDT', 'TRX/USDT', 'DOGE/USDT', 'ADA/USDT', 'BCH/USDT', 'WBTC/USDT', 'LINK/USDT', 'XLM/USDT', 'ZEC/USDT', 'LTC/USDT', 'SUI/USDT', 'AVAX/USDT', 'HBAR/USDT', 'SHIB/USDT', 'TON/USDT', 'UNI/USDT']
+        generated_pairs = ['BTC/USDT', 'ETH/USDT', 'XRP/USDT', 'BNB/USDT', 'SOL/USDT', 'TRX/USDT', 'DOGE/USDT', 'ADA/USDT', 'LINK/USDT', 'XLM/USDT', 'HBAR/USDT', 'LTC/USDT', 'AVAX/USDT', 'SHIB/USDT', 'SUI/USDT', 'UNI/USDT']
 
         schedule.every().day.at("21:00").do(fetch_balance_and_notify)
     else:

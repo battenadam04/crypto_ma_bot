@@ -158,6 +158,31 @@ def _binance_quote_volumes(exchange):
     return volumes
 
 
+def _fetch_binance_margin_symbols(exchange_obj, quote='USDT'):
+    """
+    Fetch the actual margin-enabled symbols from Binance's margin API.
+    Uses isolated + cross margin endpoints; isMarginTradingAllowed in exchange
+    info can be inaccurate (e.g. TON/USDT has spot but NOT margin).
+    """
+    allowed = set()
+    try:
+        # Isolated margin pairs (GET /sapi/v1/margin/isolated/allPairs)
+        isolated = exchange_obj.sapi_get_margin_isolated_allpairs()
+        for p in isolated or []:
+            if p.get('quote') == quote and p.get('isMarginTrade', False):
+                allowed.add(str(p.get('symbol', '')).replace('/', ''))
+        # Cross margin pairs (GET /sapi/v1/margin/allPairs)
+        cross = exchange_obj.sapi_get_margin_allpairs()
+        for p in cross or []:
+            sym = str(p.get('symbol', '')).replace('/', '')
+            if p.get('quote') == quote or (sym and sym.endswith(quote)):
+                allowed.add(sym)
+    except Exception as e:
+        log_event(f"⚠️ Could not fetch Binance margin pairs: {e}. Falling back to isMarginTradingAllowed.")
+        return None  # caller will fall back to exchange info
+    return allowed
+
+
 def get_top_tradable_pairs(
     exchange_or_markets,
     quote='USDT',
@@ -166,7 +191,7 @@ def get_top_tradable_pairs(
     min_market_cap_usd=1_000_000_000,
 ):
     """
-    - Binance: MARGIN-enabled USDT spot pairs
+    - Binance: MARGIN-enabled USDT spot pairs (from official margin API)
     - KuCoin: USDT-M linear futures
     """
 
@@ -192,6 +217,9 @@ def get_top_tradable_pairs(
     # BINANCE — MARGIN
     # =========================
     if is_binance:
+        # Fetch actual margin-enabled symbols from Binance API
+        margin_symbols = _fetch_binance_margin_symbols(exchange_obj, quote)
+
         # Binance public 24h ticker → LIST
         tickers_24h = exchange_obj.publicGetTicker24hr()
 
@@ -212,10 +240,14 @@ def get_top_tradable_pairs(
             if not market.get('active', True):
                 continue
 
-            # Margin eligibility lives ONLY here
-            info = market.get('info', {})
-            if not info.get('isMarginTradingAllowed', False):
-                continue
+            binance_symbol = symbol.replace("/", "")
+            if margin_symbols is not None:
+                if binance_symbol not in margin_symbols:
+                    continue
+            else:
+                info = market.get('info', {})
+                if not info.get('isMarginTradingAllowed', False):
+                    continue
 
             base = market.get('base')
             if not base or base in stablecoins:
@@ -223,7 +255,6 @@ def get_top_tradable_pairs(
             if base not in market_caps:
                 continue
 
-            binance_symbol = symbol.replace("/", "")
             volume = volume_by_symbol.get(binance_symbol, 0.0)
             if volume < float(min_volume):
                 continue

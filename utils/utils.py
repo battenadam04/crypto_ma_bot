@@ -236,21 +236,64 @@ def is_ranging(df, window=50, range_threshold=0.05, adx_threshold=25):
     return range_pct < range_threshold and adx_recent < adx_threshold
 
 
+def _bearish_engulfing(curr, prev):
+    """Current bearish candle engulfs previous bullish candle (rejection from top)."""
+    curr_bearish = curr['close'] < curr['open']
+    prev_bullish = prev['close'] > prev['open']
+    engulfs = curr['open'] >= prev['close'] and curr['close'] <= prev['open']
+    return curr_bearish and prev_bullish and engulfs
+
+
+def _bullish_engulfing(curr, prev):
+    """Current bullish candle engulfs previous bearish candle (bounce from bottom)."""
+    curr_bullish = curr['close'] > curr['open']
+    prev_bearish = prev['close'] < prev['open']
+    engulfs = curr['open'] <= prev['close'] and curr['close'] >= prev['open']
+    return curr_bullish and prev_bearish and engulfs
+
+
 def check_range_trade(df):
+    """
+    Range signals require confirmation that the range is continuing:
+    - SELL at resistance: wait for bearish candle (or bearish engulfing) showing rejection
+    - BUY at support: wait for bullish candle (or bullish engulfing) showing bounce
+    """
+    if len(df) < 2:
+        return False, False
+
     last = df.iloc[-1]
+    prev = df.iloc[-2]
 
-    support_buffer = 1.02  # changed from 1.01
-    resistance_buffer = 0.98  # changed from 0.99
+    support_buffer = 1.02
+    resistance_buffer = 0.98
+
+    support_level = last['support']
+    resistance_level = last['resistance']
+
+    # BUY at support: price touched support + RSI oversold + BULLISH reversal candle
+    # (green candle = bounce confirmation, not a red candle still falling)
+    prev_touched_support = prev['low'] <= support_level * support_buffer
+    at_or_near_support = last['low'] <= support_level * support_buffer or prev_touched_support
+    bullish_reversal = last['close'] > last['open']
+    bullish_engulfing_confirmed = _bullish_engulfing(last, prev)
     buy_signal = (
-        last['close'] <= last['support'] * support_buffer
+        at_or_near_support
         and last['rsi'] < 35
+        and (bullish_reversal or bullish_engulfing_confirmed)
     )
 
+    # SELL at resistance: price touched resistance + RSI overbought + BEARISH reversal candle
+    # (red candle = rejection confirmation, not a green candle still rising)
+    prev_touched_resistance = prev['high'] >= resistance_level * resistance_buffer
+    at_or_near_resistance = last['high'] >= resistance_level * resistance_buffer or prev_touched_resistance
+    bearish_reversal = last['close'] < last['open']
+    bearish_engulfing_confirmed = _bearish_engulfing(last, prev)
     sell_signal = (
-        last['close'] >= last['resistance'] * resistance_buffer
+        at_or_near_resistance
         and last['rsi'] > 65
+        and (bearish_reversal or bearish_engulfing_confirmed)
     )
-    
+
     return buy_signal, sell_signal
 
 
