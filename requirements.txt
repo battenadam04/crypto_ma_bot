@@ -5,6 +5,7 @@ ccxt>=4.0.0
 pandas>=2.0.3
 numpy==2.2.6
 requests>=2.25.0
+yfinance>=0.2.0
 matplotlib>=3.4.0
 python-telegram-bot==13.15   # optional, if you switch from raw requests
 ta>=0.10.0                   # if you use ta-lib (e.g., RSI, MACD) via pandas-ta

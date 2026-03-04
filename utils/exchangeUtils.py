@@ -42,6 +42,12 @@ def init_exchange():
                 'defaultType': 'margin'  # very important for margin trading
             }
         })
+        # Sandbox: use Binance Spot Test Network. Must be set before load_markets().
+        # Note: Binance Spot Test Network does not support /sapi (margin) endpoints;
+        # margin-specific calls may fail; use for connectivity and spot order flow testing only.
+        if os.getenv("BINANCE_SANDBOX", "false").lower() == "true":
+            exchange.set_sandbox_mode(True)
+            log_event("BINANCE_SANDBOX=true: using Binance testnet (testnet.binance.vision). Margin APIs may not work on spot testnet.")
     
     else:
         raise ValueError(f"Unsupported exchange: {EXCHANGE_NAME}")
@@ -378,8 +384,8 @@ def place_futures_order(exchange, df, symbol, side, capital, leverage=10, strate
             print("❌ No available USDT balance for futures trading.")
             return None
 
-        # Use only a portion of balance (e.g., 5% of capital)
-        capital_pct=0.25
+        # Use only a portion of balance (configurable)
+        capital_pct = getattr(config, 'TRADE_CAPITAL_PCT', 0.25)
         capital_to_use = usdt_balance * capital_pct
 
         # Apply leverage to get max notional
