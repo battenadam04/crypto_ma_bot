@@ -3,6 +3,7 @@ from utils.telegramUtils import send_telegram
 
 
 DAILY_LOSS_LIMIT = 0.30  # 30%
+start_of_day_balance = None
 loss_triggered = False  # reset manually when ready to resume
 
 def check_daily_loss_limit():
@@ -14,9 +15,14 @@ def check_daily_loss_limit():
 
     current_balance = fetch_balance_and_notify()
 
+    if current_balance is None:
+        print("⚠️ Could not fetch current balance, skipping check.")
+        return True
+
     if start_of_day_balance is None:
-        print("⚠️ No start-of-day balance set, skipping check.")
-        return True  # allow trades to continue
+        start_of_day_balance = current_balance
+        print(f"📌 Start-of-day balance initialized to {start_of_day_balance:.2f} USDT.")
+        return True
 
     loss_pct = (start_of_day_balance - current_balance) / start_of_day_balance
 

@@ -667,9 +667,7 @@ def place_tp_sl_orders(exchange, symbol, side, amount, tp_price, sl_price, fille
 
 def fetch_balance_and_notify():
     try:
-        global start_of_day_balance
         balance = init_exchange().fetch_balance()
-        start_of_day_balance = balance
         usdt = balance['total'].get('USDT', 0)
         available = balance['free'].get('USDT', 0)
         timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
@@ -681,6 +679,7 @@ def fetch_balance_and_notify():
         )
         send_telegram(message)
         print("✅ Balance sent to Telegram.")
-        return balance
+        return usdt
     except Exception as e:
         print("❌ Error fetching balance or sending message:", e)
+        return None
