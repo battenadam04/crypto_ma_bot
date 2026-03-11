@@ -1,8 +1,6 @@
 from utils.exchangeUtils import fetch_balance_and_notify
 from utils.telegramUtils import send_telegram
-
-
-DAILY_LOSS_LIMIT = 0.30  # 30%
+from config import DAILY_LOSS_LIMIT
 start_of_day_balance = None
 loss_triggered = False  # reset manually when ready to resume
 

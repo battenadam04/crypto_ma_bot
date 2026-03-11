@@ -12,7 +12,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 from utils.utils import (
     check_long_signal, check_short_signal, calculate_trade_levels, add_atr_column, check_range_trade, is_ranging, log_event,
 )
-from utils.exchangeUtils import init_exchange, get_top_tradable_pairs
+from utils.exchangeUtils import get_exchange, get_top_tradable_pairs
 
 BACKTEST_STATE_FILE = os.path.join(os.path.dirname(__file__), '..', 'last_backtest.json')
 DEFAULT_BACKTEST_PAIRS = [
@@ -21,7 +21,7 @@ DEFAULT_BACKTEST_PAIRS = [
     'AVAX/USDT', 'SHIB/USDT', 'SUI/USDT', 'UNI/USDT'
 ]
 
-exchange = init_exchange()
+exchange = get_exchange()
 
 
 def _get_backtest_pairs(pairs_override=None):
