@@ -13,6 +13,7 @@ from utils.utils import calculate_trade_levels, get_decimal_places, get_filled_p
 
 max_wait_seconds = 300
 poll_interval = 1
+MAX_TP_SL_RETRIES = 10
 
 EXCHANGE_NAME = os.getenv("EXCHANGE", "kucoin")  # default kucoin
 
@@ -316,6 +317,34 @@ def get_top_tradable_pairs(
 
 
 
+def _emergency_close_position(exchange, symbol, side, amount):
+    """Force-close a position via market order when TP/SL placement fails."""
+    close_side = 'sell' if side == 'buy' else 'buy'
+    try:
+        close_order = exchange.create_market_order(
+            symbol=symbol,
+            side=close_side,
+            amount=amount,
+            params={'reduceOnly': True}
+        )
+        send_telegram(
+            f"🚨 EMERGENCY CLOSE: {symbol}\n"
+            f"TP/SL placement failed after {MAX_TP_SL_RETRIES} retries.\n"
+            f"Position force-closed to protect capital.\n"
+            f"Order ID: {close_order.get('id', 'N/A')}"
+        )
+        log_event(f"🚨 Emergency close for {symbol}: {close_order}")
+        return close_order
+    except Exception as e:
+        send_telegram(
+            f"🚨🚨 CRITICAL: Failed to emergency close {symbol}!\n"
+            f"Error: {e}\n"
+            f"MANUAL INTERVENTION REQUIRED!"
+        )
+        log_event(f"🚨🚨 CRITICAL: Failed to emergency close {symbol}: {e}")
+        return None
+
+
 def place_entry_order_with_fallback(exchange, symbol, side, amount, entry_price, leverage):
     try:
         exchange.set_margin_mode('isolated', symbol)
@@ -448,13 +477,11 @@ def place_futures_order(exchange, df, symbol, side, capital, leverage=10, strate
             else:
                 return {'status': 'error', 'message': 'Entry order not filled in time'}
 
-            # 🔒 Step 3: Place TP and SL with retry
-            attempt = 1
-            while True:
+            # 🔒 Step 3: Place TP and SL with retry (capped to protect capital)
+            for attempt in range(1, MAX_TP_SL_RETRIES + 1):
                 levels = calculate_trade_levels(filled_price, side, df, len(df)-1, strategy_type)
                 tp_price = round(levels['take_profit'], price_precision)
                 sl_price = round(levels['stop_loss'], price_precision)
-
 
                 validated = safe_place_tp_sl(
                     tp_price,
@@ -465,7 +492,6 @@ def place_futures_order(exchange, df, symbol, side, capital, leverage=10, strate
                 )
 
                 if validated and validated.get('valid'):
-
                     tp_sl_result = place_tp_sl_orders(exchange, symbol, side, amount, validated['take_profit'], validated['stop_loss'], filled_price)
 
                     if tp_sl_result['status'] in ['tp_filled', 'sl_filled', 'success']:
@@ -477,14 +503,12 @@ def place_futures_order(exchange, df, symbol, side, capital, leverage=10, strate
                             'sl_order': tp_sl_result['sl_order']
                         }
 
-                    attempt += 1
-                    print(f"🔁 Retry #{attempt} in 2 seconds...")
-                    time.sleep(2)
-                else:
-                    print("🚫 Skipping order due to unsafe TP/SL values.")
-                    continue
+                print(f"🔁 TP/SL attempt {attempt}/{MAX_TP_SL_RETRIES} failed, retrying in 2s...")
+                time.sleep(2)
 
-            #return {'status': 'error', 'message': f"Failed to place TP/SL after {max_attempts} attempts."}
+            log_event(f"🚨 TP/SL failed after {MAX_TP_SL_RETRIES} attempts for {symbol}. Force-closing position.")
+            _emergency_close_position(exchange, symbol, side, amount)
+            return {'status': 'error', 'message': f"TP/SL failed after {MAX_TP_SL_RETRIES} attempts. Position force-closed."}
         else:
             print(f"🔁TRADING SIGNALS ONLY...")
             levels = calculate_trade_levels(price, side, df, len(df)-1, strategy_type)

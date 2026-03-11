@@ -45,7 +45,7 @@ def send_telegram(text, image_path=None):
         requests.post(url, data={'chat_id': config.TELEGRAM_CHAT_ID, 'text': text})
 
         if image_path:
-            url = f"https://api.telegram.org/bot{configTELEGRAM_TOKEN}/sendPhoto"
+            url = f"https://api.telegram.org/bot{config.TELEGRAM_TOKEN}/sendPhoto"
             with open(image_path, 'rb') as img:
                 requests.post(url, files={'photo': img}, data={'chat_id': config.TELEGRAM_CHAT_ID})
             log_event(f"Posted to Telegram")

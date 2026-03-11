@@ -98,11 +98,11 @@ def handle_trade(symbol, direction, df, strategy_type="trend"):
 
         message = (
                 f"{'📈 LONG' if direction == 'long' else '📉 SHORT'} SIGNAL for {symbol} ({TIMEFRAME})\n"
-                f"Confirmed by 15m {'up' if direction == 'long' else 'down'}{strategy_type}\n\n"
-                f" Filled Entry: {filledEntry}\n"
+                f"Confirmed by 15m {'up' if direction == 'long' else 'down'} {strategy_type}\n\n"
+                f"💲 Filled Entry: {filledEntry}\n"
                 f"🎯 TP: {tp}\n"
                 f"🛑 SL: {sl}\n"
-                f"⚙️ Trade Status: {status}"
+                f"⚙️ Trade Status: {status}\n"
                 f"⚙️ Trade Error: {error}"
             )
         send_telegram(message)
