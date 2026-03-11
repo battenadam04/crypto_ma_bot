@@ -28,7 +28,8 @@ DEFAULT_BACKTEST_PAIRS = [
     'AVAX/USDT', 'SHIB/USDT', 'SUI/USDT', 'UNI/USDT'
 ]
 
-exchange = get_exchange()
+def _get_exchange():
+    return get_exchange()
 
 
 def _apply_slippage(price, direction):
@@ -93,7 +94,7 @@ def _get_backtest_pairs(pairs_override=None):
     if pairs_override:
         return [(s, None, None) if isinstance(s, str) else s for s in pairs_override]
     try:
-        pairs = get_top_tradable_pairs(exchange, quote='USDT', top_n=20)
+        pairs = get_top_tradable_pairs(_get_exchange(), quote='USDT', top_n=20)
         if pairs:
             return pairs
     except Exception as e:
@@ -115,7 +116,7 @@ def fetch_data(pair, timeframe='5m', days=BACKTEST_DAYS):
     loops = 0
 
     while loops < max_tries:
-        ohlcv = exchange.fetch_ohlcv(pair, timeframe=timeframe, since=since, limit=limit)
+        ohlcv = _get_exchange().fetch_ohlcv(pair, timeframe=timeframe, since=since, limit=limit)
 
         if not ohlcv:
             break
@@ -163,7 +164,7 @@ def fetch_higher_timeframe_data(pair, timeframe='15m', days=BACKTEST_DAYS):
     limit = 200
     loops = 0
     while loops < 30:
-        ohlcv = exchange.fetch_ohlcv(pair, timeframe=timeframe, since=since, limit=limit)
+        ohlcv = _get_exchange().fetch_ohlcv(pair, timeframe=timeframe, since=since, limit=limit)
         if not ohlcv:
             break
         all_ohlcv.extend(ohlcv)
