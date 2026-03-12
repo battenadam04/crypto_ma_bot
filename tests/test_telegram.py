@@ -15,37 +15,53 @@ class TestHandleTelegramCommand:
     def setup_method(self):
         config.TRADING_ENABLED = False
 
-    def test_on_enables_trading(self):
+    def test_on_enables_signals_only(self):
+        config.TRADING_SIGNALS_ONLY = True
         response, mode = handle_telegram_command("/on")
         assert config.TRADING_ENABLED is True
-        assert "ENABLED" in response
+        assert "signals only" in response
+
+    def test_on_enables_live_trading(self):
+        config.TRADING_SIGNALS_ONLY = False
+        response, mode = handle_telegram_command("/on")
+        assert config.TRADING_ENABLED is True
+        assert "live trading" in response
 
     def test_on_already_enabled(self):
         config.TRADING_ENABLED = True
         response, mode = handle_telegram_command("/on")
         assert "already" in response
 
-    def test_off_disables_trading(self):
+    def test_off_disables(self):
         config.TRADING_ENABLED = True
         response, mode = handle_telegram_command("/off")
         assert config.TRADING_ENABLED is False
-        assert "DISABLED" in response
+        assert "OFF" in response
 
     def test_off_already_disabled(self):
         config.TRADING_ENABLED = False
         response, mode = handle_telegram_command("/off")
         assert "already" in response
 
-    def test_status_returns_state(self):
+    def test_status_shows_signals_mode(self):
         config.TRADING_ENABLED = True
+        config.TRADING_SIGNALS_ONLY = True
         response, mode = handle_telegram_command("/status")
         assert "ON" in response
+        assert "SIGNALS ONLY" in response
         assert mode == 'HTML'
+
+    def test_status_shows_live_mode(self):
+        config.TRADING_ENABLED = True
+        config.TRADING_SIGNALS_ONLY = False
+        response, mode = handle_telegram_command("/status")
+        assert "LIVE TRADING" in response
 
     def test_status_disabled(self):
         config.TRADING_ENABLED = False
         response, mode = handle_telegram_command("/status")
         assert "OFF" in response
+        assert "TRADING_SIGNALS_ONLY" in response
 
     def test_help_returns_commands(self):
         response, mode = handle_telegram_command("/help")
@@ -65,11 +81,12 @@ class TestHandleTelegramCommand:
 
     def test_case_insensitive(self):
         response, _ = handle_telegram_command("/ON")
-        assert "ENABLED" in response
+        assert "Bot ON" in response
 
     def test_whitespace_stripped(self):
+        config.TRADING_ENABLED = True
         response, _ = handle_telegram_command("  /off  ")
-        assert "DISABLED" in response
+        assert "Bot OFF" in response
 
 
 class TestPairsCommand:
