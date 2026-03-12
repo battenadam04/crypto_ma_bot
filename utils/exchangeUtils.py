@@ -13,6 +13,7 @@ from utils.utils import calculate_trade_levels, get_decimal_places, get_filled_p
 
 max_wait_seconds = 300
 poll_interval = 1
+MAX_TP_SL_RETRIES = 10
 
 EXCHANGE_NAME = os.getenv("EXCHANGE", "kucoin")  # default kucoin
 
@@ -56,15 +57,24 @@ def init_exchange():
     return exchange
 
 
+_cached_exchange = None
+
+def get_exchange():
+    """Return a cached exchange instance (created once, reused everywhere)."""
+    global _cached_exchange
+    if _cached_exchange is None:
+        _cached_exchange = init_exchange()
+    return _cached_exchange
+
+
+from config import MAX_OPEN_TRADES as MAX_OPEN_ORDERS, MAX_LOSSES_PER_SYMBOL, ENTRY_BUFFER_PCT
+
 loss_tracker = {}
-MAX_LOSSES = 5
-MAX_OPEN_ORDERS = 3
 
 
-# TODO: update loss tracker
 def can_place_order(symbol):
     try:
-        exchange = init_exchange()
+        exchange = get_exchange()
         positions = exchange.fetch_positions()
 
         open_positions = [
@@ -79,7 +89,7 @@ def can_place_order(symbol):
 
             return False, f"Max open positions reached ({MAX_OPEN_ORDERS})."
 
-        if loss_tracker.get(symbol, 0) >= MAX_LOSSES:
+        if loss_tracker.get(symbol, 0) >= MAX_LOSSES_PER_SYMBOL:
             return False, f"{symbol} hit max loss cap: {loss_tracker[symbol]}"
 
 
@@ -316,6 +326,34 @@ def get_top_tradable_pairs(
 
 
 
+def _emergency_close_position(exchange, symbol, side, amount):
+    """Force-close a position via market order when TP/SL placement fails."""
+    close_side = 'sell' if side == 'buy' else 'buy'
+    try:
+        close_order = exchange.create_market_order(
+            symbol=symbol,
+            side=close_side,
+            amount=amount,
+            params={'reduceOnly': True}
+        )
+        send_telegram(
+            f"🚨 EMERGENCY CLOSE: {symbol}\n"
+            f"TP/SL placement failed after {MAX_TP_SL_RETRIES} retries.\n"
+            f"Position force-closed to protect capital.\n"
+            f"Order ID: {close_order.get('id', 'N/A')}"
+        )
+        log_event(f"🚨 Emergency close for {symbol}: {close_order}")
+        return close_order
+    except Exception as e:
+        send_telegram(
+            f"🚨🚨 CRITICAL: Failed to emergency close {symbol}!\n"
+            f"Error: {e}\n"
+            f"MANUAL INTERVENTION REQUIRED!"
+        )
+        log_event(f"🚨🚨 CRITICAL: Failed to emergency close {symbol}: {e}")
+        return None
+
+
 def place_entry_order_with_fallback(exchange, symbol, side, amount, entry_price, leverage):
     try:
         exchange.set_margin_mode('isolated', symbol)
@@ -402,9 +440,7 @@ def place_futures_order(exchange, df, symbol, side, capital, leverage=10, strate
         if amount < min_amount and not TRADING_SIGNALS_ONLY:
             return {'status': 'error', 'message': f"Amount {amount} is below min allowed: {min_amount}"}
 
-        # Entry price (with buffer)
-        buffer = 0.05
-        raw_entry_price = price * (1 + buffer / 100) if side == 'buy' else price * (1 - buffer / 100)
+        raw_entry_price = price * (1 + ENTRY_BUFFER_PCT / 100) if side == 'buy' else price * (1 - ENTRY_BUFFER_PCT / 100)
 
         if raw_entry_price <= min_price and not TRADING_SIGNALS_ONLY:
             return {'status': 'error', 'message': f"Raw entry price {raw_entry_price} is below min allowed: {min_price}"}
@@ -448,13 +484,11 @@ def place_futures_order(exchange, df, symbol, side, capital, leverage=10, strate
             else:
                 return {'status': 'error', 'message': 'Entry order not filled in time'}
 
-            # 🔒 Step 3: Place TP and SL with retry
-            attempt = 1
-            while True:
+            # 🔒 Step 3: Place TP and SL with retry (capped to protect capital)
+            for attempt in range(1, MAX_TP_SL_RETRIES + 1):
                 levels = calculate_trade_levels(filled_price, side, df, len(df)-1, strategy_type)
                 tp_price = round(levels['take_profit'], price_precision)
                 sl_price = round(levels['stop_loss'], price_precision)
-
 
                 validated = safe_place_tp_sl(
                     tp_price,
@@ -465,7 +499,6 @@ def place_futures_order(exchange, df, symbol, side, capital, leverage=10, strate
                 )
 
                 if validated and validated.get('valid'):
-
                     tp_sl_result = place_tp_sl_orders(exchange, symbol, side, amount, validated['take_profit'], validated['stop_loss'], filled_price)
 
                     if tp_sl_result['status'] in ['tp_filled', 'sl_filled', 'success']:
@@ -477,14 +510,12 @@ def place_futures_order(exchange, df, symbol, side, capital, leverage=10, strate
                             'sl_order': tp_sl_result['sl_order']
                         }
 
-                    attempt += 1
-                    print(f"🔁 Retry #{attempt} in 2 seconds...")
-                    time.sleep(2)
-                else:
-                    print("🚫 Skipping order due to unsafe TP/SL values.")
-                    continue
+                print(f"🔁 TP/SL attempt {attempt}/{MAX_TP_SL_RETRIES} failed, retrying in 2s...")
+                time.sleep(2)
 
-            #return {'status': 'error', 'message': f"Failed to place TP/SL after {max_attempts} attempts."}
+            log_event(f"🚨 TP/SL failed after {MAX_TP_SL_RETRIES} attempts for {symbol}. Force-closing position.")
+            _emergency_close_position(exchange, symbol, side, amount)
+            return {'status': 'error', 'message': f"TP/SL failed after {MAX_TP_SL_RETRIES} attempts. Position force-closed."}
         else:
             print(f"🔁TRADING SIGNALS ONLY...")
             levels = calculate_trade_levels(price, side, df, len(df)-1, strategy_type)
@@ -532,22 +563,6 @@ def place_tp_sl_orders(exchange, symbol, side, amount, tp_price, sl_price, fille
             if last_price is None:
                 raise Exception("Couldn't fetch current market price.")
 
-            # 🚨 Validate TP/SL logic before placing
-            # if not is_valid_tp_sl(tp_price, sl_price, filled_price, last_price, side):
-            #     print(f"⚠️ Invalid TP/SL for current conditions. Adjusting..TP:{tp_price}, SL:{sl_price}")
-
-            #     # Apply minimal offset adjustment to make them valid
-            #     adjust_pct = 1  #1% nudge
-            #     if side == 'buy':
-            #         tp_price = max(filled_price * (1 + adjust_pct), tp_price)
-            #         sl_price = min(filled_price * (1 - adjust_pct), sl_price)
-            #     else:
-            #         tp_price = min(filled_price * (1 - adjust_pct), tp_price)
-            #         sl_price = max(filled_price * (1 + adjust_pct), sl_price)
-
-            #     print(f"🛠️ Adjusted TP: {tp_price}, SL: {sl_price}")
-
-
             # ✅ Place TP (limit order)
             tp_order = exchange.create_order(
                 symbol=symbol,
@@ -580,8 +595,6 @@ def place_tp_sl_orders(exchange, symbol, side, amount, tp_price, sl_price, fille
             tp_id = tp_order['id']
             sl_id = sl_order['id']
             print(f"✅ TP/SL orders successfully placed.")
-            # print(f"• TP ID: {tp_id}, Price: {tp_price}")
-            # print(f"• SL ID: {sl_id}, Stop Price: {sl_price}")
 
             # 🔄 Step 2: Poll for one of the orders to fill
             start_time = time.time()
@@ -667,7 +680,7 @@ def place_tp_sl_orders(exchange, symbol, side, amount, tp_price, sl_price, fille
 
 def fetch_balance_and_notify():
     try:
-        balance = init_exchange().fetch_balance()
+        balance = get_exchange().fetch_balance()
         usdt = balance['total'].get('USDT', 0)
         available = balance['free'].get('USDT', 0)
         timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')

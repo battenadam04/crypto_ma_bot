@@ -1,13 +1,11 @@
-import requests
 from ta.trend import SMAIndicator
 from ta.trend import ADXIndicator
 import pandas as pd
 
-import time
 import os
 from datetime import datetime, timezone
 from utils.configUtils import strategy_settings
-from config import TELEGRAM_CHAT_ID, TELEGRAM_TOKEN
+from config import RSI_OVERSOLD, RSI_OVERBOUGHT, RANGE_ADX_THRESHOLD
 
     
 def set_leverage(exchange, symbol, leverage):
@@ -223,7 +221,7 @@ def is_early_breakout(df):
 
     return crossover and (under_ma50 or near_ma50)
 
-def is_ranging(df, window=50, range_threshold=0.05, adx_threshold=25):
+def is_ranging(df, window=50, range_threshold=0.05, adx_threshold=RANGE_ADX_THRESHOLD):
     if len(df) < window or 'adx' not in df.columns:
         return False
 
@@ -278,7 +276,7 @@ def check_range_trade(df):
     bullish_engulfing_confirmed = _bullish_engulfing(last, prev)
     buy_signal = (
         at_or_near_support
-        and last['rsi'] < 35
+        and last['rsi'] < RSI_OVERSOLD
         and (bullish_reversal or bullish_engulfing_confirmed)
     )
 
@@ -290,7 +288,7 @@ def check_range_trade(df):
     bearish_engulfing_confirmed = _bearish_engulfing(last, prev)
     sell_signal = (
         at_or_near_resistance
-        and last['rsi'] > 65
+        and last['rsi'] > RSI_OVERBOUGHT
         and (bearish_reversal or bearish_engulfing_confirmed)
     )
 

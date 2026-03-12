@@ -1,18 +1,20 @@
-import ccxt
 import config
 import json
 import os
 import pandas as pd
-import pandas_ta as ta
 import time
-from datetime import datetime,timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor
 import threading
 import schedule
 
 
 
-from config import TRADING_SIGNALS_ONLY, TRADE_CAPITAL, MIN_ADX_TREND
+from config import (
+    TRADING_SIGNALS_ONLY, TRADE_CAPITAL, MIN_ADX_TREND,
+    DEFAULT_LEVERAGE, MAIN_LOOP_INTERVAL_SEC,
+    RSI_OVERSOLD, RSI_OVERBOUGHT, RANGE_ADX_THRESHOLD,
+)
 from strategies.simulate_trades import run_backtest
 from utils.dailyChecksUtils import check_daily_loss_limit
 from utils.telegramUtils import poll_telegram, send_telegram
@@ -21,8 +23,8 @@ from utils.utils import (
 )
 
 from utils.exchangeUtils import (
-    fetch_balance_and_notify, init_exchange,
-    place_futures_order,can_place_order
+    fetch_balance_and_notify, get_exchange,
+    place_futures_order, can_place_order
 )
 
 
@@ -39,10 +41,8 @@ DEFAULT_PAIRS = [
 can_trade_event = threading.Event()
 can_trade_event.set()  # Initially allow trading
 
-exchange = init_exchange()
+exchange = get_exchange()
 TIMEFRAME = '5m'
-MAX_OPEN_TRADES = 3
-MAX_LOSSES = 3
 
 # Higher-timeframe cache: keep only last 60 rows per symbol (enough for MA50); cap total entries to avoid unbounded growth
 HTF_CACHE_TTL_SEC = 900
@@ -83,7 +83,7 @@ def handle_trade(symbol, direction, df, strategy_type="trend"):
                 symbol=symbol,
                 side=side,
                 capital=TRADE_CAPITAL,
-                leverage=10,
+                leverage=DEFAULT_LEVERAGE,
                 strategy_type=strategy_type
             )
         log_event(f"🔍 Trade results:\n{trade_result}")
@@ -98,11 +98,11 @@ def handle_trade(symbol, direction, df, strategy_type="trend"):
 
         message = (
                 f"{'📈 LONG' if direction == 'long' else '📉 SHORT'} SIGNAL for {symbol} ({TIMEFRAME})\n"
-                f"Confirmed by 15m {'up' if direction == 'long' else 'down'}{strategy_type}\n\n"
-                f" Filled Entry: {filledEntry}\n"
+                f"Confirmed by 15m {'up' if direction == 'long' else 'down'} {strategy_type}\n\n"
+                f"💲 Filled Entry: {filledEntry}\n"
                 f"🎯 TP: {tp}\n"
                 f"🛑 SL: {sl}\n"
-                f"⚙️ Trade Status: {status}"
+                f"⚙️ Trade Status: {status}\n"
                 f"⚙️ Trade Error: {error}"
             )
         send_telegram(message)
@@ -280,5 +280,10 @@ if __name__ == '__main__':
 
         # ✅ Trading enabled
         main()
-        log_event("🕒 Waiting 5 minutes until next cycle...\n")
-        time.sleep(300)
+        log_event(f"🕒 Waiting {MAIN_LOOP_INTERVAL_SEC}s until next cycle...\n")
+        for _ in range(MAIN_LOOP_INTERVAL_SEC // 10):
+            try:
+                schedule.run_pending()
+            except Exception:
+                pass
+            time.sleep(10)
