@@ -110,27 +110,34 @@ def poll_telegram():
 
 def _cmd_on():
     if config.TRADING_ENABLED:
-        return "ℹ️ Trading already ENABLED"
+        mode = "signals only" if config.TRADING_SIGNALS_ONLY else "live trading"
+        return f"ℹ️ Bot already ON ({mode})"
     config.TRADING_ENABLED = True
-    return "✅ Trading ENABLED"
+    if config.TRADING_SIGNALS_ONLY:
+        return "✅ Bot ON — signals only mode (no live orders)"
+    return "✅ Bot ON — live trading mode"
 
 
 def _cmd_off():
     if not config.TRADING_ENABLED:
-        return "ℹ️ Trading already DISABLED"
+        return "ℹ️ Bot already OFF"
     config.TRADING_ENABLED = False
-    return "⛔ Trading DISABLED"
+    return "⛔ Bot OFF — no signals or trades will be processed"
 
 
 def _cmd_status():
-    mode = "SIGNALS ONLY" if config.TRADING_SIGNALS_ONLY else "LIVE TRADING"
+    if config.TRADING_SIGNALS_ONLY:
+        mode = "📡 SIGNALS ONLY (no live orders)"
+    else:
+        mode = "💹 LIVE TRADING (real orders)"
     state = "ON" if config.TRADING_ENABLED else "OFF"
     exchange_name = os.getenv("EXCHANGE", "kucoin")
     return (
         f"<b>📊 Bot Status</b>\n"
         f"State: <b>{state}</b>\n"
         f"Mode: {mode}\n"
-        f"Exchange: {exchange_name}"
+        f"Exchange: {exchange_name}\n\n"
+        f"<i>Toggle with /on /off. To switch to live trading, set TRADING_SIGNALS_ONLY=false in your env.</i>"
     )
 
 
