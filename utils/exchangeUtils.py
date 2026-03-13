@@ -680,19 +680,40 @@ def place_tp_sl_orders(exchange, symbol, side, amount, tp_price, sl_price, fille
 
 def fetch_balance_and_notify():
     try:
-        balance = get_exchange().fetch_balance()
-        usdt = balance['total'].get('USDT', 0)
-        available = balance['free'].get('USDT', 0)
-        timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
+        ex = get_exchange()
+        is_binance_margin = (EXCHANGE_NAME == "binance_margin")
 
-        message = (
-            f"📊 Balance at {timestamp}:\n"
-            f"Total USDT: {usdt:.2f}\n"
-            f"Available USDT: {available:.2f}"
-        )
-        send_telegram(message)
-        print("✅ Balance sent to Telegram.")
-        return usdt
+        if is_binance_margin:
+            spot_bal = ex.fetch_balance({'type': 'spot'})
+            margin_bal = ex.fetch_balance({'type': 'margin'})
+            spot_total = spot_bal['total'].get('USDT', 0)
+            spot_free = spot_bal['free'].get('USDT', 0)
+            margin_total = margin_bal['total'].get('USDT', 0)
+            margin_free = margin_bal['free'].get('USDT', 0)
+            combined = spot_total + margin_total
+            timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
+            message = (
+                f"📊 Balance at {timestamp}:\n"
+                f"Spot:   {spot_total:.2f} USDT (avail: {spot_free:.2f})\n"
+                f"Margin: {margin_total:.2f} USDT (avail: {margin_free:.2f})\n"
+                f"Combined: {combined:.2f} USDT"
+            )
+            send_telegram(message)
+            print("✅ Balance sent to Telegram.")
+            return combined
+        else:
+            balance = ex.fetch_balance()
+            usdt = balance['total'].get('USDT', 0)
+            available = balance['free'].get('USDT', 0)
+            timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
+            message = (
+                f"📊 Balance at {timestamp}:\n"
+                f"Total USDT: {usdt:.2f}\n"
+                f"Available USDT: {available:.2f}"
+            )
+            send_telegram(message)
+            print("✅ Balance sent to Telegram.")
+            return usdt
     except Exception as e:
         print("❌ Error fetching balance or sending message:", e)
         return None

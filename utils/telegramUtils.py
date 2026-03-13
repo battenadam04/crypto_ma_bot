@@ -142,17 +142,31 @@ def _cmd_status():
 
 
 def _cmd_balance():
-    from utils.exchangeUtils import get_exchange
+    from utils.exchangeUtils import get_exchange, EXCHANGE_NAME
     try:
-        balance = get_exchange().fetch_balance()
-        usdt_total = balance['total'].get('USDT', 0)
-        usdt_free = balance['free'].get('USDT', 0)
+        ex = get_exchange()
         ts = datetime.now(timezone.utc).strftime('%H:%M:%S UTC')
-        return (
-            f"<b>💰 Balance</b> ({ts})\n"
-            f"Total: <code>{usdt_total:.2f}</code> USDT\n"
-            f"Available: <code>{usdt_free:.2f}</code> USDT"
-        )
+        if EXCHANGE_NAME == "binance_margin":
+            spot = ex.fetch_balance({'type': 'spot'})
+            margin = ex.fetch_balance({'type': 'margin'})
+            spot_total = spot['total'].get('USDT', 0)
+            spot_free = spot['free'].get('USDT', 0)
+            margin_total = margin['total'].get('USDT', 0)
+            margin_free = margin['free'].get('USDT', 0)
+            combined = spot_total + margin_total
+            return (
+                f"<b>💰 Balance</b> ({ts})\n"
+                f"Spot:     <code>{spot_total:.2f}</code> (avail: <code>{spot_free:.2f}</code>)\n"
+                f"Margin: <code>{margin_total:.2f}</code> (avail: <code>{margin_free:.2f}</code>)\n"
+                f"Combined: <code>{combined:.2f}</code> USDT"
+            )
+        else:
+            balance = ex.fetch_balance()
+            return (
+                f"<b>💰 Balance</b> ({ts})\n"
+                f"Total: <code>{balance['total'].get('USDT', 0):.2f}</code> USDT\n"
+                f"Available: <code>{balance['free'].get('USDT', 0):.2f}</code> USDT"
+            )
     except Exception as e:
         return f"❌ Failed to fetch balance: {e}"
 
@@ -255,6 +269,19 @@ def _cmd_backtest():
         return f"❌ Failed to load backtest: {e}"
 
 
+def _cmd_signals():
+    from utils.signalTracker import get_daily_signals, build_eod_summary
+    signals = get_daily_signals()
+    if not signals:
+        return "📭 No signals sent today."
+    try:
+        from utils.exchangeUtils import get_exchange
+        summary = build_eod_summary(get_exchange())
+        return summary if summary else "📭 No signals sent today."
+    except Exception as e:
+        return f"❌ Failed to build signal summary: {e}"
+
+
 def _cmd_config():
     return (
         f"<b>⚙️ Configuration</b>\n"
@@ -277,6 +304,7 @@ HELP_TEXT = (
     "/balance — Current USDT balance\n"
     "/positions — Open positions\n"
     "/pairs — Active pairs with win rates\n"
+    "/signals — Today's signals with outcomes\n"
     "/pnl — Today's profit/loss\n"
     "/backtest — Last backtest results\n"
     "/config — Current configuration\n"
@@ -296,6 +324,8 @@ COMMAND_MAP = {
     "positions": _cmd_positions,
     "/pairs": _cmd_pairs,
     "pairs": _cmd_pairs,
+    "/signals": _cmd_signals,
+    "signals": _cmd_signals,
     "/pnl": _cmd_pnl,
     "pnl": _cmd_pnl,
     "/backtest": _cmd_backtest,
@@ -308,7 +338,7 @@ COMMAND_MAP = {
 
 HTML_COMMANDS = {
     "/status", "status", "/balance", "balance", "/positions", "positions",
-    "/pairs", "pairs", "/pnl", "pnl", "/backtest", "backtest",
+    "/pairs", "pairs", "/signals", "signals", "/pnl", "pnl", "/backtest", "backtest",
     "/config", "config", "/help", "help",
 }
 
