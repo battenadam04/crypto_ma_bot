@@ -14,6 +14,7 @@ from config import (
     TRADING_SIGNALS_ONLY, TRADE_CAPITAL, MIN_ADX_TREND,
     DEFAULT_LEVERAGE, MAIN_LOOP_INTERVAL_SEC,
     RSI_OVERSOLD, RSI_OVERBOUGHT, RANGE_ADX_THRESHOLD,
+    BACKTEST_INTERVAL_HOURS,
 )
 from strategies.simulate_trades import run_backtest
 from utils.dailyChecksUtils import check_daily_loss_limit
@@ -26,6 +27,7 @@ from utils.exchangeUtils import (
     fetch_balance_and_notify, get_exchange,
     place_futures_order, can_place_order
 )
+from utils.signalTracker import record_signal, send_eod_report
 
 
 BACKTEST_STATE_FILE = "last_backtest.json"  # relative to project root (bot dir)
@@ -107,6 +109,9 @@ def handle_trade(symbol, direction, df, strategy_type="trend"):
             )
         send_telegram(message)
         log_event(f"Trade: {message}")
+
+        if status == 'success':
+            record_signal(symbol, direction, strategy_type, filledEntry, tp, sl)
     except Exception as e:
         log_event(f"❌ Error in handle_trade for {symbol}: {e}")
 
@@ -217,20 +222,21 @@ def main():
     # Pairs to use this cycle: always defined so the loop never raises UnboundLocalError
     generated_pairs = get_trading_pairs()
 
-    # Run backtest once every 24 hours or if filtered_pairs empty (first run)
-    if not filtered_pairs or ((now - last_backtest_time) > timedelta(days=1) and check_daily_loss_limit()):
-        log_event("⏳ Running daily backtest...")
+    backtest_interval = timedelta(hours=BACKTEST_INTERVAL_HOURS)
+    if not filtered_pairs or ((now - last_backtest_time) > backtest_interval and check_daily_loss_limit()):
+        log_event(f"⏳ Running backtest (interval: {BACKTEST_INTERVAL_HOURS}h)...")
         filtered_pairs = run_backtest()
         last_backtest_time = now
         global _balance_job_scheduled
         if not _balance_job_scheduled:
             schedule.every().day.at("21:00").do(fetch_balance_and_notify)
+            schedule.every().day.at("22:00").do(send_eod_report)
             _balance_job_scheduled = True
         log_event(f"✅ Backtest complete. {len(filtered_pairs)} pairs selected.")
         if filtered_pairs:
             generated_pairs = filtered_pairs
     else:
-        log_event("🕒 Skipping pair processing due to loss of balance or within 24h window.\n")
+        log_event(f"🕒 Skipping backtest — next run in {BACKTEST_INTERVAL_HOURS}h or loss limit triggered.\n")
 
     # Collect all signals this cycle, then take trades in backtest-priority order
     # so live behavior matches backtest: we prefer the pair with the highest backtest win rate
