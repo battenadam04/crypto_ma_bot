@@ -374,7 +374,10 @@ def simulate_combined_strategy(pair, df_5m, df_1h):
 def run_backtest(pairs_override=None):
     """Run backtest on pairs. Persists good_pairs and per-pair results to last_backtest.json."""
     pairs = _get_backtest_pairs(pairs_override)
-    win_rate_threshold = float(os.getenv("BACKTEST_WIN_RATE_THRESHOLD", "55"))
+    win_rate_threshold = float(os.getenv("BACKTEST_WIN_RATE_THRESHOLD", "50"))
+    min_trades = int(os.getenv("BACKTEST_MIN_TRADES", "3"))
+    min_pairs = int(os.getenv("BACKTEST_MIN_PAIRS", "3"))
+    top_n_fallback = int(os.getenv("BACKTEST_TOP_N_FALLBACK", "8"))
 
     good_pairs = []
     results_by_symbol = {}
@@ -390,15 +393,36 @@ def run_backtest(pairs_override=None):
                 result_save = {k: v for k, v in result.items() if k != 'equity_curve'}
                 results_by_symbol[symbol] = result_save
                 log_event(f"CHECKING BACKTEST: {result_save}")
-                if result['win_rate'] >= win_rate_threshold:
+                total_trades = result.get('total_trades', 0)
+                if total_trades >= min_trades and result['win_rate'] >= win_rate_threshold:
                     good_pairs.append(symbol)
         except Exception as e:
             log_event(f"❌ Error backtesting {symbol}: {e}")
+
+    # If too few pairs passed the threshold, take top N by win rate (then by total_trades) so we trade multiple pairs
+    if len(good_pairs) < min_pairs and results_by_symbol:
+        sorted_symbols = sorted(
+            results_by_symbol.keys(),
+            key=lambda s: (
+                results_by_symbol[s].get('win_rate', 0),
+                results_by_symbol[s].get('total_trades', 0),
+            ),
+            reverse=True,
+        )
+        # Only include pairs that have at least min_trades (avoid 1-trade flukes)
+        fallback = [
+            s for s in sorted_symbols
+            if results_by_symbol[s].get('total_trades', 0) >= min_trades
+        ][:top_n_fallback]
+        if fallback:
+            log_event(f"Fallback: only {len(good_pairs)} passed threshold; using top {len(fallback)} by win rate: {fallback}")
+            good_pairs = fallback
 
     state = {
         "pairs": good_pairs,
         "run_at": datetime.now(timezone.utc).isoformat(),
         "win_rate_threshold": win_rate_threshold,
+        "min_trades": min_trades,
         "results": results_by_symbol,
     }
     try:
