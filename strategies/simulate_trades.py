@@ -13,7 +13,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 from config import (
     BACKTEST_SLIPPAGE_BPS, BACKTEST_COMMISSION_BPS,
     BACKTEST_COOLDOWN_BARS, BACKTEST_LOOKAHEAD, BACKTEST_DAYS,
-    MIN_ADX_TREND,
+    MIN_ADX_TREND, LIMIT_ENTRY_OFFSET_PCT, LIMIT_IDEA_FALLBACK_PCT,
+    BACKTEST_USE_LIMIT_IDEAS, BACKTEST_LIMIT_FILL_BARS, BACKTEST_MIN_RR_RATIO,
 )
 from utils.utils import (
     check_long_signal, check_short_signal, calculate_trade_levels,
@@ -43,6 +44,46 @@ def _apply_slippage(price, direction):
 def _commission_cost(price):
     """Per-side commission in price units."""
     return price * (BACKTEST_COMMISSION_BPS / 10_000)
+
+
+def _suggest_limit_entry(slice_df, direction, strategy_type, entry_price):
+    """
+    Mirror live limit suggestion logic for backtests.
+    Uses rolling support/resistance levels from the signal bar.
+    """
+    if slice_df is None or len(slice_df) == 0:
+        return float(entry_price)
+    last = slice_df.iloc[-1]
+    support = float(last['support']) if pd.notna(last.get('support')) else float(entry_price)
+    resistance = float(last['resistance']) if pd.notna(last.get('resistance')) else float(entry_price)
+
+    if direction in ('buy', 'long'):
+        base_level = support if strategy_type == "range" else min(float(entry_price), support * 1.003)
+        return float(base_level * (1 + LIMIT_ENTRY_OFFSET_PCT))
+    base_level = resistance if strategy_type == "range" else max(float(entry_price), resistance * 0.997)
+    return float(base_level * (1 - LIMIT_ENTRY_OFFSET_PCT))
+
+
+def _resolve_backtest_entry(df, signal_idx, direction, strategy_type):
+    """
+    Return (fill_idx, fill_price) for a limit-idea entry fill.
+    Limit is considered filled when touched within BACKTEST_LIMIT_FILL_BARS.
+    """
+    signal_price = float(df['close'].iat[signal_idx])
+    slice_df = df.iloc[:signal_idx + 1]
+    limit_price = _suggest_limit_entry(slice_df, direction, strategy_type, signal_price)
+    max_fill_idx = min(len(df) - 1, signal_idx + max(1, BACKTEST_LIMIT_FILL_BARS))
+    is_long = direction in ('buy', 'long')
+
+    for j in range(signal_idx + 1, max_fill_idx + 1):
+        high = float(df['high'].iat[j])
+        low = float(df['low'].iat[j])
+        if is_long and low <= limit_price:
+            return j, limit_price
+        if not is_long and high >= limit_price:
+            return j, limit_price
+
+    return None, None
 
 
 def _compute_risk_metrics(pnl_list):
@@ -85,6 +126,7 @@ def _compute_risk_metrics(pnl_list):
         'profit_factor': round(profit_factor, 2),
         'avg_win_pct': round(avg_win * 100, 4),
         'avg_loss_pct': round(avg_loss * 100, 4),
+        'rr_ratio': round((avg_win / abs(avg_loss)), 2) if avg_loss < 0 else 0.0,
         'equity_curve': [round(e, 4) for e in equity],
     }
 
@@ -115,6 +157,8 @@ def fetch_data(pair, timeframe='5m', days=BACKTEST_DAYS):
     max_tries = 30
     loops = 0
 
+    # Step by one candle so we don't re-fetch the same bars (5m = 300_000 ms)
+    step_ms = 5 * 60 * 1000 if timeframe == '5m' else 15 * 60 * 1000  # 15m default for fetch_data
     while loops < max_tries:
         ohlcv = _get_exchange().fetch_ohlcv(pair, timeframe=timeframe, since=since, limit=limit)
 
@@ -124,12 +168,13 @@ def fetch_data(pair, timeframe='5m', days=BACKTEST_DAYS):
         all_ohlcv.extend(ohlcv)
 
         last_timestamp = ohlcv[-1][0]
-        since = last_timestamp + 60_000
+        since = last_timestamp + step_ms
         loops += 1
 
         time.sleep(0.3)
 
-        if len(all_ohlcv) >= 1000:
+        # Cap at ~17 days of 5m bars so backtest has enough history for many trades
+        if len(all_ohlcv) >= 5000:
             break
 
     if not all_ohlcv:
@@ -263,6 +308,19 @@ def _get_signal_at_bar(slice_df, htf_slice, entry_price):
             return ('buy', 'range')
         if sell_signal:
             return ('sell', 'range')
+
+    # Fallback: if no normal signal, use limit-idea proximity in ranging conditions.
+    if not trend_up and not trend_down and is_ranging(slice_df) and len(slice_df) > 0:
+        last = slice_df.iloc[-1]
+        close = float(last['close'])
+        support = float(last['support']) if pd.notna(last.get('support')) else close
+        resistance = float(last['resistance']) if pd.notna(last.get('resistance')) else close
+        near_support = close <= support * (1 + LIMIT_IDEA_FALLBACK_PCT)
+        near_resistance = close >= resistance * (1 - LIMIT_IDEA_FALLBACK_PCT)
+        if near_support:
+            return ('buy', 'range')
+        if near_resistance:
+            return ('sell', 'range')
     return None
 
 
@@ -321,6 +379,7 @@ def simulate_combined_strategy(pair, df_5m, df_1h):
         if direction is None:
             continue
 
+        # Always execute the normal signal entry (existing backtest behavior).
         last_trade_bar = i
         outcome = check_trade_outcome(df_5m, i, direction, entry_price, BACKTEST_LOOKAHEAD, strat)
         result = outcome['result']
@@ -343,6 +402,33 @@ def simulate_combined_strategy(pair, df_5m, df_1h):
                 long_none += 1
             else:
                 short_none += 1
+
+        # Optional: execute limit-idea entry alongside normal signal entry.
+        if BACKTEST_USE_LIMIT_IDEAS:
+            fill_idx, filled_entry_price = _resolve_backtest_entry(df_5m, i, direction, strat)
+            if fill_idx is not None:
+                limit_outcome = check_trade_outcome(
+                    df_5m, fill_idx, direction, filled_entry_price, BACKTEST_LOOKAHEAD, strat
+                )
+                limit_result = limit_outcome['result']
+                pnl_list.append(limit_outcome['pnl_pct'])
+                strategy_used.append('ma' if strat == 'trend' else 'range')
+
+                if limit_result == 'win':
+                    if is_long:
+                        long_wins += 1
+                    else:
+                        short_wins += 1
+                elif limit_result == 'loss':
+                    if is_long:
+                        long_losses += 1
+                    else:
+                        short_losses += 1
+                else:
+                    if is_long:
+                        long_none += 1
+                    else:
+                        short_none += 1
 
     total_trades = long_wins + long_losses + long_none + short_wins + short_losses + short_none
     total_wins = long_wins + short_wins
@@ -372,12 +458,11 @@ def simulate_combined_strategy(pair, df_5m, df_1h):
 
 
 def run_backtest(pairs_override=None):
-    """Run backtest on pairs. Persists good_pairs and per-pair results to last_backtest.json."""
+    """Run backtest on pairs. Only pairs with win_rate >= threshold (default 50%) are kept. No fallback."""
     pairs = _get_backtest_pairs(pairs_override)
     win_rate_threshold = float(os.getenv("BACKTEST_WIN_RATE_THRESHOLD", "50"))
-    min_trades = int(os.getenv("BACKTEST_MIN_TRADES", "3"))
-    min_pairs = int(os.getenv("BACKTEST_MIN_PAIRS", "3"))
-    top_n_fallback = int(os.getenv("BACKTEST_TOP_N_FALLBACK", "8"))
+    min_rr_ratio = float(BACKTEST_MIN_RR_RATIO)
+    min_trades = 3  # require at least 3 trades so 1-trade flukes don't qualify
 
     good_pairs = []
     results_by_symbol = {}
@@ -394,35 +479,16 @@ def run_backtest(pairs_override=None):
                 results_by_symbol[symbol] = result_save
                 log_event(f"CHECKING BACKTEST: {result_save}")
                 total_trades = result.get('total_trades', 0)
-                if total_trades >= min_trades and result['win_rate'] >= win_rate_threshold:
+                rr_ratio = float(result.get('rr_ratio', 0.0))
+                if total_trades >= min_trades and result['win_rate'] >= win_rate_threshold and rr_ratio >= min_rr_ratio:
                     good_pairs.append(symbol)
         except Exception as e:
             log_event(f"❌ Error backtesting {symbol}: {e}")
-
-    # If too few pairs passed the threshold, take top N by win rate (then by total_trades) so we trade multiple pairs
-    if len(good_pairs) < min_pairs and results_by_symbol:
-        sorted_symbols = sorted(
-            results_by_symbol.keys(),
-            key=lambda s: (
-                results_by_symbol[s].get('win_rate', 0),
-                results_by_symbol[s].get('total_trades', 0),
-            ),
-            reverse=True,
-        )
-        # Only include pairs that have at least min_trades (avoid 1-trade flukes)
-        fallback = [
-            s for s in sorted_symbols
-            if results_by_symbol[s].get('total_trades', 0) >= min_trades
-        ][:top_n_fallback]
-        if fallback:
-            log_event(f"Fallback: only {len(good_pairs)} passed threshold; using top {len(fallback)} by win rate: {fallback}")
-            good_pairs = fallback
 
     state = {
         "pairs": good_pairs,
         "run_at": datetime.now(timezone.utc).isoformat(),
         "win_rate_threshold": win_rate_threshold,
-        "min_trades": min_trades,
         "results": results_by_symbol,
     }
     try:
@@ -493,15 +559,26 @@ def run_portfolio_backtest(pairs_override=None, max_trades_per_bar=3):
                 win_rate = 0.0
                 if isinstance(results_by_symbol.get(symbol), dict):
                     win_rate = float(results_by_symbol[symbol].get('win_rate', 0))
-                signals_at_bar.append((symbol, i, entry_price, direction, strategy_type, win_rate))
+                signals_at_bar.append((symbol, i, direction, strategy_type, win_rate))
 
-        signals_at_bar.sort(key=lambda x: x[5], reverse=True)
+        signals_at_bar.sort(key=lambda x: x[4], reverse=True)
         for t in signals_at_bar[:max_trades_per_bar]:
-            symbol, idx, entry_price, direction, strategy_type, _ = t
+            symbol, idx, direction, strategy_type, _ = t
             df_5m = data_by_symbol[symbol][0]
-            outcome = check_trade_outcome(df_5m, idx, direction, entry_price, BACKTEST_LOOKAHEAD, strategy_type)
+            signal_entry_price = float(df_5m['close'].iat[idx])
+            outcome = check_trade_outcome(
+                df_5m, idx, direction, signal_entry_price, BACKTEST_LOOKAHEAD, strategy_type
+            )
             pnl_list.append(outcome['pnl_pct'])
-            last_trade_bar_by_sym[symbol] = i
+            last_trade_bar_by_sym[symbol] = idx
+
+            if BACKTEST_USE_LIMIT_IDEAS:
+                fill_idx, filled_entry_price = _resolve_backtest_entry(df_5m, idx, direction, strategy_type)
+                if fill_idx is not None:
+                    limit_outcome = check_trade_outcome(
+                        df_5m, fill_idx, direction, filled_entry_price, BACKTEST_LOOKAHEAD, strategy_type
+                    )
+                    pnl_list.append(limit_outcome['pnl_pct'])
 
     total_wins = sum(1 for p in pnl_list if p > 0)
     total_losses = sum(1 for p in pnl_list if p <= 0)

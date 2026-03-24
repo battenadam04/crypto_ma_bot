@@ -4,6 +4,7 @@ import os
 import time
 import requests
 from datetime import datetime, timezone
+from typing import List
 
 from utils.utils import log_event
 
@@ -11,7 +12,7 @@ BACKTEST_STATE_FILE = os.path.join(os.path.dirname(__file__), '..', 'last_backte
 
 last_update_id = 0
 
-_send_timestamps: list[float] = []
+_send_timestamps: List[float] = []
 TELEGRAM_RATE_LIMIT = 20
 TELEGRAM_RATE_WINDOW_SEC = 60
 
@@ -286,6 +287,7 @@ def _cmd_config():
     return (
         f"<b>⚙️ Configuration</b>\n"
         f"Exchange: {os.getenv('EXCHANGE', 'kucoin')}\n"
+        f"Timeframe: <code>{config.TIMEFRAME}</code>\n"
         f"Signals only: {config.TRADING_SIGNALS_ONLY}\n"
         f"Trade capital %: {config.TRADE_CAPITAL_PCT * 100:.0f}%\n"
         f"Leverage: {config.DEFAULT_LEVERAGE}x\n"
@@ -294,6 +296,37 @@ def _cmd_config():
         f"Min ADX: {config.MIN_ADX_TREND}\n"
         f"RSI bounds: {config.RSI_OVERSOLD}/{config.RSI_OVERBOUGHT}"
     )
+
+
+_ALLOWED_TIMEFRAMES = (
+    "1m", "3m", "5m", "15m", "30m",
+    "1h", "2h", "4h",
+    "1d",
+)
+
+
+def _cmd_timeframe(args=None):
+    args = args or []
+    if not args:
+        allowed = ", ".join(f"<code>{t}</code>" for t in _ALLOWED_TIMEFRAMES)
+        return (
+            f"<b>🕒 Timeframe</b>\n"
+            f"Current: <code>{config.TIMEFRAME}</code>\n"
+            f"Set with: <code>/timeframe 15m</code> (or <code>/tf 15m</code>)\n"
+            f"Allowed: {allowed}"
+        )
+
+    tf = (args[0] or "").strip().lower()
+    if tf not in _ALLOWED_TIMEFRAMES:
+        allowed = ", ".join(_ALLOWED_TIMEFRAMES)
+        return f"❌ Invalid timeframe <code>{tf}</code>. Allowed: {allowed}"
+
+    try:
+        config.set_timeframe(tf)
+    except Exception as e:
+        return f"❌ Failed to set timeframe: {e}"
+
+    return f"✅ Timeframe set to <code>{config.TIMEFRAME}</code>"
 
 
 HELP_TEXT = (
@@ -307,6 +340,7 @@ HELP_TEXT = (
     "/signals — Today's signals with outcomes\n"
     "/pnl — Today's profit/loss\n"
     "/backtest — Last backtest results\n"
+    "/timeframe — Get/set timeframe (ex: /timeframe 15m)\n"
     "/config — Current configuration\n"
     "/help — This message"
 )
@@ -339,19 +373,26 @@ COMMAND_MAP = {
 HTML_COMMANDS = {
     "/status", "status", "/balance", "balance", "/positions", "positions",
     "/pairs", "pairs", "/signals", "signals", "/pnl", "pnl", "/backtest", "backtest",
+    "/timeframe", "timeframe", "/tf", "tf",
     "/config", "config", "/help", "help",
 }
 
 
 def handle_telegram_command(text):
     """Return (response_text, parse_mode) tuple."""
-    text = text.strip().lower()
-    log_event(f"Telegram command received: {text}")
+    raw = (text or "").strip()
+    parts = raw.split()
+    cmd = parts[0].lower() if parts else ""
+    args = parts[1:] if len(parts) > 1 else []
+    log_event(f"Telegram command received: {raw}")
 
-    handler = COMMAND_MAP.get(text)
+    if cmd in {"/timeframe", "timeframe", "/tf", "tf"}:
+        return _cmd_timeframe(args), "HTML"
+
+    handler = COMMAND_MAP.get(cmd)
     if handler:
         response = handler()
-        parse_mode = 'HTML' if text in HTML_COMMANDS else None
+        parse_mode = 'HTML' if cmd in HTML_COMMANDS else None
         return response, parse_mode
 
     return HELP_TEXT, 'HTML'

@@ -14,7 +14,7 @@ from config import (
     TRADING_SIGNALS_ONLY, TRADE_CAPITAL, MIN_ADX_TREND,
     DEFAULT_LEVERAGE, MAIN_LOOP_INTERVAL_SEC,
     RSI_OVERSOLD, RSI_OVERBOUGHT, RANGE_ADX_THRESHOLD,
-    BACKTEST_INTERVAL_HOURS,
+    BACKTEST_INTERVAL_HOURS, LIMIT_ENTRY_OFFSET_PCT, LIMIT_IDEA_FALLBACK_PCT,
 )
 from strategies.simulate_trades import run_backtest
 from utils.dailyChecksUtils import check_daily_loss_limit
@@ -44,7 +44,6 @@ can_trade_event = threading.Event()
 can_trade_event.set()  # Initially allow trading
 
 exchange = get_exchange()
-TIMEFRAME = '5m'
 
 # Higher-timeframe cache: keep only last 60 rows per symbol (enough for MA50); cap total entries to avoid unbounded growth
 HTF_CACHE_TTL_SEC = 900
@@ -58,10 +57,21 @@ last_backtest_time = datetime.min  # very old time to force backtest on first ru
 
 
 
-def fetch_data(symbol, timeframe=TIMEFRAME, limit=350):
+def _hours_back_for_timeframe(timeframe: str) -> int:
+    """Heuristic to bound historical fetch size per timeframe."""
+    tf = (timeframe or "").strip().lower()
+    if tf in {"1m", "3m", "5m", "15m"}:
+        return 6
+    if tf in {"30m", "1h"}:
+        return 48
+    return 168
+
+
+def fetch_data(symbol, timeframe=None, limit=350):
     """Fetch OHLCV; limit size to avoid large allocations."""
     try:
-        hours_back = 6 if timeframe == '5m' else 48
+        timeframe = timeframe or config.TIMEFRAME
+        hours_back = _hours_back_for_timeframe(timeframe)
         since_dt = datetime.now(timezone.utc) - timedelta(hours=hours_back)
         since_ms = int(since_dt.timestamp() * 1000)
         ohlcv = exchange.fetch_ohlcv(symbol, timeframe=timeframe, since=since_ms, limit=min(limit, 500))
@@ -74,7 +84,7 @@ def fetch_data(symbol, timeframe=TIMEFRAME, limit=350):
 
 
 
-def handle_trade(symbol, direction, df, strategy_type="trend"):
+def handle_trade(symbol, direction, df, strategy_type="trend", signal_source="SIG"):
     try:    
         df = add_atr_column(df)
         side = 'buy' if direction == 'long' else 'sell'
@@ -98,14 +108,19 @@ def handle_trade(symbol, direction, df, strategy_type="trend"):
         tp = tp_order.get('id') if isinstance(tp_order, dict) else tp_order if tp_order is not None else 'N/A'
         sl = sl_order.get('id') if isinstance(sl_order, dict) else sl_order if sl_order is not None else 'N/A'
 
+        # Build an optional limit-entry idea near local support/resistance.
+        limit_hint = build_limit_order_hint(df, direction, strategy_type)
+
         message = (
-                f"{'📈 LONG' if direction == 'long' else '📉 SHORT'} SIGNAL for {symbol} ({TIMEFRAME})\n"
+                f"{'📈 LONG' if direction == 'long' else '📉 SHORT'} SIGNAL for {symbol} ({config.TIMEFRAME})\n"
                 f"Confirmed by 15m {'up' if direction == 'long' else 'down'} {strategy_type}\n\n"
+                f"🧭 Src: {signal_source}\n"
                 f"💲 Filled Entry: {filledEntry}\n"
                 f"🎯 TP: {tp}\n"
                 f"🛑 SL: {sl}\n"
                 f"⚙️ Trade Status: {status}\n"
-                f"⚙️ Trade Error: {error}"
+                f"⚙️ Trade Error: {error}\n"
+                f"{limit_hint}"
             )
         send_telegram(message)
         log_event(f"Trade: {message}")
@@ -114,6 +129,78 @@ def handle_trade(symbol, direction, df, strategy_type="trend"):
             record_signal(symbol, direction, strategy_type, filledEntry, tp, sl)
     except Exception as e:
         log_event(f"❌ Error in handle_trade for {symbol}: {e}")
+
+
+def _fmt_price(value):
+    if value is None:
+        return "N/A"
+    if value < 0.01:
+        return f"{value:.8f}"
+    if value < 1:
+        return f"{value:.6f}"
+    if value < 100:
+        return f"{value:.4f}"
+    return f"{value:.2f}"
+
+
+def build_limit_order_hint(df, direction, strategy_type):
+    """
+    Return a short text block suggesting a limit entry near support/resistance.
+    - Range setups: emphasize bounce/rejection entry.
+    - Trend setups: suggest a small pullback entry to improve fill quality.
+    """
+    if df is None or len(df) == 0:
+        return "📝 Limit idea: not available (no candle data)"
+
+    last = df.iloc[-1]
+    close = float(last['close'])
+    support = float(last['support']) if pd.notna(last.get('support')) else close
+    resistance = float(last['resistance']) if pd.notna(last.get('resistance')) else close
+
+    if direction == 'long':
+        base_level = support if strategy_type == "range" else min(close, support * 1.003)
+        limit_price = base_level * (1 + LIMIT_ENTRY_OFFSET_PCT)
+        dist_pct = ((close - limit_price) / close) * 100
+        return (
+            f"📝 Limit idea: place a BUY LIMIT near support\n"
+            f"  • Support: {_fmt_price(support)}\n"
+            f"  • Suggested limit: {_fmt_price(limit_price)} (~{dist_pct:.2f}% below current)"
+        )
+
+    base_level = resistance if strategy_type == "range" else max(close, resistance * 0.997)
+    limit_price = base_level * (1 - LIMIT_ENTRY_OFFSET_PCT)
+    dist_pct = ((limit_price - close) / close) * 100
+    return (
+        f"📝 Limit idea: place a SELL LIMIT near resistance\n"
+        f"  • Resistance: {_fmt_price(resistance)}\n"
+        f"  • Suggested limit: {_fmt_price(limit_price)} (~{dist_pct:.2f}% above current)"
+    )
+
+
+def _limit_idea_fallback_signal(lower_df, trend_up, trend_down):
+    """
+    Fallback: if no normal signal, allow a range-biased limit idea near key levels.
+    """
+    if lower_df is None or len(lower_df) < 51:
+        return None
+    if trend_up or trend_down:
+        return None
+    if not is_ranging(lower_df):
+        return None
+
+    last = lower_df.iloc[-1]
+    close = float(last['close'])
+    support = float(last['support']) if pd.notna(last.get('support')) else close
+    resistance = float(last['resistance']) if pd.notna(last.get('resistance')) else close
+
+    near_support = close <= support * (1 + LIMIT_IDEA_FALLBACK_PCT)
+    near_resistance = close >= resistance * (1 - LIMIT_IDEA_FALLBACK_PCT)
+
+    if near_support:
+        return {'direction': 'long', 'strategy_type': 'range'}
+    if near_resistance:
+        return {'direction': 'short', 'strategy_type': 'range'}
+    return None
 
 def get_backtest_win_rates():
     """Load per-pair win rates from last backtest so we can prioritize which signal to take first."""
@@ -140,8 +227,8 @@ def process_pair(symbol):
             log_event(f"⛔ Skipping {symbol}: {reason}")
             return None
 
-    log_event(f"🔍 Checking {symbol} on {TIMEFRAME} timeframe...")
-    lower_df = fetch_data(symbol, TIMEFRAME)
+    log_event(f"🔍 Checking {symbol} on {config.TIMEFRAME} timeframe...")
+    lower_df = fetch_data(symbol, config.TIMEFRAME)
     if lower_df is None or len(lower_df) < 51:
         log_event(f"⚠️ Skipping {symbol} — insufficient lower timeframe data.")
         return None
@@ -183,15 +270,20 @@ def process_pair(symbol):
               (pd.notna(lower_df['adx'].iloc[-1]) and lower_df['adx'].iloc[-1] >= MIN_ADX_TREND))
 
     if adx_ok and check_long_signal(lower_df) and trend_up:
-        return {'symbol': symbol, 'direction': 'long', 'strategy_type': 'trend', 'df': lower_df}
+        return {'symbol': symbol, 'direction': 'long', 'strategy_type': 'trend', 'signal_source': 'SIG', 'df': lower_df}
     if adx_ok and check_short_signal(lower_df) and trend_down:
-        return {'symbol': symbol, 'direction': 'short', 'strategy_type': 'trend', 'df': lower_df}
+        return {'symbol': symbol, 'direction': 'short', 'strategy_type': 'trend', 'signal_source': 'SIG', 'df': lower_df}
     if is_ranging(lower_df) and not trend_up and not trend_down:
         buy_signal, sell_signal = check_range_trade(lower_df)
         if buy_signal:
-            return {'symbol': symbol, 'direction': 'long', 'strategy_type': 'range', 'df': lower_df}
+            return {'symbol': symbol, 'direction': 'long', 'strategy_type': 'range', 'signal_source': 'SIG', 'df': lower_df}
         if sell_signal:
-            return {'symbol': symbol, 'direction': 'short', 'strategy_type': 'range', 'df': lower_df}
+            return {'symbol': symbol, 'direction': 'short', 'strategy_type': 'range', 'signal_source': 'SIG', 'df': lower_df}
+
+    fallback = _limit_idea_fallback_signal(lower_df, trend_up, trend_down)
+    if fallback:
+        log_event(f"🧠 Limit-idea fallback triggered for {symbol} ({fallback['direction']})")
+        return {'symbol': symbol, 'direction': fallback['direction'], 'strategy_type': fallback['strategy_type'], 'signal_source': 'LIM', 'df': lower_df}
 
     log_event(f"✅ No confirmed signal for {symbol} this cycle.")
     return None
@@ -257,7 +349,13 @@ def main():
         if not allowed:
             log_event(f"⛔ Skipping trade {sig['symbol']}: {reason}")
             continue
-        handle_trade(sig['symbol'], sig['direction'], sig['df'], strategy_type=sig['strategy_type'])
+        handle_trade(
+            sig['symbol'],
+            sig['direction'],
+            sig['df'],
+            strategy_type=sig['strategy_type'],
+            signal_source=sig.get('signal_source', 'SIG'),
+        )
 
     # Prune HTF cache to current set only so we don't keep data for removed pairs
     if len(higher_timeframe_cache) > len(generated_pairs) + 5:

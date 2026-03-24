@@ -14,6 +14,7 @@ from utils.telegramUtils import handle_telegram_command, _rate_limited, _send_ti
 class TestHandleTelegramCommand:
     def setup_method(self):
         config.TRADING_ENABLED = False
+        config.TIMEFRAME = "5m"
 
     def test_on_enables_signals_only(self):
         config.TRADING_SIGNALS_ONLY = True
@@ -87,6 +88,28 @@ class TestHandleTelegramCommand:
         config.TRADING_ENABLED = True
         response, _ = handle_telegram_command("  /off  ")
         assert "Bot OFF" in response
+
+    def test_timeframe_shows_current_and_help(self):
+        response, mode = handle_telegram_command("/timeframe")
+        assert "Timeframe" in response
+        assert "5m" in response
+        assert mode == "HTML"
+
+    def test_timeframe_set_valid(self, monkeypatch):
+        def _fake_set(tf):
+            config.TIMEFRAME = tf
+            return tf
+
+        monkeypatch.setattr(config, "set_timeframe", _fake_set)
+        response, mode = handle_telegram_command("/timeframe 15m")
+        assert "15m" in response
+        assert config.TIMEFRAME == "15m"
+        assert mode == "HTML"
+
+    def test_timeframe_set_invalid(self):
+        response, mode = handle_telegram_command("/timeframe 7m")
+        assert "Invalid timeframe" in response
+        assert mode == "HTML"
 
 
 class TestPairsCommand:
