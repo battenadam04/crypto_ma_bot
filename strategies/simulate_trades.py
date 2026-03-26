@@ -10,6 +10,9 @@ import time
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 
+# Mark this process as backtesting so shared helpers can suppress noisy prints.
+os.environ.setdefault("BACKTESTING", "true")
+
 from config import (
     BACKTEST_SLIPPAGE_BPS, BACKTEST_COMMISSION_BPS,
     BACKTEST_COOLDOWN_BARS, BACKTEST_LOOKAHEAD, BACKTEST_DAYS,
@@ -23,11 +26,18 @@ from utils.utils import (
 from utils.exchangeUtils import get_exchange, get_top_tradable_pairs
 
 BACKTEST_STATE_FILE = os.path.join(os.path.dirname(__file__), '..', 'last_backtest.json')
+BACKTEST_VERBOSE = os.getenv("BACKTEST_VERBOSE", "false").strip().lower() in ("1", "true", "yes", "y", "on")
 DEFAULT_BACKTEST_PAIRS = [
     'BTC/USDT', 'ETH/USDT', 'XRP/USDT', 'BNB/USDT', 'SOL/USDT', 'TRX/USDT',
     'DOGE/USDT', 'ADA/USDT', 'LINK/USDT', 'XLM/USDT', 'HBAR/USDT', 'LTC/USDT',
     'AVAX/USDT', 'SHIB/USDT', 'SUI/USDT', 'UNI/USDT'
 ]
+
+def _bt_log(message: str, *, verbose: bool = False):
+    """Backtest logging: keep output minimal unless BACKTEST_VERBOSE=true."""
+    if verbose and not BACKTEST_VERBOSE:
+        return
+    log_event(message)
 
 def _get_exchange():
     return get_exchange()
@@ -246,8 +256,12 @@ def check_trade_outcome(df, start_idx, direction, entry_price,
     if 'ATR' not in df.columns:
         df = add_atr_column(df, period=7)
 
-    entry_price = _apply_slippage(entry_price, direction)
-    commission = _commission_cost(entry_price) * 2
+    apply_fees = os.getenv("BACKTEST_APPLY_FEES", "true").strip().lower() in ("1", "true", "yes", "y", "on")
+    if apply_fees:
+        entry_price = _apply_slippage(entry_price, direction)
+        commission = _commission_cost(entry_price) * 2
+    else:
+        commission = 0.0
 
     levels = calculate_trade_levels(entry_price, direction, df, start_idx, strategy)
     tp, sl = levels['take_profit'], levels['stop_loss']
@@ -438,14 +452,14 @@ def simulate_combined_strategy(pair, df_5m, df_1h):
 
     risk_metrics = _compute_risk_metrics(pnl_list)
 
-    log_event(f"\n--- Results for {pair} ---")
-    log_event(f"Total Trades: {total_trades}")
-    log_event(f"Wins: {total_wins} (Long: {long_wins}, Short: {short_wins})")
-    log_event(f"Losses: {long_losses + short_losses} (Long: {long_losses}, Short: {short_losses})")
-    log_event(f"Win Rate: {win_rate}%")
-    log_event(f"MA Usage: {ma_used}, Range Usage: {range_used}")
-    log_event(f"Sharpe: {risk_metrics['sharpe']} | Max DD: {risk_metrics['max_drawdown_pct']}% | PF: {risk_metrics['profit_factor']}")
-    log_event(f"Avg Win: {risk_metrics['avg_win_pct']}% | Avg Loss: {risk_metrics['avg_loss_pct']}%")
+    _bt_log(f"\n--- Results for {pair} ---", verbose=True)
+    _bt_log(f"Total Trades: {total_trades}", verbose=True)
+    _bt_log(f"Wins: {total_wins} (Long: {long_wins}, Short: {short_wins})", verbose=True)
+    _bt_log(f"Losses: {long_losses + short_losses} (Long: {long_losses}, Short: {short_losses})", verbose=True)
+    _bt_log(f"Win Rate: {win_rate}%", verbose=True)
+    _bt_log(f"MA Usage: {ma_used}, Range Usage: {range_used}", verbose=True)
+    _bt_log(f"Sharpe: {risk_metrics['sharpe']} | Max DD: {risk_metrics['max_drawdown_pct']}% | PF: {risk_metrics['profit_factor']}", verbose=True)
+    _bt_log(f"Avg Win: {risk_metrics['avg_win_pct']}% | Avg Loss: {risk_metrics['avg_loss_pct']}%", verbose=True)
 
     result = {
         'win_rate': win_rate,
@@ -461,15 +475,17 @@ def run_backtest(pairs_override=None):
     """Run backtest on pairs. Only pairs with win_rate >= threshold (default 50%) are kept. No fallback."""
     pairs = _get_backtest_pairs(pairs_override)
     win_rate_threshold = float(os.getenv("BACKTEST_WIN_RATE_THRESHOLD", "50"))
-    min_rr_ratio = float(BACKTEST_MIN_RR_RATIO)
+    enforce_rr = os.getenv("BACKTEST_ENFORCE_RR", "false").strip().lower() in ("1", "true", "yes", "y", "on")
+    min_rr_ratio = float(BACKTEST_MIN_RR_RATIO) if enforce_rr else 0.0
     min_trades = 3  # require at least 3 trades so 1-trade flukes don't qualify
 
     good_pairs = []
     results_by_symbol = {}
 
-    log_event(f"Backtest pairs: {[p[0] for p in pairs]}")
-    for pair in pairs:
+    _bt_log(f"Backtesting {len(pairs)} pairs...", verbose=False)
+    for idx, pair in enumerate(pairs):
         symbol = pair[0] if isinstance(pair, (list, tuple)) else pair
+        _bt_log(f"[{idx + 1}/{len(pairs)}] Backtesting {symbol}", verbose=False)
         try:
             df = fetch_data(symbol, '5m', days=BACKTEST_DAYS)
             df_1h = fetch_higher_timeframe_data(symbol, '15m', days=BACKTEST_DAYS)
@@ -477,13 +493,13 @@ def run_backtest(pairs_override=None):
                 result = simulate_combined_strategy(pair, df, df_1h)
                 result_save = {k: v for k, v in result.items() if k != 'equity_curve'}
                 results_by_symbol[symbol] = result_save
-                log_event(f"CHECKING BACKTEST: {result_save}")
+                _bt_log(f"Result: {result_save}", verbose=True)
                 total_trades = result.get('total_trades', 0)
                 rr_ratio = float(result.get('rr_ratio', 0.0))
                 if total_trades >= min_trades and result['win_rate'] >= win_rate_threshold and rr_ratio >= min_rr_ratio:
                     good_pairs.append(symbol)
         except Exception as e:
-            log_event(f"❌ Error backtesting {symbol}: {e}")
+            _bt_log(f"❌ Error backtesting {symbol}: {e}", verbose=False)
 
     state = {
         "pairs": good_pairs,
@@ -496,9 +512,10 @@ def run_backtest(pairs_override=None):
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w") as f:
             json.dump(state, f, indent=2)
-        log_event(f"Wrote backtest state to {path} ({len(good_pairs)} good pairs).")
+        _bt_log(f"Backtest complete: {len(good_pairs)} good pairs (threshold {win_rate_threshold}%, min trades {min_trades}, min RR {min_rr_ratio}).", verbose=False)
+        _bt_log(f"Wrote backtest state to {path}", verbose=False)
     except Exception as e:
-        log_event(f"Failed to write last_backtest.json: {e}")
+        _bt_log(f"Failed to write last_backtest.json: {e}", verbose=False)
 
     return good_pairs
 

@@ -128,11 +128,14 @@ def calculate_trade_levels(price, direction, df, start_idx, strategy_type="trend
     tp_pct = ((tp - entry) / entry) * 100
     sl_pct = ((entry - sl) / entry) * 100 if direction == 'buy' else ((sl - entry) / entry) * 100
 
-    print(f"🎯 {strategy_type.upper()} trade:")
-    print(f"• Entry: {entry}")
-    print(f"• TP: {tp} ({tp_pct:.2f}%)")
-    print(f"• SL: {sl} ({sl_pct:.2f}%)")
-    print(f"• ATR: {atr:.6f}")
+    is_backtesting = os.getenv("BACKTESTING", "false").strip().lower() in ("1", "true", "yes", "y", "on")
+    backtest_verbose = os.getenv("BACKTEST_VERBOSE", "false").strip().lower() in ("1", "true", "yes", "y", "on")
+    if (not is_backtesting) or backtest_verbose:
+        print(f"🎯 {strategy_type.upper()} trade:")
+        print(f"• Entry: {entry}")
+        print(f"• TP: {tp} ({tp_pct:.2f}%)")
+        print(f"• SL: {sl} ({sl_pct:.2f}%)")
+        print(f"• ATR: {atr:.6f}")
 
     return {
         'entry': entry,
