@@ -60,9 +60,10 @@ last_backtest_time = datetime.min  # very old time to force backtest on first ru
 def _hours_back_for_timeframe(timeframe: str) -> int:
     """Heuristic to bound historical fetch size per timeframe."""
     tf = (timeframe or "").strip().lower()
-    if tf in {"1m", "3m", "5m", "15m"}:
+    # 15m needs ~51+ bars for ma50 / trend checks; 6h only yields ~24 candles.
+    if tf in {"1m", "3m", "5m"}:
         return 6
-    if tf in {"30m", "1h"}:
+    if tf in {"15m", "30m", "1h"}:
         return 48
     return 168
 
