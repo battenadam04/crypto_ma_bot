@@ -89,7 +89,10 @@ def handle_trade(symbol, direction, df, strategy_type="trend", signal_source="SI
     try:    
         df = add_atr_column(df)
         side = 'buy' if direction == 'long' else 'sell'
-        log_event(f"💰 Starting trade: {strategy_type} for {direction}")
+        log_event(
+            f"{'📣 Signal' if config.TRADING_SIGNALS_ONLY else '💰 Starting live trade'}: "
+            f"{strategy_type} {direction} for {symbol}"
+        )
         trade_result = place_futures_order(
                 exchange=exchange,
                 df=df,
@@ -100,6 +103,9 @@ def handle_trade(symbol, direction, df, strategy_type="trend", signal_source="SI
                 strategy_type=strategy_type
             )
         log_event(f"🔍 Trade results:\n{trade_result}")
+        if trade_result is None or not isinstance(trade_result, dict):
+            log_event(f"❌ place_futures_order returned invalid result for {symbol}: {trade_result!r}")
+            return
         status = trade_result.get('status', 'unknown')
         error = trade_result.get('message', 'none')
         filledEntry = trade_result.get('filled_entry', 'none')
@@ -112,7 +118,21 @@ def handle_trade(symbol, direction, df, strategy_type="trend", signal_source="SI
         # Build an optional limit-entry idea near local support/resistance.
         limit_hint = build_limit_order_hint(df, direction, strategy_type)
 
-        message = (
+        if config.TRADING_SIGNALS_ONLY:
+            message = (
+                f"{'📈 LONG' if direction == 'long' else '📉 SHORT'} SIGNAL for {symbol} ({config.TIMEFRAME})\n"
+                f"Confirmed by 15m {'up' if direction == 'long' else 'down'} {strategy_type}\n\n"
+                f"🧭 Src: {signal_source}\n"
+                f"ℹ️ Signals only — the bot does not place orders.\n"
+                f"💲 Reference price: {filledEntry}\n"
+                f"🎯 TP (indicative): {tp}\n"
+                f"🛑 SL (indicative): {sl}\n"
+            )
+            if status != "success":
+                message += f"⚙️ Status: {status}\n⚙️ Detail: {error}\n"
+            message += limit_hint
+        else:
+            message = (
                 f"{'📈 LONG' if direction == 'long' else '📉 SHORT'} SIGNAL for {symbol} ({config.TIMEFRAME})\n"
                 f"Confirmed by 15m {'up' if direction == 'long' else 'down'} {strategy_type}\n\n"
                 f"🧭 Src: {signal_source}\n"
@@ -124,7 +144,7 @@ def handle_trade(symbol, direction, df, strategy_type="trend", signal_source="SI
                 f"{limit_hint}"
             )
         send_telegram(message)
-        log_event(f"Trade: {message}")
+        log_event(f"{'Signal' if config.TRADING_SIGNALS_ONLY else 'Trade'}: {message}")
 
         if status == 'success':
             record_signal(symbol, direction, strategy_type, filledEntry, tp, sl)

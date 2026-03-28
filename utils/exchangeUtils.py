@@ -413,14 +413,28 @@ def place_futures_order(exchange, df, symbol, side, capital, leverage=10, strate
         if price is None or price <= 0:
             return {'status': 'error', 'message': f"Invalid ticker data for {symbol}: {ticker}"}
 
+        # Signals-only: never touch balance, sizing, or orders — only market + last price for indicative TP/SL.
+        if TRADING_SIGNALS_ONLY:
+            log_event(f"📣 Signals-only: {symbol} — indicative levels (no orders, no balance check).")
+            levels = calculate_trade_levels(price, side, df, len(df) - 1, strategy_type)
+            tp_price = round(levels['take_profit'], price_precision)
+            sl_price = round(levels['stop_loss'], price_precision)
+            return {
+                'status': 'success',
+                'filled_entry': price,
+                'tp_order': tp_price,
+                'sl_order': sl_price,
+            }
+
         contract_value = float(market.get('contractSize') or 1.0)
 
         balance = exchange.fetch_balance()
         usdt_balance = balance['free'].get('USDT', 0)
 
         if usdt_balance == 0:
-            print("❌ No available USDT balance for futures trading.")
-            return None
+            msg = "No available USDT balance for futures trading."
+            print(f"❌ {msg}")
+            return {"status": "error", "message": msg, "filled_entry": None, "tp_order": None, "sl_order": None}
 
         # Use only a portion of balance (configurable)
         capital_pct = getattr(config, 'TRADE_CAPITAL_PCT', 0.25)
@@ -437,96 +451,81 @@ def place_futures_order(exchange, df, symbol, side, capital, leverage=10, strate
         print(f"• Price: {price} | Notional: {notional:.2f} | Amount: {amount}")
 
         # Skip if amount is below minimum
-        if amount < min_amount and not TRADING_SIGNALS_ONLY:
+        if amount < min_amount:
             return {'status': 'error', 'message': f"Amount {amount} is below min allowed: {min_amount}"}
 
         raw_entry_price = price * (1 + ENTRY_BUFFER_PCT / 100) if side == 'buy' else price * (1 - ENTRY_BUFFER_PCT / 100)
 
-        if raw_entry_price <= min_price and not TRADING_SIGNALS_ONLY:
+        if raw_entry_price <= min_price:
             return {'status': 'error', 'message': f"Raw entry price {raw_entry_price} is below min allowed: {min_price}"}
 
         entry_price = round(raw_entry_price, price_precision)
 
-        if entry_price <= 0 and not TRADING_SIGNALS_ONLY:
+        if entry_price <= 0:
             return {'status': 'error', 'message': f"Final entry price is invalid: {entry_price}"}
-        
 
-        # ✅ Place Entry Order
-        # only return data for trading signals for manual trading and ignore bot setting trades
-        if not TRADING_SIGNALS_ONLY:
-            entry_order = place_entry_order_with_fallback(exchange, symbol, side, amount, entry_price, leverage)
+        # ✅ Place entry + TP/SL (live path only; signals-only returns earlier)
+        entry_order = place_entry_order_with_fallback(exchange, symbol, side, amount, entry_price, leverage)
 
-            if not entry_order or not isinstance(entry_order, dict) or 'id' not in entry_order:
-                return {'status': 'error', 'message': f"Entry order failed: {entry_order}"}
+        if not entry_order or not isinstance(entry_order, dict) or 'id' not in entry_order:
+            return {'status': 'error', 'message': f"Entry order failed: {entry_order}"}
 
-            # 🕒 Poll for order fill
-            filled_price = None
+        # 🕒 Poll for order fill
+        filled_price = None
 
-            for _ in range(max_wait_seconds):
-                try:
-                    order_id = entry_order['id']
-                    order_status = exchange.fetch_order(order_id, symbol)
-                    status = order_status.get('status')
-                    filled = float(order_status.get('filled', 0))
-                    amount = float(order_status.get('amount', 1))
+        for _ in range(max_wait_seconds):
+            try:
+                order_id = entry_order['id']
+                order_status = exchange.fetch_order(order_id, symbol)
+                status = order_status.get('status')
+                filled = float(order_status.get('filled', 0))
+                amount = float(order_status.get('amount', 1))
 
-
-                    if status == 'closed' or (status == 'open' and filled >= amount):
-                        filled_price_fetched = get_filled_price(order_status)
-                        filled_price = filled_price_fetched
-                        print(f"✅ Entry order {order_id} filled with filled price:{filled_price}")
-                        break
-                    else:
-                        log_event(f"⏳ Waiting for order {order_id} to fill, current status: {status}")
-                except Exception as e:
-                    print(f"❌ Error fetching order status: {e}")
-                time.sleep(poll_interval)
-            else:
-                return {'status': 'error', 'message': 'Entry order not filled in time'}
-
-            # 🔒 Step 3: Place TP and SL with retry (capped to protect capital)
-            for attempt in range(1, MAX_TP_SL_RETRIES + 1):
-                levels = calculate_trade_levels(filled_price, side, df, len(df)-1, strategy_type)
-                tp_price = round(levels['take_profit'], price_precision)
-                sl_price = round(levels['stop_loss'], price_precision)
-
-                validated = safe_place_tp_sl(
-                    tp_price,
-                    sl_price,
-                    entry_price=filled_price,
-                    direction=side,
-                    symbol=symbol
-                )
-
-                if validated and validated.get('valid'):
-                    tp_sl_result = place_tp_sl_orders(exchange, symbol, side, amount, validated['take_profit'], validated['stop_loss'], filled_price)
-
-                    if tp_sl_result['status'] in ['tp_filled', 'sl_filled', 'success']:
-                        print(f"✅ TP and SL successfully placed on attempt {attempt}.")
-                        return {
-                            'status': 'success',
-                            'filled_entry': filled_price,
-                            'tp_order': tp_sl_result['tp_order'],
-                            'sl_order': tp_sl_result['sl_order']
-                        }
-
-                print(f"🔁 TP/SL attempt {attempt}/{MAX_TP_SL_RETRIES} failed, retrying in 2s...")
-                time.sleep(2)
-
-            log_event(f"🚨 TP/SL failed after {MAX_TP_SL_RETRIES} attempts for {symbol}. Force-closing position.")
-            _emergency_close_position(exchange, symbol, side, amount)
-            return {'status': 'error', 'message': f"TP/SL failed after {MAX_TP_SL_RETRIES} attempts. Position force-closed."}
+                if status == 'closed' or (status == 'open' and filled >= amount):
+                    filled_price_fetched = get_filled_price(order_status)
+                    filled_price = filled_price_fetched
+                    print(f"✅ Entry order {order_id} filled with filled price:{filled_price}")
+                    break
+                else:
+                    log_event(f"⏳ Waiting for order {order_id} to fill, current status: {status}")
+            except Exception as e:
+                print(f"❌ Error fetching order status: {e}")
+            time.sleep(poll_interval)
         else:
-            print(f"🔁TRADING SIGNALS ONLY...")
-            levels = calculate_trade_levels(price, side, df, len(df)-1, strategy_type)
+            return {'status': 'error', 'message': 'Entry order not filled in time'}
+
+        # 🔒 Place TP and SL with retry (capped to protect capital)
+        for attempt in range(1, MAX_TP_SL_RETRIES + 1):
+            levels = calculate_trade_levels(filled_price, side, df, len(df)-1, strategy_type)
             tp_price = round(levels['take_profit'], price_precision)
             sl_price = round(levels['stop_loss'], price_precision)
-            return {
-                'status': 'success',
-                'filled_entry': price,
-                'tp_order': tp_price,
-                'sl_order': sl_price
-            }
+
+            validated = safe_place_tp_sl(
+                tp_price,
+                sl_price,
+                entry_price=filled_price,
+                direction=side,
+                symbol=symbol
+            )
+
+            if validated and validated.get('valid'):
+                tp_sl_result = place_tp_sl_orders(exchange, symbol, side, amount, validated['take_profit'], validated['stop_loss'], filled_price)
+
+                if tp_sl_result['status'] in ['tp_filled', 'sl_filled', 'success']:
+                    print(f"✅ TP and SL successfully placed on attempt {attempt}.")
+                    return {
+                        'status': 'success',
+                        'filled_entry': filled_price,
+                        'tp_order': tp_sl_result['tp_order'],
+                        'sl_order': tp_sl_result['sl_order']
+                    }
+
+            print(f"🔁 TP/SL attempt {attempt}/{MAX_TP_SL_RETRIES} failed, retrying in 2s...")
+            time.sleep(2)
+
+        log_event(f"🚨 TP/SL failed after {MAX_TP_SL_RETRIES} attempts for {symbol}. Force-closing position.")
+        _emergency_close_position(exchange, symbol, side, amount)
+        return {'status': 'error', 'message': f"TP/SL failed after {MAX_TP_SL_RETRIES} attempts. Position force-closed."}
 
     except Exception as e:
         return {'status': 'error', 'message': f"Unexpected error: {str(e)}"}
