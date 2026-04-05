@@ -15,10 +15,25 @@ max_wait_seconds = 300
 poll_interval = 1
 MAX_TP_SL_RETRIES = 10
 
-EXCHANGE_NAME = os.getenv("EXCHANGE", "kucoin")  # default kucoin
+# Normalize so Render/dashboard env vars like "PHEMEX" or "phemex " still match.
+EXCHANGE_RAW = os.getenv("EXCHANGE", "phemex") or "phemex"
+EXCHANGE_NAME = EXCHANGE_RAW.strip().lower()
 
 def init_exchange():
-    if EXCHANGE_NAME == "kucoin":
+    if EXCHANGE_NAME == "phemex":
+        exchange = ccxt.phemex({
+            'apiKey': os.getenv("PHEMEX_API_KEY", ""),
+            'secret': os.getenv("PHEMEX_SECRET", ""),
+            'enableRateLimit': True,
+            'options': {
+                'defaultType': 'swap',
+            },
+        })
+        if os.getenv("PHEMEX_SANDBOX", "false").lower() == "true":
+            exchange.set_sandbox_mode(True)
+            log_event("PHEMEX_SANDBOX=true: using Phemex testnet API.")
+
+    elif EXCHANGE_NAME == "kucoin":
         exchange = ccxt.kucoin({
             'apiKey': os.getenv("KUCOIN_API_KEY"),
             'secret': os.getenv("KUCOIN_SECRET_KEY"),
@@ -199,6 +214,96 @@ def _fetch_binance_margin_symbols(exchange_obj, quote='USDT'):
     return allowed
 
 
+def get_top_phemex_usdt_swaps(
+    exchange,
+    top_n=20,
+    min_quote_volume=1_000_000,
+    min_market_cap_usd=0,
+):
+    """
+    Rank active USDT-settled perpetuals on Phemex by 24h quote volume.
+
+    If min_market_cap_usd > 0, CoinGecko is used to keep only bases whose market cap
+    meets that USD threshold (same idea as Binance path). Sort: (cap, volume) desc;
+    if cap filter off, sort by volume only.
+    """
+    stablecoins = {
+        'USDT', 'USDC', 'BUSD', 'TUSD', 'DAI',
+        'FDUSD', 'UST', 'USDE', 'USD1',
+    }
+    use_cap = min_market_cap_usd is not None and float(min_market_cap_usd) > 0
+    caps = fetch_market_caps(float(min_market_cap_usd)) if use_cap else {}
+    if use_cap and not caps:
+        log_event(
+            "get_top_phemex_usdt_swaps: CoinGecko returned no caps (rate limit/error). "
+            "Using volume-only ranking; set BACKTEST_COINGECKO_MIN_CAP=0 to skip CoinGecko intentionally."
+        )
+        use_cap = False
+    exchange.load_markets()
+    try:
+        tickers = exchange.fetch_tickers()
+    except Exception as e:
+        log_event(f"get_top_phemex_usdt_swaps: fetch_tickers failed: {e}")
+        return []
+
+    rows = []
+    for symbol, m in (exchange.markets or {}).items():
+        if not m.get('swap') or m.get('settle') != 'USDT':
+            continue
+        if not m.get('active', True):
+            continue
+        base = m.get('base')
+        if not base or base in stablecoins:
+            continue
+        if use_cap and base not in caps:
+            continue
+        t = tickers.get(symbol) or {}
+        qv = t.get('quoteVolume')
+        if qv is None:
+            continue
+        try:
+            vol = float(qv)
+        except (TypeError, ValueError):
+            continue
+        if vol < float(min_quote_volume):
+            continue
+        cap_val = caps.get(base, 0.0) if use_cap else 0.0
+        rows.append((symbol, cap_val, vol))
+
+    if use_cap:
+        rows.sort(key=lambda x: (x[1], x[2]), reverse=True)
+    else:
+        rows.sort(key=lambda x: x[2], reverse=True)
+    return rows[: int(top_n)]
+
+
+def get_auto_backtest_pairs(exchange):
+    """
+    Optional universe for backtests when BACKTEST_AUTO_TOP_PAIRS=true.
+    Respects BACKTEST_TOP_N, BACKTEST_MIN_QUOTE_VOLUME, BACKTEST_COINGECKO_MIN_CAP (0 = skip CoinGecko, volume only).
+    """
+    eid = getattr(exchange, "id", None)
+    if eid not in ("binance", "phemex", "kucoinfutures"):
+        log_event(
+            "BACKTEST_AUTO_TOP_PAIRS: built-in discovery needs EXCHANGE=binance_margin, phemex, or "
+            f"kucoin_futures (ccxt id was {eid!r}). Set BACKTEST_PAIRS or CRYPTO_PAIRS instead."
+        )
+        return []
+    top_n = int(os.getenv("BACKTEST_TOP_N", "20"))
+    min_vol = float(os.getenv("BACKTEST_MIN_QUOTE_VOLUME", "1000000"))
+    cap_raw = os.getenv("BACKTEST_COINGECKO_MIN_CAP", "1000000000").strip()
+    try:
+        min_cap = float(cap_raw) if cap_raw else 0.0
+    except ValueError:
+        min_cap = 1_000_000_000.0
+    return get_top_tradable_pairs(
+        exchange,
+        top_n=top_n,
+        min_volume=min_vol,
+        min_market_cap_usd=min_cap,
+    )
+
+
 def get_top_tradable_pairs(
     exchange_or_markets,
     quote='USDT',
@@ -207,8 +312,18 @@ def get_top_tradable_pairs(
     min_market_cap_usd=1_000_000_000,
 ):
     """
-    - Binance: MARGIN-enabled USDT spot pairs (from official margin API)
-    - KuCoin: USDT-M linear futures
+    Discover liquid symbols on the connected exchange (for backtests / screening).
+
+    CoinGecko: when min_market_cap_usd > 0, only bases present in CoinGecko's top listings
+    with market cap >= that USD value are kept. That is a *large-cap* filter, not "top volume
+    from CoinGecko" — volume still comes from the exchange (24h quote volume).
+
+    Ranking: (market_cap, 24h_quote_volume) descending when the cap filter is on; otherwise
+    by 24h quote volume only.
+
+    - Binance (margin): margin-enabled USDT spot pairs.
+    - Phemex: USDT-settled perpetual swaps.
+    - KuCoin futures: linear USDT contracts (ccxt id kucoinfutures), or a legacy markets dict.
     """
 
     stablecoins = {
@@ -216,7 +331,14 @@ def get_top_tradable_pairs(
         'FDUSD', 'UST', 'USDE', 'USD1'
     }
 
-    market_caps = fetch_market_caps(min_market_cap_usd)
+    use_cap_filter = min_market_cap_usd is not None and float(min_market_cap_usd) > 0
+    market_caps = fetch_market_caps(float(min_market_cap_usd)) if use_cap_filter else {}
+    if use_cap_filter and not market_caps:
+        log_event(
+            "get_top_tradable_pairs: CoinGecko returned no caps (rate limit/error). "
+            "Using volume-only ranking for this run."
+        )
+        use_cap_filter = False
     filtered_pairs = []
 
     # Allow passing exchange OR markets dict
@@ -228,6 +350,18 @@ def get_top_tradable_pairs(
         markets = exchange_obj.markets or {}
 
     is_binance = exchange_obj and exchange_obj.id == "binance"
+    is_phemex = exchange_obj and exchange_obj.id == "phemex"
+    use_kucoin_futures_markets = isinstance(exchange_or_markets, dict) or (
+        exchange_obj and exchange_obj.id == "kucoinfutures"
+    )
+
+    if is_phemex and exchange_obj is not None:
+        return get_top_phemex_usdt_swaps(
+            exchange_obj,
+            top_n=top_n,
+            min_quote_volume=float(min_volume),
+            min_market_cap_usd=float(min_market_cap_usd) if use_cap_filter else 0.0,
+        )
 
     # =========================
     # BINANCE — MARGIN
@@ -268,21 +402,20 @@ def get_top_tradable_pairs(
             base = market.get('base')
             if not base or base in stablecoins:
                 continue
-            if base not in market_caps:
+            if use_cap_filter and base not in market_caps:
                 continue
 
             volume = volume_by_symbol.get(binance_symbol, 0.0)
             if volume < float(min_volume):
                 continue
 
-            filtered_pairs.append(
-                (symbol, market_caps[base], volume)
-            )
+            cap_val = market_caps[base] if use_cap_filter else 0.0
+            filtered_pairs.append((symbol, cap_val, volume))
 
     # =========================
-    # KUCOIN — FUTURES
+    # KUCOIN — FUTURES (or legacy markets dict)
     # =========================
-    else:
+    elif use_kucoin_futures_markets:
         for symbol, market in markets.items():
             if not market.get('future', False):
                 continue
@@ -296,7 +429,7 @@ def get_top_tradable_pairs(
             base = market.get('base')
             if not base or base in stablecoins:
                 continue
-            if base not in market_caps:
+            if use_cap_filter and base not in market_caps:
                 continue
 
             vol = market.get('info', {}).get('volumeOf24h')
@@ -311,14 +444,16 @@ def get_top_tradable_pairs(
             if volume < float(min_volume):
                 continue
 
-            filtered_pairs.append(
-                (symbol, market_caps[base], volume)
-            )
+            cap_val = market_caps[base] if use_cap_filter else 0.0
+            filtered_pairs.append((symbol, cap_val, volume))
 
-    filtered_pairs.sort(
-        key=lambda x: (x[1], x[2]),
-        reverse=True
-    )
+    else:
+        return []
+
+    if use_cap_filter:
+        filtered_pairs.sort(key=lambda x: (x[1], x[2]), reverse=True)
+    else:
+        filtered_pairs.sort(key=lambda x: x[2], reverse=True)
 
     return filtered_pairs[:top_n]
 
@@ -355,6 +490,25 @@ def _emergency_close_position(exchange, symbol, side, amount):
 
 
 def place_entry_order_with_fallback(exchange, symbol, side, amount, entry_price, leverage):
+    lev = int(leverage)
+    lev_s = str(lev)
+
+    if getattr(exchange, "id", None) == "phemex":
+        try:
+            exchange.set_margin_mode("isolated", symbol, {"leverage": lev_s})
+            return exchange.create_limit_order(symbol, side, amount, entry_price, params={})
+        except Exception as e:
+            if "margin" in str(e).lower() or "leverage" in str(e).lower():
+                print("⚠️ Phemex isolated margin/leverage failed. Retrying cross...")
+                try:
+                    exchange.set_margin_mode("cross", symbol, {"leverage": lev_s})
+                    return exchange.create_limit_order(symbol, side, amount, entry_price, params={})
+                except Exception as retry_error:
+                    print(f"❌ Phemex cross margin retry failed: {retry_error}")
+                    return None
+            print(f"❌ Phemex entry order failed: {e}")
+            return None
+
     try:
         exchange.set_margin_mode('isolated', symbol)
         # First attempt with 'isolated'
@@ -364,7 +518,7 @@ def place_entry_order_with_fallback(exchange, symbol, side, amount, entry_price,
                 amount=amount,
                 price=entry_price,
                 params={
-                    'leverage': int(leverage),
+                    'leverage': lev,
                 }
             )
     except Exception as e:
@@ -379,7 +533,7 @@ def place_entry_order_with_fallback(exchange, symbol, side, amount, entry_price,
                     amount=amount,
                     price=entry_price,
                     params={
-                        'leverage': int(leverage),
+                        'leverage': lev,
                     }
                 )
             except Exception as retry_error:
@@ -551,6 +705,11 @@ def is_order_valid(order):
 
 def place_tp_sl_orders(exchange, symbol, side, amount, tp_price, sl_price, filled_price, max_retries=3, delay=1, poll_interval=2, max_poll_time=60):
     close_side = 'sell' if side == 'buy' else 'buy'
+    # Phemex conditional market orders: triggerDirection + stopPrice (ccxt unified)
+    if side == 'buy':
+        tp_trigger_dir, sl_trigger_dir = 'up', 'down'
+    else:
+        tp_trigger_dir, sl_trigger_dir = 'down', 'up'
 
     for attempt in range(1, max_retries + 1):
         print(f"🔁 Order attempt {attempt}: Creating TP/SL orders...")
@@ -562,34 +721,61 @@ def place_tp_sl_orders(exchange, symbol, side, amount, tp_price, sl_price, fille
             if last_price is None:
                 raise Exception("Couldn't fetch current market price.")
 
-            # ✅ Place TP (limit order)
-            tp_order = exchange.create_order(
-                symbol=symbol,
-                type='market',
-                side=close_side,
-                amount=amount,
-                params={
-                    'stop': 'up',
+            if getattr(exchange, 'id', None) == 'phemex':
+                phemex_cond = {
                     'reduceOnly': True,
-                    'stopPrice': tp_price,
-                    'stopPriceType': 'TP'
+                    'triggerType': 'ByMarkPrice',
                 }
-            )
+                tp_order = exchange.create_order(
+                    symbol=symbol,
+                    type='market',
+                    side=close_side,
+                    amount=amount,
+                    params={
+                        **phemex_cond,
+                        'stopPrice': tp_price,
+                        'triggerDirection': tp_trigger_dir,
+                    },
+                )
+                sl_order = exchange.create_order(
+                    symbol=symbol,
+                    type='market',
+                    side=close_side,
+                    amount=amount,
+                    params={
+                        **phemex_cond,
+                        'stopPrice': sl_price,
+                        'triggerDirection': sl_trigger_dir,
+                    },
+                )
+            else:
+                # ✅ KuCoin-style params (and similar)
+                tp_order = exchange.create_order(
+                    symbol=symbol,
+                    type='market',
+                    side=close_side,
+                    amount=amount,
+                    params={
+                        'stop': 'up',
+                        'reduceOnly': True,
+                        'stopPrice': tp_price,
+                        'stopPriceType': 'TP'
+                    }
+                )
 
-            # ✅ Place SL (stop-market order)
-            sl_order = exchange.create_order(
-                symbol=symbol,
-                type='market',
-                side=close_side,
-                amount=amount,
-                params={
-                    'stop': 'down',
-                    'stopPrice': sl_price,
-                    'reduceOnly': True,
-                    'stopType': 'loss',
-                    'stopPriceType': 'TP'
-                }
-            )
+                sl_order = exchange.create_order(
+                    symbol=symbol,
+                    type='market',
+                    side=close_side,
+                    amount=amount,
+                    params={
+                        'stop': 'down',
+                        'stopPrice': sl_price,
+                        'reduceOnly': True,
+                        'stopType': 'loss',
+                        'stopPriceType': 'TP'
+                    }
+                )
 
             tp_id = tp_order['id']
             sl_id = sl_order['id']

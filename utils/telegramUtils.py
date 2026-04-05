@@ -132,7 +132,7 @@ def _cmd_status():
     else:
         mode = "💹 LIVE TRADING (real orders)"
     state = "ON" if config.TRADING_ENABLED else "OFF"
-    exchange_name = os.getenv("EXCHANGE", "kucoin")
+    exchange_name = os.getenv("EXCHANGE", "phemex")
     return (
         f"<b>📊 Bot Status</b>\n"
         f"State: <b>{state}</b>\n"
@@ -286,7 +286,7 @@ def _cmd_signals():
 def _cmd_config():
     return (
         f"<b>⚙️ Configuration</b>\n"
-        f"Exchange: {os.getenv('EXCHANGE', 'kucoin')}\n"
+        f"Exchange: {os.getenv('EXCHANGE', 'phemex')}\n"
         f"Timeframe: <code>{config.TIMEFRAME}</code>\n"
         f"Signals only: {config.TRADING_SIGNALS_ONLY}\n"
         f"Trade capital %: {config.TRADE_CAPITAL_PCT * 100:.0f}%\n"

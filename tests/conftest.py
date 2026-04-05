@@ -10,10 +10,10 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 os.environ.setdefault('TELEGRAM_TOKEN', 'test-token')
 os.environ.setdefault('TELEGRAM_CHAT_ID', '12345')
-os.environ.setdefault('EXCHANGE', 'binance_margin')
+os.environ.setdefault('EXCHANGE', 'phemex')
 os.environ.setdefault('TRADING_SIGNALS_ONLY', 'true')
-os.environ.setdefault('BINANCE_API_KEY', 'test')
-os.environ.setdefault('BINANCE_SECRET_KEY', 'test')
+os.environ.setdefault('PHEMEX_API_KEY', 'test')
+os.environ.setdefault('PHEMEX_SECRET', 'test')
 
 
 @pytest.fixture

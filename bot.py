@@ -32,12 +32,27 @@ from utils.signalTracker import record_signal, send_eod_report
 
 BACKTEST_STATE_FILE = "last_backtest.json"  # relative to project root (bot dir)
 
-# Default pairs when CRYPTO_PAIRS env is empty and backtest has not run (avoids UnboundLocalError in else branch)
-DEFAULT_PAIRS = [
-    'BTC/USDT', 'ETH/USDT', 'XRP/USDT', 'BNB/USDT', 'SOL/USDT', 'TRX/USDT',
-    'DOGE/USDT', 'ADA/USDT', 'LINK/USDT', 'XLM/USDT', 'HBAR/USDT', 'LTC/USDT',
-    'AVAX/USDT', 'SHIB/USDT', 'SUI/USDT', 'UNI/USDT'
+_DEFAULT_PAIRS_PHEMEX = [
+    'BTC/USDT:USDT', 'ETH/USDT:USDT', 'XRP/USDT:USDT', 'SOL/USDT:USDT',
+    'DOGE/USDT:USDT', 'ADA/USDT:USDT', 'LINK/USDT:USDT', 'AVAX/USDT:USDT',
+    'LTC/USDT:USDT', 'UNI/USDT:USDT', 'DOT/USDT:USDT', 'ATOM/USDT:USDT',
 ]
+_DEFAULT_PAIRS_BINANCE_MARGIN = [
+    'BTC/USDT', 'ETH/USDT', 'XRP/USDT', 'SOL/USDT',
+    'DOGE/USDT', 'ADA/USDT', 'LINK/USDT', 'AVAX/USDT',
+    'LTC/USDT', 'UNI/USDT', 'DOT/USDT', 'ATOM/USDT',
+]
+
+
+def _default_live_pairs():
+    """Symbol shape must match EXCHANGE (Phemex perps vs Binance margin spot)."""
+    if os.getenv("EXCHANGE", "phemex").strip().lower() == "binance_margin":
+        return _DEFAULT_PAIRS_BINANCE_MARGIN.copy()
+    return _DEFAULT_PAIRS_PHEMEX.copy()
+
+
+# Default pairs when CRYPTO_PAIRS env is empty and backtest has not run
+DEFAULT_PAIRS = _default_live_pairs()
 
 # Global flag
 can_trade_event = threading.Event()

@@ -18,20 +18,33 @@ from config import (
     BACKTEST_COOLDOWN_BARS, BACKTEST_LOOKAHEAD, BACKTEST_DAYS,
     MIN_ADX_TREND, LIMIT_ENTRY_OFFSET_PCT, LIMIT_IDEA_FALLBACK_PCT,
     BACKTEST_USE_LIMIT_IDEAS, BACKTEST_LIMIT_FILL_BARS, BACKTEST_MIN_RR_RATIO,
+    CRYPTO_PAIRS,
 )
 from utils.utils import (
     check_long_signal, check_short_signal, calculate_trade_levels,
     add_atr_column, check_range_trade, is_ranging, log_event,
 )
-from utils.exchangeUtils import get_exchange, get_top_tradable_pairs
+from utils.exchangeUtils import get_exchange, get_auto_backtest_pairs
 
 BACKTEST_STATE_FILE = os.path.join(os.path.dirname(__file__), '..', 'last_backtest.json')
 BACKTEST_VERBOSE = os.getenv("BACKTEST_VERBOSE", "false").strip().lower() in ("1", "true", "yes", "y", "on")
-DEFAULT_BACKTEST_PAIRS = [
-    'BTC/USDT', 'ETH/USDT', 'XRP/USDT', 'BNB/USDT', 'SOL/USDT', 'TRX/USDT',
-    'DOGE/USDT', 'ADA/USDT', 'LINK/USDT', 'XLM/USDT', 'HBAR/USDT', 'LTC/USDT',
-    'AVAX/USDT', 'SHIB/USDT', 'SUI/USDT', 'UNI/USDT'
+# Fallback universes when CRYPTO_PAIRS / BACKTEST_PAIRS / auto-discovery are unset.
+DEFAULT_BACKTEST_PAIRS_PHEMEX = [
+    'BTC/USDT:USDT', 'ETH/USDT:USDT', 'XRP/USDT:USDT', 'SOL/USDT:USDT',
+    'DOGE/USDT:USDT', 'ADA/USDT:USDT', 'LINK/USDT:USDT', 'AVAX/USDT:USDT',
+    'LTC/USDT:USDT', 'UNI/USDT:USDT', 'DOT/USDT:USDT', 'ATOM/USDT:USDT',
 ]
+DEFAULT_BACKTEST_PAIRS_BINANCE = [
+    'BTC/USDT', 'ETH/USDT', 'XRP/USDT', 'SOL/USDT',
+    'DOGE/USDT', 'ADA/USDT', 'LINK/USDT', 'AVAX/USDT',
+    'LTC/USDT', 'UNI/USDT', 'DOT/USDT', 'ATOM/USDT',
+]
+
+
+def _default_backtest_pair_symbols():
+    if os.getenv("EXCHANGE", "phemex").strip().lower() == "binance_margin":
+        return DEFAULT_BACKTEST_PAIRS_BINANCE
+    return DEFAULT_BACKTEST_PAIRS_PHEMEX
 
 def _bt_log(message: str, *, verbose: bool = False):
     """Backtest logging: keep output minimal unless BACKTEST_VERBOSE=true."""
@@ -142,20 +155,34 @@ def _compute_risk_metrics(pnl_list):
 
 
 def _get_backtest_pairs(pairs_override=None):
-    """Resolve pair list: override, then get_top_tradable_pairs, then env BACKTEST_PAIRS, then default."""
+    """
+    Resolve pair list:
+    override → BACKTEST_PAIRS → BACKTEST_AUTO_TOP_PAIRS (exchange + optional CoinGecko) →
+    CRYPTO_PAIRS → defaults (symbol shape matches EXCHANGE: phemex vs binance_margin).
+    """
     if pairs_override:
         return [(s, None, None) if isinstance(s, str) else s for s in pairs_override]
-    try:
-        pairs = get_top_tradable_pairs(_get_exchange(), quote='USDT', top_n=20)
-        if pairs:
-            return pairs
-    except Exception as e:
-        log_event(f"get_top_tradable_pairs failed (e.g. CoinGecko blocked): {e}. Using fallback list.")
     env_pairs = os.getenv("BACKTEST_PAIRS", "").strip().split(",")
     env_pairs = [p.strip() for p in env_pairs if p.strip()]
     if env_pairs:
         return [(s, None, None) for s in env_pairs]
-    return [(s, None, None) for s in DEFAULT_BACKTEST_PAIRS]
+    if os.getenv("BACKTEST_AUTO_TOP_PAIRS", "false").strip().lower() in ("1", "true", "yes", "y", "on"):
+        try:
+            auto = get_auto_backtest_pairs(_get_exchange())
+            if auto:
+                return auto
+            log_event(
+                "BACKTEST_AUTO_TOP_PAIRS=true but discovery returned 0 pairs — "
+                "check EXCHANGE (phemex / binance_margin / kucoin_futures), API keys if required, "
+                "or lower BACKTEST_MIN_QUOTE_VOLUME / set BACKTEST_COINGECKO_MIN_CAP=0. "
+                "Falling back to CRYPTO_PAIRS / defaults."
+            )
+        except Exception as e:
+            log_event(f"BACKTEST_AUTO_TOP_PAIRS failed: {e}")
+    configured = [p.strip() for p in (CRYPTO_PAIRS or []) if p.strip()]
+    if configured:
+        return [(s, None, None) for s in configured]
+    return [(s, None, None) for s in _default_backtest_pair_symbols()]
 
 
 def fetch_data(pair, timeframe='5m', days=BACKTEST_DAYS):
