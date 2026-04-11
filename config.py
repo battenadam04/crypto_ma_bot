@@ -3,7 +3,11 @@ import os
 import json
 import threading
 
-load_dotenv()
+# Always load the project-root .env (same folder as this file). Plain load_dotenv() only
+# reads cwd, so e.g. `cd strategies && python simulate_trades.py` would miss ../.env and
+# BACKTEST_DAYS / API keys would fall back to defaults.
+_PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+load_dotenv(os.path.join(_PROJECT_ROOT, ".env"))
 
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
@@ -94,12 +98,13 @@ LIMIT_ENTRY_OFFSET_PCT = float(os.getenv('LIMIT_ENTRY_OFFSET_PCT', '0.0015'))
 LIMIT_IDEA_FALLBACK_PCT = float(os.getenv('LIMIT_IDEA_FALLBACK_PCT', '0.003'))
 
 # Backtest parameters
+# Not used by live bot.py (backtest is manual via strategies/simulate_trades.py). Kept for scripts / env docs.
 BACKTEST_INTERVAL_HOURS = int(os.getenv('BACKTEST_INTERVAL_HOURS', '168'))  # 168h = weekly
 BACKTEST_SLIPPAGE_BPS = float(os.getenv('BACKTEST_SLIPPAGE_BPS', '5'))
 BACKTEST_COMMISSION_BPS = float(os.getenv('BACKTEST_COMMISSION_BPS', '4'))
 BACKTEST_COOLDOWN_BARS = int(os.getenv('BACKTEST_COOLDOWN_BARS', '10'))
 BACKTEST_LOOKAHEAD = int(os.getenv('BACKTEST_LOOKAHEAD', '50'))
-BACKTEST_DAYS = int(os.getenv('BACKTEST_DAYS', '90'))
+BACKTEST_DAYS = int(os.getenv('BACKTEST_DAYS', '28'))
 BACKTEST_USE_LIMIT_IDEAS = os.getenv('BACKTEST_USE_LIMIT_IDEAS', 'false').lower() == 'true'
 BACKTEST_LIMIT_FILL_BARS = int(os.getenv('BACKTEST_LIMIT_FILL_BARS', '3'))
 BACKTEST_MIN_RR_RATIO = float(os.getenv('BACKTEST_MIN_RR_RATIO', '2.0'))

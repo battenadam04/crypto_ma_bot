@@ -14,10 +14,8 @@ from config import (
     TRADING_SIGNALS_ONLY, TRADE_CAPITAL, MIN_ADX_TREND,
     DEFAULT_LEVERAGE, MAIN_LOOP_INTERVAL_SEC,
     RSI_OVERSOLD, RSI_OVERBOUGHT, RANGE_ADX_THRESHOLD,
-    BACKTEST_INTERVAL_HOURS, LIMIT_ENTRY_OFFSET_PCT, LIMIT_IDEA_FALLBACK_PCT,
+    LIMIT_ENTRY_OFFSET_PCT, LIMIT_IDEA_FALLBACK_PCT,
 )
-from strategies.simulate_trades import run_backtest
-from utils.dailyChecksUtils import check_daily_loss_limit
 from utils.telegramUtils import poll_telegram, send_telegram
 from utils.utils import (
     add_atr_column, calculate_mas, check_long_signal, check_short_signal,is_ranging, check_range_trade, log_event
@@ -65,11 +63,7 @@ HTF_CACHE_TTL_SEC = 900
 HTF_CACHE_MAX_ROWS = 60   # enough for ma20, ma50, iloc[-5]
 HTF_CACHE_MAX_SYMBOLS = 32
 higher_timeframe_cache = {}
-_balance_job_scheduled = False  # avoid adding duplicate schedule jobs every 24h
-
-filtered_pairs = []
-last_backtest_time = datetime.min  # very old time to force backtest on first run
-
+_balance_job_scheduled = False  # avoid duplicate schedule jobs
 
 
 def _hours_back_for_timeframe(timeframe: str) -> int:
@@ -326,45 +320,54 @@ def process_pair(symbol):
 
 
 def get_trading_pairs():
-    """Single source of truth: CRYPTO_PAIRS from config, or backtest file, or default list."""
-    from config import CRYPTO_PAIRS
-    if CRYPTO_PAIRS and any(p.strip() for p in CRYPTO_PAIRS):
-        return [p.strip() for p in CRYPTO_PAIRS if p.strip()]
+    """
+    Live scanning universe (no auto-backtest in the bot — run `strategies/simulate_trades.py` manually).
+
+    Order: last_backtest.json `pairs` (filtered by `win_rate_threshold` vs `results` when win_rate exists),
+    then CRYPTO_PAIRS env, then DEFAULT_PAIRS.
+    """
+    state_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), BACKTEST_STATE_FILE)
     try:
-        state_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), BACKTEST_STATE_FILE)
         if os.path.isfile(state_path):
             with open(state_path, 'r') as f:
                 data = json.load(f)
-            pairs = data.get('pairs', [])
-            if pairs:
-                return pairs
+            raw = data.get('pairs') or []
+            threshold = float(data.get('win_rate_threshold', 40))
+            results = data.get('results') or {}
+            qualified = []
+            for p in raw:
+                if not isinstance(p, str) or not p.strip():
+                    continue
+                sym = p.strip()
+                r = results.get(sym)
+                if isinstance(r, dict) and r.get('win_rate') is not None:
+                    if float(r['win_rate']) < threshold:
+                        continue
+                qualified.append(sym)
+            if qualified:
+                return qualified
     except Exception:
         pass
+
+    from config import CRYPTO_PAIRS
+    if CRYPTO_PAIRS and any(p.strip() for p in CRYPTO_PAIRS):
+        return [p.strip() for p in CRYPTO_PAIRS if p.strip()]
     return DEFAULT_PAIRS.copy()
 
 
 def main():
-    global filtered_pairs, last_backtest_time
-    now = datetime.now(timezone.utc)
-
-    # Pairs to use this cycle: always defined so the loop never raises UnboundLocalError
     generated_pairs = get_trading_pairs()
+    if not generated_pairs:
+        log_event(
+            "⚠️ No pairs to scan — run `python strategies/simulate_trades.py` to refresh last_backtest.json, "
+            "or set CRYPTO_PAIRS in .env."
+        )
+        return
 
-    backtest_interval = timedelta(hours=BACKTEST_INTERVAL_HOURS)
-    if not filtered_pairs or ((now - last_backtest_time) > backtest_interval and check_daily_loss_limit()):
-        log_event(f"⏳ Running backtest (interval: {BACKTEST_INTERVAL_HOURS}h)...")
-        filtered_pairs = run_backtest()
-        last_backtest_time = now
-        global _balance_job_scheduled
-        if not _balance_job_scheduled:
-            schedule.every().day.at("21:00").do(fetch_balance_and_notify)
-            schedule.every().day.at("22:00").do(send_eod_report)
-            _balance_job_scheduled = True
-        log_event(f"✅ Backtest complete. {len(filtered_pairs)} pairs selected.")
-        if filtered_pairs:
-            generated_pairs = filtered_pairs
-    else:
-        log_event(f"🕒 Skipping backtest — next run in {BACKTEST_INTERVAL_HOURS}h or loss limit triggered.\n")
+    log_event(
+        f"📋 Scanning {len(generated_pairs)} pair(s) "
+        f"(from last_backtest.json when present, else CRYPTO_PAIRS / defaults)."
+    )
 
     # Collect all signals this cycle, then take trades in backtest-priority order
     # so live behavior matches backtest: we prefer the pair with the highest backtest win rate
@@ -404,6 +407,11 @@ if __name__ == '__main__':
     # Start Telegram polling in a background thread (single worker to limit memory)
     executor = ThreadPoolExecutor(max_workers=1)
     executor.submit(poll_telegram)
+
+    if not _balance_job_scheduled:
+        schedule.every().day.at("21:00").do(fetch_balance_and_notify)
+        schedule.every().day.at("22:00").do(send_eod_report)
+        _balance_job_scheduled = True
 
     while True:
         # Run any scheduled jobs (e.g. daily balance at 21:00)

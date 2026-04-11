@@ -21,13 +21,24 @@ from config import (
     CRYPTO_PAIRS,
 )
 from utils.utils import (
-    check_long_signal, check_short_signal, calculate_trade_levels,
-    add_atr_column, check_range_trade, is_ranging, log_event,
+    check_long_signal,
+    check_short_signal,
+    calculate_trade_levels,
+    add_atr_column,
+    check_range_trade,
+    is_ranging,
+    log_event,
+    calculate_mas,
 )
 from utils.exchangeUtils import get_exchange, get_auto_backtest_pairs
 
 BACKTEST_STATE_FILE = os.path.join(os.path.dirname(__file__), '..', 'last_backtest.json')
 BACKTEST_VERBOSE = os.getenv("BACKTEST_VERBOSE", "false").strip().lower() in ("1", "true", "yes", "y", "on")
+# Per-pair win-rate screening: false = trend + range trades only (legacy; higher pass rate).
+# true = include limit-idea proximity signals (matches live bot + portfolio backtest).
+_BACKTEST_PER_PAIR_LIMIT_FALLBACK = os.getenv(
+    "BACKTEST_PER_PAIR_LIMIT_FALLBACK", "false"
+).strip().lower() in ("1", "true", "yes", "y", "on")
 # Fallback universes when CRYPTO_PAIRS / BACKTEST_PAIRS / auto-discovery are unset.
 DEFAULT_BACKTEST_PAIRS_PHEMEX = [
     'BTC/USDT:USDT', 'ETH/USDT:USDT', 'XRP/USDT:USDT', 'SOL/USDT:USDT',
@@ -185,18 +196,66 @@ def _get_backtest_pairs(pairs_override=None):
     return [(s, None, None) for s in _default_backtest_pair_symbols()]
 
 
+def _timeframe_step_ms(timeframe: str) -> int:
+    """One candle length in ms for paging fetch_ohlcv."""
+    m = {
+        '1m': 60_000,
+        '3m': 3 * 60_000,
+        '5m': 5 * 60_000,
+        '15m': 15 * 60_000,
+        '30m': 30 * 60_000,
+        '1h': 3_600_000,
+        '4h': 4 * 3_600_000,
+        '1d': 86_400_000,
+    }
+    return m.get(timeframe, 5 * 60_000)
+
+
+def _approx_bars_per_calendar_day(timeframe: str) -> int:
+    """~24h of crypto candles per day (used to size fetch depth from BACKTEST_DAYS)."""
+    per_day = {
+        '1m': 1440,
+        '3m': 480,
+        '5m': 288,
+        '15m': 96,
+        '30m': 48,
+        '1h': 24,
+        '4h': 6,
+        '1d': 1,
+    }
+    return per_day.get(timeframe, 288)
+
+
+def _backtest_ohlcv_limit() -> int:
+    """Larger pages = far fewer HTTP round-trips (Phemex/CCXT often allows up to 1000–2000)."""
+    try:
+        raw = int(os.getenv("BACKTEST_OHLCV_LIMIT", "1000"))
+    except ValueError:
+        raw = 1000
+    return max(200, min(raw, 2000))
+
+
+def _backtest_fetch_sleep_sec() -> float:
+    if os.getenv("BACKTESTING", "").strip().lower() in ("1", "true", "yes", "y", "on"):
+        return float(os.getenv("BACKTEST_FETCH_SLEEP_SEC", "0.05"))
+    return 0.3
+
+
 def fetch_data(pair, timeframe='5m', days=BACKTEST_DAYS):
     all_ohlcv = []
     now = datetime.now()
     since = int((now - timedelta(days=days)).timestamp() * 1000)
 
-    limit = 200
-    max_tries = 30
-    loops = 0
+    limit = _backtest_ohlcv_limit()
+    step_ms = _timeframe_step_ms(timeframe)
+    sleep_sec = _backtest_fetch_sleep_sec()
+    d = max(1, int(days))
+    target_bars = max(800, _approx_bars_per_calendar_day(timeframe) * d)
+    eff = max(150, limit - 5)
+    max_loops = min(800, max(30, target_bars // eff + 25))
 
-    # Step by one candle so we don't re-fetch the same bars (5m = 300_000 ms)
-    step_ms = 5 * 60 * 1000 if timeframe == '5m' else 15 * 60 * 1000  # 15m default for fetch_data
-    while loops < max_tries:
+    loops = 0
+    while loops < max_loops:
         ohlcv = _get_exchange().fetch_ohlcv(pair, timeframe=timeframe, since=since, limit=limit)
 
         if not ohlcv:
@@ -208,10 +267,9 @@ def fetch_data(pair, timeframe='5m', days=BACKTEST_DAYS):
         since = last_timestamp + step_ms
         loops += 1
 
-        time.sleep(0.3)
+        time.sleep(sleep_sec)
 
-        # Cap at ~17 days of 5m bars so backtest has enough history for many trades
-        if len(all_ohlcv) >= 5000:
+        if len(all_ohlcv) >= target_bars:
             break
 
     if not all_ohlcv:
@@ -227,9 +285,8 @@ def fetch_data(pair, timeframe='5m', days=BACKTEST_DAYS):
     df = pd.DataFrame(unique_ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
     df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
 
-    df['ma10'] = df['close'].rolling(10).mean()
-    df['ma20'] = df['close'].rolling(20).mean()
-    df['ma50'] = df['close'].rolling(50).mean()
+    # Match live bot: SMAIndicator (utils.calculate_mas), not plain rolling — avoids signal drift.
+    df = calculate_mas(df)
     df['rsi'] = df.ta.rsi(length=14)
     df['adx'] = df.ta.adx(length=14)['ADX_14']
     df['support'] = df['low'].rolling(window=50).min()
@@ -243,18 +300,25 @@ def fetch_higher_timeframe_data(pair, timeframe='15m', days=BACKTEST_DAYS):
     now = datetime.now()
     since = int((now - timedelta(days=days)).timestamp() * 1000)
 
-    limit = 200
+    limit = _backtest_ohlcv_limit()
+    step_ms = _timeframe_step_ms(timeframe)
+    sleep_sec = _backtest_fetch_sleep_sec()
+    d = max(1, int(days))
+    target_bars = max(300, _approx_bars_per_calendar_day(timeframe) * d)
+    eff = max(150, limit - 5)
+    max_loops = min(800, max(25, target_bars // eff + 20))
+
     loops = 0
-    while loops < 30:
+    while loops < max_loops:
         ohlcv = _get_exchange().fetch_ohlcv(pair, timeframe=timeframe, since=since, limit=limit)
         if not ohlcv:
             break
         all_ohlcv.extend(ohlcv)
         last_timestamp = ohlcv[-1][0]
-        since = last_timestamp + 60_000 * 15
+        since = last_timestamp + step_ms
         loops += 1
-        time.sleep(0.3)
-        if len(all_ohlcv) >= 1000:
+        time.sleep(sleep_sec)
+        if len(all_ohlcv) >= target_bars:
             break
 
     if not all_ohlcv:
@@ -269,8 +333,7 @@ def fetch_higher_timeframe_data(pair, timeframe='15m', days=BACKTEST_DAYS):
 
     df = pd.DataFrame(unique_ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
     df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-    df['ma20'] = df['close'].rolling(20).mean()
-    df['ma50'] = df['close'].rolling(50).mean()
+    df = calculate_mas(df)
     return df
 
 
@@ -325,8 +388,18 @@ def check_trade_outcome(df, start_idx, direction, entry_price,
     return {'result': result, 'pnl_pct': pnl_pct}
 
 
-def _get_signal_at_bar(slice_df, htf_slice, entry_price):
-    """Same signal logic as live at one bar. Returns ('buy'|'sell', 'trend'|'range') or None."""
+def _get_signal_at_bar(
+    slice_df,
+    htf_slice,
+    entry_price,
+    *,
+    include_limit_idea_fallback=True,
+):
+    """Same signal logic as live at one bar. Returns ('buy'|'sell', 'trend'|'range') or None.
+
+    When include_limit_idea_fallback is False, skips the proximity-based LIM paths (matches older
+    per-pair screening). Live bot and portfolio backtest use True.
+    """
     if len(htf_slice) < 6:
         return None
     ma20_slope = htf_slice['ma20'].iloc[-1] - htf_slice['ma20'].iloc[-4]
@@ -350,7 +423,10 @@ def _get_signal_at_bar(slice_df, htf_slice, entry_price):
         if sell_signal:
             return ('sell', 'range')
 
-    # Fallback: if no normal signal, use limit-idea proximity in ranging conditions.
+    if not include_limit_idea_fallback:
+        return None
+
+    # Fallback: if no normal signal, use limit-idea proximity in ranging conditions (live: _limit_idea_fallback_signal).
     if not trend_up and not trend_down and is_ranging(slice_df) and len(slice_df) > 0:
         last = slice_df.iloc[-1]
         close = float(last['close'])
@@ -374,51 +450,40 @@ def simulate_combined_strategy(pair, df_5m, df_1h):
 
     df_5m = add_atr_column(df_5m, period=7)
 
+    # O(n) align 5m bars to 15m window ends — avoids filtering the whole HTF df every bar.
+    htf_end_idx = df_1h['timestamp'].searchsorted(df_5m['timestamp'], side='right') - 1
+
+    # Signal helpers only need recent rows + precomputed indicators on full df (fixed window).
+    _slice_lookback = 80
+
     for i in range(60, len(df_5m) - 10):
         if (i - last_trade_bar) < BACKTEST_COOLDOWN_BARS:
             continue
 
-        slice_df = df_5m.iloc[:i + 1]
+        sl_start = max(0, i - _slice_lookback)
+        slice_df = df_5m.iloc[sl_start : i + 1]
+        if len(slice_df) < 51:
+            continue
+
         entry_price = float(df_5m['close'].iat[i])
 
-        curr_time = df_5m['timestamp'].iat[i]
-        htf_slice = df_1h[df_1h['timestamp'] <= curr_time].iloc[-6:]
+        ei = int(htf_end_idx[i])
+        if ei < 5:
+            continue
+        htf_slice = df_1h.iloc[ei - 5 : ei + 1]
 
         if len(htf_slice) < 6:
             continue
 
-        ma20_slope = htf_slice['ma20'].iloc[-1] - htf_slice['ma20'].iloc[-4]
-
-        trend_up = (
-            htf_slice['ma20'].iloc[-1] > htf_slice['ma50'].iloc[-1] and
-            htf_slice['ma20'].iloc[-1] > htf_slice['ma20'].iloc[-5] and
-            ma20_slope > 0
+        sig = _get_signal_at_bar(
+            slice_df,
+            htf_slice,
+            entry_price,
+            include_limit_idea_fallback=_BACKTEST_PER_PAIR_LIMIT_FALLBACK,
         )
-        trend_down = (
-            htf_slice['ma20'].iloc[-1] < htf_slice['ma50'].iloc[-1] and
-            htf_slice['ma20'].iloc[-1] < htf_slice['ma20'].iloc[-5] and
-            ma20_slope < 0
-        )
-
-        adx_ok = (MIN_ADX_TREND <= 0 or
-                  ('adx' in slice_df.columns and pd.notna(slice_df['adx'].iloc[-1]) and slice_df['adx'].iloc[-1] >= MIN_ADX_TREND))
-
-        direction = None
-        strat = None
-
-        if adx_ok and check_long_signal(slice_df) and trend_up:
-            direction, strat = 'buy', 'trend'
-        elif adx_ok and check_short_signal(slice_df) and trend_down:
-            direction, strat = 'sell', 'trend'
-        elif is_ranging(slice_df) and not trend_up and not trend_down:
-            buy_signal, sell_signal = check_range_trade(slice_df)
-            if buy_signal:
-                direction, strat = 'buy', 'range'
-            elif sell_signal:
-                direction, strat = 'sell', 'range'
-
-        if direction is None:
+        if sig is None:
             continue
+        direction, strat = sig
 
         # Always execute the normal signal entry (existing backtest behavior).
         last_trade_bar = i
@@ -580,6 +645,12 @@ def run_portfolio_backtest(pairs_override=None, max_trades_per_bar=3):
         log_event("Portfolio backtest: no data for any pair.")
         return 0.0
 
+    htf_end_by_sym = {
+        sym: df_15m['timestamp'].searchsorted(df_5m['timestamp'], side='right') - 1
+        for sym, (df_5m, df_15m) in data_by_symbol.items()
+    }
+    _slice_lookback = 80
+
     min_len = min(len(data_by_symbol[s][0]) for s in data_by_symbol) - 10
     if min_len < 70:
         log_event("Portfolio backtest: insufficient common bars.")
@@ -593,11 +664,20 @@ def run_portfolio_backtest(pairs_override=None, max_trades_per_bar=3):
         for symbol, (df_5m, df_15m) in data_by_symbol.items():
             if (i - last_trade_bar_by_sym[symbol]) < BACKTEST_COOLDOWN_BARS:
                 continue
-            slice_df = df_5m.iloc[: i + 1]
-            curr_time = df_5m['timestamp'].iat[i]
-            htf_slice = df_15m[df_15m['timestamp'] <= curr_time].iloc[-6:]
+            sl_start = max(0, i - _slice_lookback)
+            slice_df = df_5m.iloc[sl_start : i + 1]
+            if len(slice_df) < 51:
+                continue
+            ei = int(htf_end_by_sym[symbol][i])
+            if ei < 5:
+                continue
+            htf_slice = df_15m.iloc[ei - 5 : ei + 1]
+            if len(htf_slice) < 6:
+                continue
             entry_price = float(df_5m['close'].iat[i])
-            sig = _get_signal_at_bar(slice_df, htf_slice, entry_price)
+            sig = _get_signal_at_bar(
+                slice_df, htf_slice, entry_price, include_limit_idea_fallback=True
+            )
             if sig is not None:
                 direction, strategy_type = sig
                 win_rate = 0.0
@@ -655,6 +735,7 @@ def run_portfolio_backtest(pairs_override=None, max_trades_per_bar=3):
 
 
 if __name__ == "__main__":
+    log_event(f"Backtest OHLCV depth: BACKTEST_DAYS={BACKTEST_DAYS} (from config / project .env)")
     results = run_backtest()
     print("Backtest completed, good pairs:", results)
     if results:
