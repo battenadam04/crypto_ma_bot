@@ -69,7 +69,25 @@ class TestHandleTelegramCommand:
         assert "/balance" in response
         assert "/positions" in response
         assert "/pnl" in response
+        assert "/night" in response
         assert mode == 'HTML'
+
+    def test_night_disabled_without_env(self, monkeypatch):
+        monkeypatch.setattr(config, "NIGHT_QUIET_ENABLED", False)
+        response, mode = handle_telegram_command("/night")
+        assert "NIGHT_QUIET_ENABLED=false" in response
+        assert mode == "HTML"
+
+    def test_night_arm_toggle(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(config, "NIGHT_QUIET_ENABLED", True)
+        monkeypatch.setattr(config, "_RUNTIME_CONFIG_FILE", str(tmp_path / "runtime_config.json"))
+        config.NIGHT_QUIET_ARMED = True
+        response, _ = handle_telegram_command("/night off")
+        assert config.NIGHT_QUIET_ARMED is False
+        assert "disarmed" in response.lower()
+        response2, _ = handle_telegram_command("/night on")
+        assert config.NIGHT_QUIET_ARMED is True
+        assert "armed" in response2.lower()
 
     def test_unknown_command_returns_help(self):
         response, mode = handle_telegram_command("foobar")

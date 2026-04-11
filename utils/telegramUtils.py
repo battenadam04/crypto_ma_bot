@@ -128,18 +128,28 @@ def _cmd_off():
 
 def _cmd_status():
     if config.TRADING_SIGNALS_ONLY:
-        mode = "📡 SIGNALS ONLY (no live orders)"
+        mode = "SIGNALS ONLY (no live orders)"
     else:
-        mode = "💹 LIVE TRADING (real orders)"
+        mode = "LIVE TRADING (real orders)"
     state = "ON" if config.TRADING_ENABLED else "OFF"
     exchange_name = os.getenv("EXCHANGE", "phemex")
-    return (
-        f"<b>📊 Bot Status</b>\n"
-        f"State: <b>{state}</b>\n"
-        f"Mode: {mode}\n"
-        f"Exchange: {exchange_name}\n\n"
-        f"<i>Toggle with /on /off. To switch to live trading, set TRADING_SIGNALS_ONLY=false in your env.</i>"
+    lines = [
+        f"<b>Bot Status</b>",
+        f"State: <b>{state}</b>",
+        f"Mode: {mode}",
+        f"Exchange: {exchange_name}",
+    ]
+    if config.NIGHT_QUIET_ENABLED:
+        nq = "armed" if config.NIGHT_QUIET_ARMED else "disarmed"
+        inside = "yes" if config.in_night_quiet_window() else "no"
+        lines.append(
+            f"Night pause: <b>{nq}</b> ({config.NIGHT_QUIET_START_HOUR}:00–{config.NIGHT_QUIET_END_HOUR}:00 "
+            f"{config.NIGHT_QUIET_TZ}, in window now: {inside})"
+        )
+    lines.append(
+        "\n<i>Toggle with /on /off. Overnight: /night. Live orders need TRADING_SIGNALS_ONLY=false.</i>"
     )
+    return "\n".join(lines)
 
 
 def _cmd_balance():
@@ -284,18 +294,24 @@ def _cmd_signals():
 
 
 def _cmd_config():
-    return (
-        f"<b>⚙️ Configuration</b>\n"
-        f"Exchange: {os.getenv('EXCHANGE', 'phemex')}\n"
-        f"Timeframe: <code>{config.TIMEFRAME}</code>\n"
-        f"Signals only: {config.TRADING_SIGNALS_ONLY}\n"
-        f"Trade capital %: {config.TRADE_CAPITAL_PCT * 100:.0f}%\n"
-        f"Leverage: {config.DEFAULT_LEVERAGE}x\n"
-        f"Max open trades: {config.MAX_OPEN_TRADES}\n"
-        f"Daily loss limit: {config.DAILY_LOSS_LIMIT * 100:.0f}%\n"
-        f"Min ADX: {config.MIN_ADX_TREND}\n"
-        f"RSI bounds: {config.RSI_OVERSOLD}/{config.RSI_OVERBOUGHT}"
-    )
+    lines = [
+        f"<b>Configuration</b>",
+        f"Exchange: {os.getenv('EXCHANGE', 'phemex')}",
+        f"Timeframe: <code>{config.TIMEFRAME}</code>",
+        f"Signals only: {config.TRADING_SIGNALS_ONLY}",
+        f"Trade capital %: {config.TRADE_CAPITAL_PCT * 100:.0f}%",
+        f"Leverage: {config.DEFAULT_LEVERAGE}x",
+        f"Max open trades: {config.MAX_OPEN_TRADES}",
+        f"Daily loss limit: {config.DAILY_LOSS_LIMIT * 100:.0f}%",
+        f"Min ADX: {config.MIN_ADX_TREND}",
+        f"RSI bounds: {config.RSI_OVERSOLD}/{config.RSI_OVERBOUGHT}",
+    ]
+    if config.NIGHT_QUIET_ENABLED:
+        lines.append(
+            f"Night quiet: {config.NIGHT_QUIET_START_HOUR}:00–{config.NIGHT_QUIET_END_HOUR}:00 {config.NIGHT_QUIET_TZ}, "
+            f"armed={config.NIGHT_QUIET_ARMED}, sleep={config.NIGHT_QUIET_SLEEP_SEC}s"
+        )
+    return "\n".join(lines)
 
 
 _ALLOWED_TIMEFRAMES = (
@@ -329,6 +345,41 @@ def _cmd_timeframe(args=None):
     return f"✅ Timeframe set to <code>{config.TIMEFRAME}</code>"
 
 
+
+def _cmd_night(args=None):
+    args = args or []
+    if not config.NIGHT_QUIET_ENABLED:
+        return (
+            "Overnight pause is off in .env (<code>NIGHT_QUIET_ENABLED=false</code>). "
+            "Set it <code>true</code>, configure hours/TZ, restart the bot, then use <code>/night</code>."
+        )
+    window = f"{config.NIGHT_QUIET_START_HOUR}:00–{config.NIGHT_QUIET_END_HOUR}:00 {config.NIGHT_QUIET_TZ}"
+    if not args:
+        armed = "ON" if config.NIGHT_QUIET_ARMED else "OFF"
+        now_in = "inside" if config.in_night_quiet_window() else "outside"
+        return (
+            f"<b>Overnight pause</b>\n"
+            f"Window: <code>{window}</code>\n"
+            f"Armed: <b>{armed}</b> (when bot ON + armed + in window, pair scan is skipped)\n"
+            f"Now: <b>{now_in}</b> quiet window\n\n"
+            f"<code>/night on</code> — arm (fewer API calls overnight)\n"
+            f"<code>/night off</code> — disarm (scan 24/7 while bot is ON)"
+        )
+    sub = (args[0] or "").strip().lower()
+    if sub in ("on", "arm", "true", "1", "yes"):
+        try:
+            config.set_night_quiet_armed(True)
+        except Exception as e:
+            return f"Error: {e}"
+        return "Overnight pause <b>armed</b>. Scanning pauses during the configured night window."
+    if sub in ("off", "disarm", "false", "0", "no"):
+        try:
+            config.set_night_quiet_armed(False)
+        except Exception as e:
+            return f"Error: {e}"
+        return "Overnight pause <b>disarmed</b>. No night skip while the bot is ON."
+    return "Use <code>/night</code>, <code>/night on</code>, or <code>/night off</code>"
+
 HELP_TEXT = (
     "<b>📖 Available Commands</b>\n\n"
     "/on — Enable trading\n"
@@ -341,6 +392,7 @@ HELP_TEXT = (
     "/pnl — Today's profit/loss\n"
     "/backtest — Last backtest results\n"
     "/timeframe — Get/set timeframe (ex: /timeframe 15m)\n"
+    "/night — Overnight pause (needs NIGHT_QUIET_ENABLED in .env)\n"
     "/config — Current configuration\n"
     "/help — This message"
 )
@@ -375,6 +427,7 @@ HTML_COMMANDS = {
     "/pairs", "pairs", "/signals", "signals", "/pnl", "pnl", "/backtest", "backtest",
     "/timeframe", "timeframe", "/tf", "tf",
     "/config", "config", "/help", "help",
+    "/night", "night",
 }
 
 
@@ -388,6 +441,9 @@ def handle_telegram_command(text):
 
     if cmd in {"/timeframe", "timeframe", "/tf", "tf"}:
         return _cmd_timeframe(args), "HTML"
+
+    if cmd in {"/night", "night"}:
+        return _cmd_night(args), "HTML"
 
     handler = COMMAND_MAP.get(cmd)
     if handler:

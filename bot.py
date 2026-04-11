@@ -30,6 +30,8 @@ from utils.signalTracker import record_signal, send_eod_report
 
 BACKTEST_STATE_FILE = "last_backtest.json"  # relative to project root (bot dir)
 
+_last_night_quiet_log_ts = 0.0
+
 _DEFAULT_PAIRS_PHEMEX = [
     'BTC/USDT:USDT', 'ETH/USDT:USDT', 'XRP/USDT:USDT', 'SOL/USDT:USDT',
     'DOGE/USDT:USDT', 'ADA/USDT:USDT', 'LINK/USDT:USDT', 'AVAX/USDT:USDT',
@@ -424,6 +426,18 @@ if __name__ == '__main__':
         if not config.TRADING_ENABLED:
             log_event("🚫 Trading disabled. Sleeping 60 seconds...")
             time.sleep(60)
+            continue
+
+        # Overnight pause: skip pair scanning (fewer API calls). Telegram polling stays active.
+        if config.should_skip_cycle_for_night_quiet():
+            now_ts = time.time()
+            if now_ts - _last_night_quiet_log_ts >= 600:
+                _last_night_quiet_log_ts = now_ts
+                log_event(
+                    f"Night quiet hours ({config.NIGHT_QUIET_START_HOUR}:00–{config.NIGHT_QUIET_END_HOUR}:00 "
+                    f"{config.NIGHT_QUIET_TZ}) — skipping scan. Use /night off in Telegram for 24/7."
+                )
+            time.sleep(config.NIGHT_QUIET_SLEEP_SEC)
             continue
 
         # ✅ Trading enabled

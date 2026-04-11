@@ -43,6 +43,19 @@ class TestConfigDefaults:
         import config
         assert isinstance(config.CRYPTO_PAIRS, list)
 
+    def test_hour_in_night_quiet_window_wraps_midnight(self):
+        import config
+        assert config.hour_in_night_quiet_window(21, 22, 6) is False
+        assert config.hour_in_night_quiet_window(22, 22, 6) is True
+        assert config.hour_in_night_quiet_window(5, 22, 6) is True
+        assert config.hour_in_night_quiet_window(10, 22, 6) is False
+
+    def test_hour_in_night_quiet_window_same_day(self):
+        import config
+        assert config.hour_in_night_quiet_window(10, 9, 17) is True
+        assert config.hour_in_night_quiet_window(8, 9, 17) is False
+        assert config.hour_in_night_quiet_window(17, 9, 17) is False
+
 
 class TestStrategySettings:
     def test_all_strategies_exist(self):

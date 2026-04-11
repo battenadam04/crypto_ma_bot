@@ -2,6 +2,8 @@ from dotenv import load_dotenv
 import os
 import json
 import threading
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 # Always load the project-root .env (same folder as this file). Plain load_dotenv() only
 # reads cwd, so e.g. `cd strategies && python simulate_trades.py` would miss ../.env and
@@ -42,9 +44,26 @@ _runtime_lock = threading.Lock()
 
 TIMEFRAME = os.getenv("TIMEFRAME", "5m")
 
+# Overnight pause: skip exchange scanning during a daily window (Telegram stays on).
+NIGHT_QUIET_ENABLED = os.getenv("NIGHT_QUIET_ENABLED", "false").strip().lower() in (
+    "1", "true", "yes", "y", "on",
+)
+NIGHT_QUIET_START_HOUR = max(0, min(23, int(os.getenv("NIGHT_QUIET_START_HOUR", "22"))))
+NIGHT_QUIET_END_HOUR = max(0, min(23, int(os.getenv("NIGHT_QUIET_END_HOUR", "6"))))
+NIGHT_QUIET_TZ = (os.getenv("NIGHT_QUIET_TZ", "UTC") or "UTC").strip()
+NIGHT_QUIET_SLEEP_SEC = max(30, int(os.getenv("NIGHT_QUIET_SLEEP_SEC", "60")))
+
+NIGHT_QUIET_ARMED = False
+
+
+def _night_quiet_armed_default() -> bool:
+    return os.getenv("NIGHT_QUIET_ARMED_DEFAULT", "true").strip().lower() in (
+        "1", "true", "yes", "y", "on",
+    )
+
 
 def _load_runtime_config():
-    global TIMEFRAME
+    global TIMEFRAME, NIGHT_QUIET_ARMED
     try:
         if not os.path.isfile(_RUNTIME_CONFIG_FILE):
             return
@@ -53,6 +72,9 @@ def _load_runtime_config():
         tf = data.get("TIMEFRAME")
         if isinstance(tf, str) and tf.strip():
             TIMEFRAME = tf.strip()
+        armed = data.get("NIGHT_QUIET_ARMED")
+        if NIGHT_QUIET_ENABLED and isinstance(armed, bool):
+            NIGHT_QUIET_ARMED = armed
     except Exception:
         # Never crash import on config load failures
         return
@@ -60,10 +82,60 @@ def _load_runtime_config():
 
 def _persist_runtime_config():
     tmp = _RUNTIME_CONFIG_FILE + ".tmp"
-    data = {"TIMEFRAME": TIMEFRAME}
+    data = {}
+    if os.path.isfile(_RUNTIME_CONFIG_FILE):
+        try:
+            with open(_RUNTIME_CONFIG_FILE, "r") as f:
+                data = json.load(f) or {}
+        except Exception:
+            data = {}
+    data["TIMEFRAME"] = TIMEFRAME
+    if NIGHT_QUIET_ENABLED:
+        data["NIGHT_QUIET_ARMED"] = NIGHT_QUIET_ARMED
     with open(tmp, "w") as f:
         json.dump(data, f)
     os.replace(tmp, _RUNTIME_CONFIG_FILE)
+
+
+NIGHT_QUIET_ARMED = NIGHT_QUIET_ENABLED and _night_quiet_armed_default()
+_load_runtime_config()
+
+
+def hour_in_night_quiet_window(hour: int, start_h: int, end_h: int) -> bool:
+    """True if hour is in [start_h, end_h) when end wraps past midnight."""
+    if start_h < end_h:
+        return start_h <= hour < end_h
+    return hour >= start_h or hour < end_h
+
+
+def _night_quiet_now_local_hour() -> int:
+    try:
+        tz = ZoneInfo(NIGHT_QUIET_TZ)
+    except Exception:
+        tz = ZoneInfo("UTC")
+    return datetime.now(tz).hour
+
+
+def in_night_quiet_window() -> bool:
+    if not NIGHT_QUIET_ENABLED:
+        return False
+    h = _night_quiet_now_local_hour()
+    return hour_in_night_quiet_window(h, NIGHT_QUIET_START_HOUR, NIGHT_QUIET_END_HOUR)
+
+
+def should_skip_cycle_for_night_quiet() -> bool:
+    return NIGHT_QUIET_ENABLED and NIGHT_QUIET_ARMED and in_night_quiet_window()
+
+
+def set_night_quiet_armed(armed: bool) -> bool:
+    """Persist whether overnight pause is armed (Telegram /night on|off)."""
+    global NIGHT_QUIET_ARMED
+    if not NIGHT_QUIET_ENABLED:
+        raise ValueError("NIGHT_QUIET_ENABLED is false in .env; set it true to use overnight pause.")
+    with _runtime_lock:
+        NIGHT_QUIET_ARMED = bool(armed)
+        _persist_runtime_config()
+    return NIGHT_QUIET_ARMED
 
 
 def set_timeframe(new_timeframe: str) -> str:
@@ -76,9 +148,6 @@ def set_timeframe(new_timeframe: str) -> str:
         TIMEFRAME = tf
         _persist_runtime_config()
     return TIMEFRAME
-
-
-_load_runtime_config()
 
 # Live trading parameters
 DEFAULT_LEVERAGE = int(os.getenv('DEFAULT_LEVERAGE', '10'))

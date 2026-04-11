@@ -4,7 +4,6 @@
     "XRP/USDT:USDT",
     "BNB/USDT:USDT",
     "SOL/USDT:USDT",
-    "TRX/USDT:USDT",
     "DOGE/USDT:USDT",
     "BCH/USDT:USDT",
     "LINK/USDT:USDT",
@@ -13,7 +12,7 @@
     "DOT/USDT:USDT",
     "UNI/USDT:USDT"
   ],
-  "run_at": "2026-04-11T19:49:19.072548+00:00",
+  "run_at": "2026-04-11T20:42:56.624751+00:00",
   "win_rate_threshold": 40.0,
   "results": {
     "BTC/USDT:USDT": {
@@ -76,18 +75,6 @@
       "avg_loss_pct": -0.7371,
       "rr_ratio": 1.95
     },
-    "TRX/USDT:USDT": {
-      "win_rate": 41.43,
-      "total_trades": 70,
-      "ma_used": 15,
-      "range_used": 55,
-      "sharpe": -0.96,
-      "max_drawdown_pct": 3.74,
-      "profit_factor": 0.86,
-      "avg_win_pct": 0.407,
-      "avg_loss_pct": -0.3343,
-      "rr_ratio": 1.22
-    },
     "DOGE/USDT:USDT": {
       "win_rate": 41.6,
       "total_trades": 125,
@@ -101,15 +88,15 @@
       "rr_ratio": 2.05
     },
     "ADA/USDT:USDT": {
-      "win_rate": 33.33,
-      "total_trades": 111,
+      "win_rate": 33.63,
+      "total_trades": 113,
       "ma_used": 60,
-      "range_used": 51,
-      "sharpe": -0.48,
-      "max_drawdown_pct": 15.42,
-      "profit_factor": 0.92,
-      "avg_win_pct": 1.2797,
-      "avg_loss_pct": -0.7013,
+      "range_used": 53,
+      "sharpe": -0.41,
+      "max_drawdown_pct": 14.68,
+      "profit_factor": 0.94,
+      "avg_win_pct": 1.2724,
+      "avg_loss_pct": -0.6986,
       "rr_ratio": 1.82
     },
     "BCH/USDT:USDT": {
@@ -221,16 +208,16 @@
       "rr_ratio": 1.79
     },
     "WLFI/USDT:USDT": {
-      "win_rate": 34.55,
-      "total_trades": 110,
-      "ma_used": 66,
+      "win_rate": 33.94,
+      "total_trades": 109,
+      "ma_used": 65,
       "range_used": 44,
-      "sharpe": 0.75,
+      "sharpe": 0.38,
       "max_drawdown_pct": 16.48,
-      "profit_factor": 1.13,
-      "avg_win_pct": 1.7354,
+      "profit_factor": 1.06,
+      "avg_win_pct": 1.6769,
       "avg_loss_pct": -0.8206,
-      "rr_ratio": 2.11
+      "rr_ratio": 2.04
     },
     "DOT/USDT:USDT": {
       "win_rate": 40.21,
@@ -255,6 +242,24 @@
       "avg_win_pct": 1.1557,
       "avg_loss_pct": -0.7233,
       "rr_ratio": 1.6
+    },
+    "NEAR/USDT:USDT": {
+      "win_rate": 29.47,
+      "total_trades": 95,
+      "ma_used": 49,
+      "range_used": 46,
+      "sharpe": -0.42,
+      "max_drawdown_pct": 19.24,
+      "profit_factor": 0.93,
+      "avg_win_pct": 1.753,
+      "avg_loss_pct": -0.7857,
+      "rr_ratio": 2.23
     }
-  }
+  },
+  "portfolio_win_rate": 39.95,
+  "portfolio_trades": 5242,
+  "portfolio_sharpe": 0.7,
+  "portfolio_max_drawdown_pct": 43.44,
+  "portfolio_profit_factor": 1.11,
+  "portfolio_run_at": "2026-04-11T20:56:08.577977+00:00"
 }
