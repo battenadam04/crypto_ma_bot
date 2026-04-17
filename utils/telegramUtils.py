@@ -112,18 +112,18 @@ def poll_telegram():
 def _cmd_on():
     if config.TRADING_ENABLED:
         mode = "signals only" if config.TRADING_SIGNALS_ONLY else "live trading"
-        return f"ℹ️ Bot already ON ({mode})"
-    config.TRADING_ENABLED = True
+        return f"ℹ️ Bot already ON ({mode})\nInstance: <code>{config.BOT_INSTANCE_ID}</code>"
+    config.set_trading_enabled(True, by="telegram:/on")
     if config.TRADING_SIGNALS_ONLY:
-        return "✅ Bot ON — signals only mode (no live orders)"
-    return "✅ Bot ON — live trading mode"
+        return f"✅ Bot ON — signals only mode (no live orders)\nInstance: <code>{config.BOT_INSTANCE_ID}</code>"
+    return f"✅ Bot ON — live trading mode\nInstance: <code>{config.BOT_INSTANCE_ID}</code>"
 
 
 def _cmd_off():
     if not config.TRADING_ENABLED:
-        return "ℹ️ Bot already OFF"
-    config.TRADING_ENABLED = False
-    return "⛔ Bot OFF — no signals or trades will be processed"
+        return f"ℹ️ Bot already OFF\nInstance: <code>{config.BOT_INSTANCE_ID}</code>"
+    config.set_trading_enabled(False, by="telegram:/off")
+    return f"⛔ Bot OFF — no signals or trades will be processed\nInstance: <code>{config.BOT_INSTANCE_ID}</code>"
 
 
 def _cmd_status():
@@ -135,10 +135,17 @@ def _cmd_status():
     exchange_name = os.getenv("EXCHANGE", "phemex")
     lines = [
         f"<b>Bot Status</b>",
+        f"Instance: <code>{config.BOT_INSTANCE_ID}</code>",
+        f"Started: <code>{config.BOT_STARTED_AT_UTC}</code>",
         f"State: <b>{state}</b>",
         f"Mode: {mode}",
         f"Exchange: {exchange_name}",
     ]
+    if config.TRADING_ENABLED_LAST_SET_AT_UTC:
+        lines.append(
+            f"Last toggle: <code>{config.TRADING_ENABLED_LAST_SET_AT_UTC}</code> by "
+            f"<code>{config.TRADING_ENABLED_LAST_SET_BY or 'unknown'}</code>"
+        )
     if config.NIGHT_QUIET_ENABLED:
         nq = "armed" if config.NIGHT_QUIET_ARMED else "disarmed"
         inside = "yes" if config.in_night_quiet_window() else "no"
@@ -423,6 +430,7 @@ COMMAND_MAP = {
 }
 
 HTML_COMMANDS = {
+    "/on", "on", "/off", "off",
     "/status", "status", "/balance", "balance", "/positions", "positions",
     "/pairs", "pairs", "/signals", "signals", "/pnl", "pnl", "/backtest", "backtest",
     "/timeframe", "timeframe", "/tf", "tf",

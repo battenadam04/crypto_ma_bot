@@ -4,6 +4,8 @@ import json
 import threading
 from datetime import datetime
 from zoneinfo import ZoneInfo
+import socket
+import uuid
 
 # Always load the project-root .env (same folder as this file). Plain load_dotenv() only
 # reads cwd, so e.g. `cd strategies && python simulate_trades.py` would miss ../.env and
@@ -36,6 +38,24 @@ TRADING_SIGNALS_ONLY = os.getenv('TRADING_SIGNALS_ONLY', 'false').lower() == 'tr
 
 # Runtime-controlled (Telegram)
 TRADING_ENABLED = False   # default OFF
+
+# Identify this running bot instance (useful when multiple instances run)
+BOT_STARTED_AT_UTC = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+BOT_HOSTNAME = socket.gethostname()
+BOT_PID = os.getpid()
+BOT_INSTANCE_ID = f"{BOT_HOSTNAME}:{BOT_PID}:{uuid.uuid4().hex[:8]}"
+
+TRADING_ENABLED_LAST_SET_AT_UTC = None
+TRADING_ENABLED_LAST_SET_BY = None
+
+
+def set_trading_enabled(enabled: bool, by: str = "unknown") -> bool:
+    """Set trading enabled flag and record provenance for observability."""
+    global TRADING_ENABLED, TRADING_ENABLED_LAST_SET_AT_UTC, TRADING_ENABLED_LAST_SET_BY
+    TRADING_ENABLED = bool(enabled)
+    TRADING_ENABLED_LAST_SET_AT_UTC = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    TRADING_ENABLED_LAST_SET_BY = (by or "unknown").strip()[:120]
+    return TRADING_ENABLED
 
 # Runtime-controlled (Telegram): active chart timeframe for signal generation
 # Defaults to env var, but can be overridden at runtime and persisted to disk.

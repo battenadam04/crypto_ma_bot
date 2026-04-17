@@ -406,6 +406,10 @@ def main():
                 del higher_timeframe_cache[sym]
 
 if __name__ == '__main__':
+    log_event(
+        f"🤖 Bot starting. Instance={config.BOT_INSTANCE_ID} Host={config.BOT_HOSTNAME} "
+        f"PID={config.BOT_PID} Started={config.BOT_STARTED_AT_UTC}"
+    )
     # Start Telegram polling in a background thread (single worker to limit memory)
     executor = ThreadPoolExecutor(max_workers=1)
     executor.submit(poll_telegram)
