@@ -2,6 +2,7 @@ import config
 import json
 import os
 import pandas as pd
+import pandas_ta as ta  # noqa: F401 — registers `DataFrame.ta` for RSI/ADX in process_pair
 import time
 from datetime import datetime, timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor
