@@ -578,6 +578,8 @@ def place_futures_order(exchange, df, symbol, side, capital, leverage=10, strate
                 'filled_entry': price,
                 'tp_order': tp_price,
                 'sl_order': sl_price,
+                'tp_price': tp_price,
+                'sl_price': sl_price,
             }
 
         contract_value = float(market.get('contractSize') or 1.0)
@@ -671,7 +673,9 @@ def place_futures_order(exchange, df, symbol, side, capital, leverage=10, strate
                         'status': 'success',
                         'filled_entry': filled_price,
                         'tp_order': tp_sl_result['tp_order'],
-                        'sl_order': tp_sl_result['sl_order']
+                        'sl_order': tp_sl_result['sl_order'],
+                        'tp_price': float(validated['take_profit']),
+                        'sl_price': float(validated['stop_loss']),
                     }
 
             print(f"🔁 TP/SL attempt {attempt}/{MAX_TP_SL_RETRIES} failed, retrying in 2s...")

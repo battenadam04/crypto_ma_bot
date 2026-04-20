@@ -123,9 +123,13 @@ def handle_trade(symbol, direction, df, strategy_type="trend", signal_source="SI
         filledEntry = trade_result.get('filled_entry', 'none')
         tp_order = trade_result.get('tp_order')
         sl_order = trade_result.get('sl_order')
+        tp_price = trade_result.get('tp_price')
+        sl_price = trade_result.get('sl_price')
 
         tp = tp_order.get('id') if isinstance(tp_order, dict) else tp_order if tp_order is not None else 'N/A'
         sl = sl_order.get('id') if isinstance(sl_order, dict) else sl_order if sl_order is not None else 'N/A'
+        tp_level = tp_price if tp_price is not None else tp
+        sl_level = sl_price if sl_price is not None else sl
 
         # Build an optional limit-entry idea near local support/resistance.
         limit_hint = build_limit_order_hint(df, direction, strategy_type)
@@ -159,7 +163,7 @@ def handle_trade(symbol, direction, df, strategy_type="trend", signal_source="SI
         log_event(f"{'Signal' if config.TRADING_SIGNALS_ONLY else 'Trade'}: {message}")
 
         if status == 'success':
-            record_signal(symbol, direction, strategy_type, filledEntry, tp, sl)
+            record_signal(symbol, direction, strategy_type, filledEntry, tp_level, sl_level)
     except Exception as e:
         log_event(f"❌ Error in handle_trade for {symbol}: {e}")
 

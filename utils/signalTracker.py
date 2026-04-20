@@ -23,7 +23,10 @@ def record_signal(symbol, direction, strategy_type, entry_price, tp_price, sl_pr
 def _resolve_signal(signal, exchange):
     """Check if TP or SL was hit since the signal was sent by looking at the current price."""
     symbol = signal['symbol']
-    entry = float(signal['entry'])
+    try:
+        entry = float(signal['entry'])
+    except Exception:
+        return 'unresolved', 0.0
     tp = signal.get('tp')
     sl = signal.get('sl')
     is_long = signal['direction'] in ('long', 'buy')
@@ -31,8 +34,11 @@ def _resolve_signal(signal, exchange):
     if tp is None or sl is None:
         return 'unresolved', 0.0
 
-    tp = float(tp)
-    sl = float(sl)
+    try:
+        tp = float(tp)
+        sl = float(sl)
+    except Exception:
+        return 'unresolved', 0.0
 
     try:
         ticker = exchange.fetch_ticker(symbol)
