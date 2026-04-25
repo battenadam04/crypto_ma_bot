@@ -56,13 +56,13 @@ def get_updates():
         return []
 
 
-def send_telegram(text, image_path=None, parse_mode=None):
+def send_telegram(text, image_path=None, parse_mode=None, bypass_rate_limit: bool = False):
     """Send a message (and optional image) to Telegram.
 
     Args:
         parse_mode: 'HTML', 'Markdown', or None for plain text.
     """
-    if _rate_limited():
+    if (not bypass_rate_limit) and _rate_limited():
         log_event("⚠️ Telegram rate limit hit, message suppressed")
         return
 
@@ -71,12 +71,19 @@ def send_telegram(text, image_path=None, parse_mode=None):
         payload = {'chat_id': config.TELEGRAM_CHAT_ID, 'text': text}
         if parse_mode:
             payload['parse_mode'] = parse_mode
-        requests.post(url, data=payload)
+        r = requests.post(url, data=payload, timeout=20)
+        r.raise_for_status()
 
         if image_path:
             url = f"https://api.telegram.org/bot{config.TELEGRAM_TOKEN}/sendPhoto"
             with open(image_path, 'rb') as img:
-                requests.post(url, files={'photo': img}, data={'chat_id': config.TELEGRAM_CHAT_ID})
+                r2 = requests.post(
+                    url,
+                    files={'photo': img},
+                    data={'chat_id': config.TELEGRAM_CHAT_ID},
+                    timeout=45,
+                )
+                r2.raise_for_status()
     except Exception as e:
         log_event(f"⚠️ Telegram error: {e}")
 
@@ -104,7 +111,8 @@ def poll_telegram():
             continue
 
         response, parse_mode = handle_telegram_command(text)
-        send_telegram(response, parse_mode=parse_mode)
+        # Never suppress command responses; otherwise /signals looks "stuck".
+        send_telegram(response, parse_mode=parse_mode, bypass_rate_limit=True)
 
         time.sleep(1)
 

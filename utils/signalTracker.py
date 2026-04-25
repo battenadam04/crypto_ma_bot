@@ -113,7 +113,8 @@ def send_eod_report():
     try:
         summary = build_eod_summary(get_exchange())
         if summary:
-            send_telegram(summary, parse_mode='HTML')
+            # Don't let rate limiting suppress the daily report.
+            send_telegram(summary, parse_mode='HTML', bypass_rate_limit=True)
             log_event("EOD signal report sent to Telegram.")
     except Exception as e:
         log_event(f"Failed to send EOD report: {e}")
