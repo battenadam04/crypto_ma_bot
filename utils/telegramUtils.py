@@ -99,22 +99,31 @@ def poll_telegram():
             time.sleep(TELEGRAM_POLL_IDLE_SECONDS)
             continue
 
-        update = updates[-1]
-        last_update_id = update["update_id"]
+        # Process every update we received. Taking only the last one can silently drop commands.
+        for update in updates:
+            try:
+                last_update_id = update.get("update_id", last_update_id)
 
-        message = update.get("message", {})
-        text = message.get("text")
-        log_event(f"Latest Telegram message: {text}")
+                # Telegram can deliver different shapes: message, edited_message, callback_query, etc.
+                message = update.get("message") or update.get("edited_message") or {}
+                text = message.get("text")
 
-        if not text:
-            time.sleep(1)
-            continue
+                callback = update.get("callback_query") or {}
+                if not text and callback:
+                    text = callback.get("data") or (callback.get("message") or {}).get("text")
 
-        response, parse_mode = handle_telegram_command(text)
-        # Never suppress command responses; otherwise /signals looks "stuck".
-        send_telegram(response, parse_mode=parse_mode, bypass_rate_limit=True)
+                if text:
+                    log_event(f"Telegram message: {text}")
+                    response, parse_mode = handle_telegram_command(text)
+                    # Never suppress command responses; otherwise /signals looks "stuck".
+                    send_telegram(response, parse_mode=parse_mode, bypass_rate_limit=True)
+                else:
+                    # Log the keys so we can see what Telegram is sending (no sensitive payload).
+                    log_event(f"Telegram update had no text. Keys={list(update.keys())}")
+            except Exception as e:
+                log_event(f"⚠️ Telegram poll loop error: {e}")
 
-        time.sleep(1)
+            time.sleep(0.2)
 
 
 def _cmd_on():
