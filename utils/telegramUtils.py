@@ -3,7 +3,6 @@ import json
 import os
 import time
 import requests
-from datetime import datetime, timezone
 from typing import List
 
 from utils.utils import log_event
@@ -57,11 +56,7 @@ def get_updates():
 
 
 def send_telegram(text, image_path=None, parse_mode=None, bypass_rate_limit: bool = False):
-    """Send a message (and optional image) to Telegram.
-
-    Args:
-        parse_mode: 'HTML', 'Markdown', or None for plain text.
-    """
+    """Send a message (and optional image) to Telegram."""
     if (not bypass_rate_limit) and _rate_limited():
         log_event("⚠️ Telegram rate limit hit, message suppressed")
         return
@@ -99,12 +94,10 @@ def poll_telegram():
             time.sleep(TELEGRAM_POLL_IDLE_SECONDS)
             continue
 
-        # Process every update we received. Taking only the last one can silently drop commands.
         for update in updates:
             try:
                 last_update_id = update.get("update_id", last_update_id)
 
-                # Telegram can deliver different shapes: message, edited_message, callback_query, etc.
                 message = update.get("message") or update.get("edited_message") or {}
                 text = message.get("text")
 
@@ -115,10 +108,8 @@ def poll_telegram():
                 if text:
                     log_event(f"Telegram message: {text}")
                     response, parse_mode = handle_telegram_command(text)
-                    # Never suppress command responses; otherwise /signals looks "stuck".
                     send_telegram(response, parse_mode=parse_mode, bypass_rate_limit=True)
                 else:
-                    # Log the keys so we can see what Telegram is sending (no sensitive payload).
                     log_event(f"Telegram update had no text. Keys={list(update.keys())}")
             except Exception as e:
                 log_event(f"⚠️ Telegram poll loop error: {e}")
@@ -128,35 +119,30 @@ def poll_telegram():
 
 def _cmd_on():
     if config.TRADING_ENABLED:
-        mode = "signals only" if config.TRADING_SIGNALS_ONLY else "live trading"
-        return f"ℹ️ Bot already ON ({mode})\nInstance: <code>{config.BOT_INSTANCE_ID}</code>"
+        return f"ℹ️ Signal scanning already ON\nInstance: <code>{config.BOT_INSTANCE_ID}</code>"
     config.set_trading_enabled(True, by="telegram:/on")
-    if config.TRADING_SIGNALS_ONLY:
-        return f"✅ Bot ON — signals only mode (no live orders)\nInstance: <code>{config.BOT_INSTANCE_ID}</code>"
-    return f"✅ Bot ON — live trading mode\nInstance: <code>{config.BOT_INSTANCE_ID}</code>"
+    return f"✅ Signal scanning ON — alerts will be sent (no live orders)\nInstance: <code>{config.BOT_INSTANCE_ID}</code>"
 
 
 def _cmd_off():
     if not config.TRADING_ENABLED:
-        return f"ℹ️ Bot already OFF\nInstance: <code>{config.BOT_INSTANCE_ID}</code>"
+        return f"ℹ️ Signal scanning already OFF\nInstance: <code>{config.BOT_INSTANCE_ID}</code>"
     config.set_trading_enabled(False, by="telegram:/off")
-    return f"⛔ Bot OFF — no signals or trades will be processed\nInstance: <code>{config.BOT_INSTANCE_ID}</code>"
+    return f"⛔ Signal scanning OFF — no new alerts\nInstance: <code>{config.BOT_INSTANCE_ID}</code>"
 
 
 def _cmd_status():
-    if config.TRADING_SIGNALS_ONLY:
-        mode = "SIGNALS ONLY (no live orders)"
-    else:
-        mode = "LIVE TRADING (real orders)"
     state = "ON" if config.TRADING_ENABLED else "OFF"
     exchange_name = os.getenv("EXCHANGE", "phemex")
     lines = [
         f"<b>Bot Status</b>",
         f"Instance: <code>{config.BOT_INSTANCE_ID}</code>",
         f"Started: <code>{config.BOT_STARTED_AT_UTC}</code>",
-        f"State: <b>{state}</b>",
-        f"Mode: {mode}",
-        f"Exchange: {exchange_name}",
+        f"Scanning: <b>{state}</b>",
+        f"Mode: SIGNALS ONLY (no live orders)",
+        f"Exchange (market data): {exchange_name}",
+        f"Cooldownframe: <code>{config.TIMEFRAME}</code>",
+        f"Cooldown/cycle: {config.MAX_SIGNALS_PER_CYCLE} | Cooldown: {config.SIGNAL_COOLDOWN_SEC}s",
     ]
     if config.TRADING_ENABLED_LAST_SET_AT_UTC:
         lines.append(
@@ -170,64 +156,8 @@ def _cmd_status():
             f"Night pause: <b>{nq}</b> ({config.NIGHT_QUIET_START_HOUR}:00–{config.NIGHT_QUIET_END_HOUR}:00 "
             f"{config.NIGHT_QUIET_TZ}, in window now: {inside})"
         )
-    lines.append(
-        "\n<i>Toggle with /on /off. Overnight: /night. Live orders need TRADING_SIGNALS_ONLY=false.</i>"
-    )
+    lines.append("\n<i>Toggle with /on /off. Overnight: /night.</i>")
     return "\n".join(lines)
-
-
-def _cmd_balance():
-    from utils.exchangeUtils import get_exchange, EXCHANGE_NAME
-    try:
-        ex = get_exchange()
-        ts = datetime.now(timezone.utc).strftime('%H:%M:%S UTC')
-        if EXCHANGE_NAME == "binance_margin":
-            spot = ex.fetch_balance({'type': 'spot'})
-            margin = ex.fetch_balance({'type': 'margin'})
-            spot_total = spot['total'].get('USDT', 0)
-            spot_free = spot['free'].get('USDT', 0)
-            margin_total = margin['total'].get('USDT', 0)
-            margin_free = margin['free'].get('USDT', 0)
-            combined = spot_total + margin_total
-            return (
-                f"<b>💰 Balance</b> ({ts})\n"
-                f"Spot:     <code>{spot_total:.2f}</code> (avail: <code>{spot_free:.2f}</code>)\n"
-                f"Margin: <code>{margin_total:.2f}</code> (avail: <code>{margin_free:.2f}</code>)\n"
-                f"Combined: <code>{combined:.2f}</code> USDT"
-            )
-        else:
-            balance = ex.fetch_balance()
-            return (
-                f"<b>💰 Balance</b> ({ts})\n"
-                f"Total: <code>{balance['total'].get('USDT', 0):.2f}</code> USDT\n"
-                f"Available: <code>{balance['free'].get('USDT', 0):.2f}</code> USDT"
-            )
-    except Exception as e:
-        return f"❌ Failed to fetch balance: {e}"
-
-
-def _cmd_positions():
-    from utils.exchangeUtils import get_exchange
-    try:
-        positions = get_exchange().fetch_positions()
-        open_pos = [p for p in positions if float(p.get('contracts', 0)) > 0]
-        if not open_pos:
-            return "📭 No open positions."
-        lines = ["<b>📋 Open Positions</b>"]
-        for p in open_pos:
-            sym = p.get('symbol', '?')
-            side = p.get('side', '?')
-            size = p.get('contracts', 0)
-            pnl = p.get('unrealizedPnl', 0)
-            entry = p.get('entryPrice', 0)
-            lines.append(
-                f"\n<b>{sym}</b> ({side})\n"
-                f"  Size: {size} | Entry: {entry}\n"
-                f"  uPnL: <code>{float(pnl):.2f}</code> USDT"
-            )
-        return "\n".join(lines)
-    except Exception as e:
-        return f"❌ Failed to fetch positions: {e}"
 
 
 def _cmd_pairs():
@@ -248,31 +178,6 @@ def _cmd_pairs():
         return "\n".join(lines)
     except Exception as e:
         return f"❌ Failed to load pairs: {e}"
-
-
-def _cmd_pnl():
-    from utils.dailyChecksUtils import start_of_day_balance
-    from utils.exchangeUtils import get_exchange
-    try:
-        balance = get_exchange().fetch_balance()
-        current = balance['total'].get('USDT', 0)
-        if start_of_day_balance is None or start_of_day_balance == 0:
-            return (
-                f"<b>📈 Current Balance</b>\n"
-                f"<code>{current:.2f}</code> USDT\n"
-                f"(Start-of-day balance not set yet)"
-            )
-        change = current - start_of_day_balance
-        pct = (change / start_of_day_balance) * 100
-        arrow = "🟢" if change >= 0 else "🔴"
-        return (
-            f"<b>📈 Daily P&amp;L</b>\n"
-            f"Start: <code>{start_of_day_balance:.2f}</code> USDT\n"
-            f"Now:   <code>{current:.2f}</code> USDT\n"
-            f"{arrow} Change: <code>{change:+.2f}</code> ({pct:+.2f}%)"
-        )
-    except Exception as e:
-        return f"❌ Failed to compute P&L: {e}"
 
 
 def _cmd_backtest():
@@ -320,13 +225,12 @@ def _cmd_signals():
 def _cmd_config():
     lines = [
         f"<b>Configuration</b>",
-        f"Exchange: {os.getenv('EXCHANGE', 'phemex')}",
+        f"Exchange (market data): {os.getenv('EXCHANGE', 'phemex')}",
         f"Timeframe: <code>{config.TIMEFRAME}</code>",
-        f"Signals only: {config.TRADING_SIGNALS_ONLY}",
-        f"Trade capital %: {config.TRADE_CAPITAL_PCT * 100:.0f}%",
-        f"Leverage: {config.DEFAULT_LEVERAGE}x",
-        f"Max open trades: {config.MAX_OPEN_TRADES}",
-        f"Daily loss limit: {config.DAILY_LOSS_LIMIT * 100:.0f}%",
+        f"Mode: signals only",
+        f"Max alerts/cycle: {config.MAX_SIGNALS_PER_CYCLE}",
+        f"Signal cooldown: {config.SIGNAL_COOLDOWN_SEC}s",
+        f"Limit-idea fallback: {config.ENABLE_LIMIT_IDEA_FALLBACK}",
         f"Min ADX: {config.MIN_ADX_TREND}",
         f"RSI bounds: {config.RSI_OVERSOLD}/{config.RSI_OVERBOUGHT}",
     ]
@@ -369,7 +273,6 @@ def _cmd_timeframe(args=None):
     return f"✅ Timeframe set to <code>{config.TIMEFRAME}</code>"
 
 
-
 def _cmd_night(args=None):
     args = args or []
     if not config.NIGHT_QUIET_ENABLED:
@@ -384,10 +287,10 @@ def _cmd_night(args=None):
         return (
             f"<b>Overnight pause</b>\n"
             f"Window: <code>{window}</code>\n"
-            f"Armed: <b>{armed}</b> (when bot ON + armed + in window, pair scan is skipped)\n"
+            f"Armed: <b>{armed}</b> (when scanning ON + armed + in window, pair scan is skipped)\n"
             f"Now: <b>{now_in}</b> quiet window\n\n"
             f"<code>/night on</code> — arm (fewer API calls overnight)\n"
-            f"<code>/night off</code> — disarm (scan 24/7 while bot is ON)"
+            f"<code>/night off</code> — disarm (scan 24/7 while scanning is ON)"
         )
     sub = (args[0] or "").strip().lower()
     if sub in ("on", "arm", "true", "1", "yes"):
@@ -401,22 +304,20 @@ def _cmd_night(args=None):
             config.set_night_quiet_armed(False)
         except Exception as e:
             return f"Error: {e}"
-        return "Overnight pause <b>disarmed</b>. No night skip while the bot is ON."
+        return "Overnight pause <b>disarmed</b>. No night skip while scanning is ON."
     return "Use <code>/night</code>, <code>/night on</code>, or <code>/night off</code>"
+
 
 HELP_TEXT = (
     "<b>📖 Available Commands</b>\n\n"
-    "/on — Enable trading\n"
-    "/off — Disable trading\n"
-    "/status — Bot state and mode\n"
-    "/balance — Current USDT balance\n"
-    "/positions — Open positions\n"
+    "/on — Start signal scanning\n"
+    "/off — Pause signal scanning\n"
+    "/status — Bot state and alert caps\n"
     "/pairs — Active pairs with win rates\n"
     "/signals — Today's signals with outcomes\n"
-    "/pnl — Today's profit/loss\n"
     "/backtest — Last backtest results\n"
     "/timeframe — Get/set timeframe (ex: /timeframe 15m)\n"
-    "/night — Overnight pause (needs NIGHT_QUIET_ENABLED in .env)\n"
+    "/night — Overnight scan pause\n"
     "/config — Current configuration\n"
     "/help — This message"
 )
@@ -428,16 +329,10 @@ COMMAND_MAP = {
     "off": _cmd_off,
     "/status": _cmd_status,
     "status": _cmd_status,
-    "/balance": _cmd_balance,
-    "balance": _cmd_balance,
-    "/positions": _cmd_positions,
-    "positions": _cmd_positions,
     "/pairs": _cmd_pairs,
     "pairs": _cmd_pairs,
     "/signals": _cmd_signals,
     "signals": _cmd_signals,
-    "/pnl": _cmd_pnl,
-    "pnl": _cmd_pnl,
     "/backtest": _cmd_backtest,
     "backtest": _cmd_backtest,
     "/config": _cmd_config,
@@ -448,8 +343,8 @@ COMMAND_MAP = {
 
 HTML_COMMANDS = {
     "/on", "on", "/off", "off",
-    "/status", "status", "/balance", "balance", "/positions", "positions",
-    "/pairs", "pairs", "/signals", "signals", "/pnl", "pnl", "/backtest", "backtest",
+    "/status", "status",
+    "/pairs", "pairs", "/signals", "signals", "/backtest", "backtest",
     "/timeframe", "timeframe", "/tf", "tf",
     "/config", "config", "/help", "help",
     "/night", "night",

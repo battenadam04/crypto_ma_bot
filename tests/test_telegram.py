@@ -1,8 +1,7 @@
 """Tests for Telegram command handling."""
 
-import pytest
-import os
 import json
+import os
 import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -16,17 +15,10 @@ class TestHandleTelegramCommand:
         config.TRADING_ENABLED = False
         config.TIMEFRAME = "5m"
 
-    def test_on_enables_signals_only(self):
-        config.TRADING_SIGNALS_ONLY = True
+    def test_on_enables_scanning(self):
         response, mode = handle_telegram_command("/on")
         assert config.TRADING_ENABLED is True
-        assert "signals only" in response
-
-    def test_on_enables_live_trading(self):
-        config.TRADING_SIGNALS_ONLY = False
-        response, mode = handle_telegram_command("/on")
-        assert config.TRADING_ENABLED is True
-        assert "live trading" in response
+        assert "Signal scanning ON" in response
 
     def test_on_already_enabled(self):
         config.TRADING_ENABLED = True
@@ -46,30 +38,25 @@ class TestHandleTelegramCommand:
 
     def test_status_shows_signals_mode(self):
         config.TRADING_ENABLED = True
-        config.TRADING_SIGNALS_ONLY = True
         response, mode = handle_telegram_command("/status")
         assert "ON" in response
         assert "SIGNALS ONLY" in response
         assert mode == 'HTML'
 
-    def test_status_shows_live_mode(self):
-        config.TRADING_ENABLED = True
-        config.TRADING_SIGNALS_ONLY = False
-        response, mode = handle_telegram_command("/status")
-        assert "LIVE TRADING" in response
-
     def test_status_disabled(self):
         config.TRADING_ENABLED = False
         response, mode = handle_telegram_command("/status")
         assert "OFF" in response
-        assert "TRADING_SIGNALS_ONLY" in response
 
     def test_help_returns_commands(self):
         response, mode = handle_telegram_command("/help")
-        assert "/balance" in response
-        assert "/positions" in response
-        assert "/pnl" in response
+        assert "/pairs" in response
+        assert "/signals" in response
+        assert "/backtest" in response
         assert "/night" in response
+        assert "/balance" not in response
+        assert "/positions" not in response
+        assert "/pnl" not in response
         assert mode == 'HTML'
 
     def test_night_disabled_without_env(self, monkeypatch):
@@ -91,21 +78,22 @@ class TestHandleTelegramCommand:
 
     def test_unknown_command_returns_help(self):
         response, mode = handle_telegram_command("foobar")
-        assert "/help" in response or "/balance" in response
+        assert "/help" in response or "/pairs" in response
 
     def test_config_command(self):
         response, mode = handle_telegram_command("/config")
         assert "Configuration" in response
+        assert "signals only" in response
         assert mode == 'HTML'
 
     def test_case_insensitive(self):
         response, _ = handle_telegram_command("/ON")
-        assert "Bot ON" in response
+        assert "Signal scanning ON" in response or "already ON" in response
 
     def test_whitespace_stripped(self):
         config.TRADING_ENABLED = True
         response, _ = handle_telegram_command("  /off  ")
-        assert "Bot OFF" in response
+        assert "OFF" in response
 
     def test_timeframe_shows_current_and_help(self):
         response, mode = handle_telegram_command("/timeframe")

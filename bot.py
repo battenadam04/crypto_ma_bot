@@ -6,32 +6,31 @@ import pandas_ta as ta  # noqa: F401 — registers `DataFrame.ta` for RSI/ADX in
 import time
 from datetime import datetime, timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor
-import threading
 import schedule
 
-
-
 from config import (
-    TRADING_SIGNALS_ONLY, TRADE_CAPITAL, MIN_ADX_TREND,
-    DEFAULT_LEVERAGE, MAIN_LOOP_INTERVAL_SEC,
-    RSI_OVERSOLD, RSI_OVERBOUGHT, RANGE_ADX_THRESHOLD,
-    LIMIT_ENTRY_OFFSET_PCT, LIMIT_IDEA_FALLBACK_PCT,
+    MIN_ADX_TREND,
+    MAIN_LOOP_INTERVAL_SEC,
+    LIMIT_ENTRY_OFFSET_PCT,
+    LIMIT_IDEA_FALLBACK_PCT,
+    SIGNAL_COOLDOWN_SEC,
+    MAX_SIGNALS_PER_CYCLE,
+    ENABLE_LIMIT_IDEA_FALLBACK,
 )
 from utils.telegramUtils import poll_telegram, send_telegram
 from utils.utils import (
-    add_atr_column, calculate_mas, check_long_signal, check_short_signal,is_ranging, check_range_trade, log_event
+    add_atr_column, calculate_mas, check_long_signal, check_short_signal,
+    is_ranging, check_range_trade, log_event,
 )
-
-from utils.exchangeUtils import (
-    fetch_balance_and_notify, get_exchange,
-    place_futures_order, can_place_order
-)
+from utils.exchangeUtils import get_exchange, build_indicative_levels
 from utils.signalTracker import record_signal, send_eod_report
 
 
 BACKTEST_STATE_FILE = "last_backtest.json"  # relative to project root (bot dir)
 
 _last_night_quiet_log_ts = 0.0
+# (symbol, direction) -> unix timestamp of last alert — prevents spam on sticky setups
+_recent_signals = {}
 
 _DEFAULT_PAIRS_PHEMEX = [
     'BTC/USDT:USDT', 'ETH/USDT:USDT', 'XRP/USDT:USDT', 'SOL/USDT:USDT',
@@ -52,27 +51,21 @@ def _default_live_pairs():
     return _DEFAULT_PAIRS_PHEMEX.copy()
 
 
-# Default pairs when CRYPTO_PAIRS env is empty and backtest has not run
 DEFAULT_PAIRS = _default_live_pairs()
-
-# Global flag
-can_trade_event = threading.Event()
-can_trade_event.set()  # Initially allow trading
 
 exchange = get_exchange()
 
-# Higher-timeframe cache: keep only last 60 rows per symbol (enough for MA50); cap total entries to avoid unbounded growth
+# Higher-timeframe cache: keep only last 60 rows per symbol (enough for MA50); cap total entries
 HTF_CACHE_TTL_SEC = 900
-HTF_CACHE_MAX_ROWS = 60   # enough for ma20, ma50, iloc[-5]
+HTF_CACHE_MAX_ROWS = 60
 HTF_CACHE_MAX_SYMBOLS = 32
 higher_timeframe_cache = {}
-_balance_job_scheduled = False  # avoid duplicate schedule jobs
+_eod_job_scheduled = False
 
 
 def _hours_back_for_timeframe(timeframe: str) -> int:
     """Heuristic to bound historical fetch size per timeframe."""
     tf = (timeframe or "").strip().lower()
-    # 15m needs ~51+ bars for ma50 / trend checks; 6h only yields ~24 candles.
     if tf in {"1m", "3m", "5m"}:
         return 6
     if tf in {"15m", "30m", "1h"}:
@@ -96,76 +89,69 @@ def fetch_data(symbol, timeframe=None, limit=350):
         return None
 
 
+def _signal_on_cooldown(symbol, direction) -> bool:
+    last = _recent_signals.get((symbol, direction))
+    if last is None:
+        return False
+    return (time.time() - last) < SIGNAL_COOLDOWN_SEC
 
-def handle_trade(symbol, direction, df, strategy_type="trend", signal_source="SIG"):
-    try:    
+
+def _mark_signal_sent(symbol, direction) -> None:
+    _recent_signals[(symbol, direction)] = time.time()
+    # Bound memory: drop oldest when large
+    if len(_recent_signals) > 200:
+        oldest_key = min(_recent_signals, key=_recent_signals.get)
+        del _recent_signals[oldest_key]
+
+
+def handle_signal(symbol, direction, df, strategy_type="trend", signal_source="SIG"):
+    """Compose and send a signals-only Telegram alert with indicative TP/SL."""
+    try:
         df = add_atr_column(df)
         side = 'buy' if direction == 'long' else 'sell'
-        log_event(
-            f"{'📣 Signal' if config.TRADING_SIGNALS_ONLY else '💰 Starting live trade'}: "
-            f"{strategy_type} {direction} for {symbol}"
+        log_event(f"📣 Signal: {strategy_type} {direction} for {symbol} (src={signal_source})")
+
+        levels = build_indicative_levels(
+            exchange=exchange,
+            df=df,
+            symbol=symbol,
+            side=side,
+            strategy_type=strategy_type,
         )
-        trade_result = place_futures_order(
-                exchange=exchange,
-                df=df,
-                symbol=symbol,
-                side=side,
-                capital=TRADE_CAPITAL,
-                leverage=DEFAULT_LEVERAGE,
-                strategy_type=strategy_type
-            )
-        log_event(f"🔍 Trade results:\n{trade_result}")
-        if trade_result is None or not isinstance(trade_result, dict):
-            log_event(f"❌ place_futures_order returned invalid result for {symbol}: {trade_result!r}")
+        if levels is None or not isinstance(levels, dict):
+            log_event(f"❌ build_indicative_levels returned invalid result for {symbol}: {levels!r}")
             return
-        status = trade_result.get('status', 'unknown')
-        error = trade_result.get('message', 'none')
-        filledEntry = trade_result.get('filled_entry', 'none')
-        tp_order = trade_result.get('tp_order')
-        sl_order = trade_result.get('sl_order')
-        tp_price = trade_result.get('tp_price')
-        sl_price = trade_result.get('sl_price')
 
-        tp = tp_order.get('id') if isinstance(tp_order, dict) else tp_order if tp_order is not None else 'N/A'
-        sl = sl_order.get('id') if isinstance(sl_order, dict) else sl_order if sl_order is not None else 'N/A'
-        tp_level = tp_price if tp_price is not None else tp
-        sl_level = sl_price if sl_price is not None else sl
+        status = levels.get('status', 'unknown')
+        error = levels.get('message', 'none')
+        filled_entry = levels.get('filled_entry', 'none')
+        tp_price = levels.get('tp_price')
+        sl_price = levels.get('sl_price')
+        tp = levels.get('tp_order') if tp_price is None else tp_price
+        sl = levels.get('sl_order') if sl_price is None else sl_price
 
-        # Build an optional limit-entry idea near local support/resistance.
         limit_hint = build_limit_order_hint(df, direction, strategy_type)
+        message = (
+            f"{'📈 LONG' if direction == 'long' else '📉 SHORT'} SIGNAL for {symbol} ({config.TIMEFRAME})\n"
+            f"Confirmed by 15m {'up' if direction == 'long' else 'down'} {strategy_type}\n\n"
+            f"🧭 Src: {signal_source}\n"
+            f"ℹ️ Signals only — no orders are placed.\n"
+            f"💲 Reference price: {filled_entry}\n"
+            f"🎯 TP (indicative): {tp}\n"
+            f"🛑 SL (indicative): {sl}\n"
+        )
+        if status != "success":
+            message += f"⚙️ Status: {status}\n⚙️ Detail: {error}\n"
+        message += limit_hint
 
-        if config.TRADING_SIGNALS_ONLY:
-            message = (
-                f"{'📈 LONG' if direction == 'long' else '📉 SHORT'} SIGNAL for {symbol} ({config.TIMEFRAME})\n"
-                f"Confirmed by 15m {'up' if direction == 'long' else 'down'} {strategy_type}\n\n"
-                f"🧭 Src: {signal_source}\n"
-                f"ℹ️ Signals only — the bot does not place orders.\n"
-                f"💲 Reference price: {filledEntry}\n"
-                f"🎯 TP (indicative): {tp}\n"
-                f"🛑 SL (indicative): {sl}\n"
-            )
-            if status != "success":
-                message += f"⚙️ Status: {status}\n⚙️ Detail: {error}\n"
-            message += limit_hint
-        else:
-            message = (
-                f"{'📈 LONG' if direction == 'long' else '📉 SHORT'} SIGNAL for {symbol} ({config.TIMEFRAME})\n"
-                f"Confirmed by 15m {'up' if direction == 'long' else 'down'} {strategy_type}\n\n"
-                f"🧭 Src: {signal_source}\n"
-                f"💲 Filled Entry: {filledEntry}\n"
-                f"🎯 TP: {tp}\n"
-                f"🛑 SL: {sl}\n"
-                f"⚙️ Trade Status: {status}\n"
-                f"⚙️ Trade Error: {error}\n"
-                f"{limit_hint}"
-            )
         send_telegram(message)
-        log_event(f"{'Signal' if config.TRADING_SIGNALS_ONLY else 'Trade'}: {message}")
+        log_event(f"Signal: {message}")
+        _mark_signal_sent(symbol, direction)
 
         if status == 'success':
-            record_signal(symbol, direction, strategy_type, filledEntry, tp_level, sl_level)
+            record_signal(symbol, direction, strategy_type, filled_entry, tp_price or tp, sl_price or sl)
     except Exception as e:
-        log_event(f"❌ Error in handle_trade for {symbol}: {e}")
+        log_event(f"❌ Error in handle_signal for {symbol}: {e}")
 
 
 def _fmt_price(value):
@@ -181,11 +167,7 @@ def _fmt_price(value):
 
 
 def build_limit_order_hint(df, direction, strategy_type):
-    """
-    Return a short text block suggesting a limit entry near support/resistance.
-    - Range setups: emphasize bounce/rejection entry.
-    - Trend setups: suggest a small pullback entry to improve fill quality.
-    """
+    """Suggest a limit entry near support/resistance for manual traders."""
     if df is None or len(df) == 0:
         return "📝 Limit idea: not available (no candle data)"
 
@@ -215,9 +197,9 @@ def build_limit_order_hint(df, direction, strategy_type):
 
 
 def _limit_idea_fallback_signal(lower_df, trend_up, trend_down):
-    """
-    Fallback: if no normal signal, allow a range-biased limit idea near key levels.
-    """
+    """Optional fallback: range-biased limit idea near key levels when no confirmed signal."""
+    if not ENABLE_LIMIT_IDEA_FALLBACK:
+        return None
     if lower_df is None or len(lower_df) < 51:
         return None
     if trend_up or trend_down:
@@ -239,8 +221,9 @@ def _limit_idea_fallback_signal(lower_df, trend_up, trend_down):
         return {'direction': 'short', 'strategy_type': 'range'}
     return None
 
+
 def get_backtest_win_rates():
-    """Load per-pair win rates from last backtest so we can prioritize which signal to take first."""
+    """Load per-pair win rates from last backtest for ranking."""
     state_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), BACKTEST_STATE_FILE)
     if not os.path.isfile(state_path):
         return {}
@@ -255,15 +238,9 @@ def get_backtest_win_rates():
 
 def process_pair(symbol):
     """
-    Check one pair for a signal. Returns a signal dict (symbol, direction, strategy_type, lower_df) or None.
-    Does not place trades; caller collects signals and takes them in backtest-priority order.
+    Check one pair for a signal. Returns a signal dict or None.
+    Does not send Telegram alerts; caller ranks/filters before dispatch.
     """
-    if not TRADING_SIGNALS_ONLY:
-        allowed, reason = can_place_order(symbol)
-        if not allowed:
-            log_event(f"⛔ Skipping {symbol}: {reason}")
-            return None
-
     log_event(f"🔍 Checking {symbol} on {config.TIMEFRAME} timeframe...")
     lower_df = fetch_data(symbol, config.TIMEFRAME)
     if lower_df is None or len(lower_df) < 51:
@@ -320,7 +297,13 @@ def process_pair(symbol):
     fallback = _limit_idea_fallback_signal(lower_df, trend_up, trend_down)
     if fallback:
         log_event(f"🧠 Limit-idea fallback triggered for {symbol} ({fallback['direction']})")
-        return {'symbol': symbol, 'direction': fallback['direction'], 'strategy_type': fallback['strategy_type'], 'signal_source': 'LIM', 'df': lower_df}
+        return {
+            'symbol': symbol,
+            'direction': fallback['direction'],
+            'strategy_type': fallback['strategy_type'],
+            'signal_source': 'LIM',
+            'df': lower_df,
+        }
 
     log_event(f"✅ No confirmed signal for {symbol} this cycle.")
     return None
@@ -328,10 +311,7 @@ def process_pair(symbol):
 
 def get_trading_pairs():
     """
-    Live scanning universe (no auto-backtest in the bot — run `strategies/simulate_trades.py` manually).
-
-    Order: last_backtest.json `pairs` (filtered by `win_rate_threshold` vs `results` when win_rate exists),
-    then CRYPTO_PAIRS env, then DEFAULT_PAIRS.
+    Scan universe: last_backtest.json pairs (win-rate filtered), then CRYPTO_PAIRS, then defaults.
     """
     state_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), BACKTEST_STATE_FILE)
     try:
@@ -362,6 +342,14 @@ def get_trading_pairs():
     return DEFAULT_PAIRS.copy()
 
 
+def _rank_key(sig, win_rates):
+    """Prefer confirmed SIG over LIM, trend over range, then backtest win rate."""
+    source_rank = 1 if sig.get('signal_source') == 'SIG' else 0
+    strategy_rank = 1 if sig.get('strategy_type') == 'trend' else 0
+    wr = win_rates.get(sig['symbol'], 0.0)
+    return (source_rank, strategy_rank, wr)
+
+
 def main():
     generated_pairs = get_trading_pairs()
     if not generated_pairs:
@@ -376,8 +364,6 @@ def main():
         f"(from last_backtest.json when present, else CRYPTO_PAIRS / defaults)."
     )
 
-    # Collect all signals this cycle, then take trades in backtest-priority order
-    # so live behavior matches backtest: we prefer the pair with the highest backtest win rate
     signals = []
     for pair in generated_pairs:
         sig = process_pair(pair)
@@ -385,17 +371,32 @@ def main():
             signals.append(sig)
 
     win_rates = get_backtest_win_rates()
-    # Sort by backtest win rate descending (take best pairs first); if no backtest data, keep list order
-    signals.sort(key=lambda s: win_rates.get(s['symbol'], 0.0), reverse=True)
-    if signals and win_rates:
-        log_event(f"Signals this cycle: {[s['symbol'] for s in signals]} (ordered by backtest win rate)")
+
+    # Drop repeats still within cooldown
+    before_cd = len(signals)
+    signals = [s for s in signals if not _signal_on_cooldown(s['symbol'], s['direction'])]
+    skipped_cd = before_cd - len(signals)
+    if skipped_cd:
+        log_event(f"⏳ Skipped {skipped_cd} signal(s) still on cooldown ({SIGNAL_COOLDOWN_SEC}s).")
+
+    signals.sort(key=lambda s: _rank_key(s, win_rates), reverse=True)
+
+    if MAX_SIGNALS_PER_CYCLE > 0 and len(signals) > MAX_SIGNALS_PER_CYCLE:
+        dropped = signals[MAX_SIGNALS_PER_CYCLE:]
+        log_event(
+            f"📉 Capping alerts to {MAX_SIGNALS_PER_CYCLE}/cycle; "
+            f"holding back: {[d['symbol'] for d in dropped]}"
+        )
+        signals = signals[:MAX_SIGNALS_PER_CYCLE]
+
+    if signals:
+        log_event(
+            f"Signals this cycle: "
+            f"{[(s['symbol'], s.get('signal_source'), s['direction']) for s in signals]}"
+        )
 
     for sig in signals:
-        allowed, reason = can_place_order(sig['symbol']) if not TRADING_SIGNALS_ONLY else (True, "signals only")
-        if not allowed:
-            log_event(f"⛔ Skipping trade {sig['symbol']}: {reason}")
-            continue
-        handle_trade(
+        handle_signal(
             sig['symbol'],
             sig['direction'],
             sig['df'],
@@ -403,41 +404,36 @@ def main():
             signal_source=sig.get('signal_source', 'SIG'),
         )
 
-    # Prune HTF cache to current set only so we don't keep data for removed pairs
     if len(higher_timeframe_cache) > len(generated_pairs) + 5:
         allowed = set(generated_pairs)
         for sym in list(higher_timeframe_cache):
             if sym not in allowed:
                 del higher_timeframe_cache[sym]
 
+
 if __name__ == '__main__':
     log_event(
-        f"🤖 Bot starting. Instance={config.BOT_INSTANCE_ID} Host={config.BOT_HOSTNAME} "
+        f"🤖 Bot starting (signals-only). Instance={config.BOT_INSTANCE_ID} Host={config.BOT_HOSTNAME} "
         f"PID={config.BOT_PID} Started={config.BOT_STARTED_AT_UTC}"
     )
-    # Start Telegram polling in a background thread (single worker to limit memory)
     executor = ThreadPoolExecutor(max_workers=1)
     executor.submit(poll_telegram)
 
-    if not _balance_job_scheduled:
-        schedule.every().day.at("21:00").do(fetch_balance_and_notify)
+    if not _eod_job_scheduled:
         schedule.every().day.at("22:00").do(send_eod_report)
-        _balance_job_scheduled = True
+        _eod_job_scheduled = True
 
     while True:
-        # Run any scheduled jobs (e.g. daily balance at 21:00)
         try:
             schedule.run_pending()
         except Exception as e:
             log_event(f"Schedule run_pending: {e}")
 
-        # 🔒 MASTER GATE (Telegram ON/OFF)
         if not config.TRADING_ENABLED:
-            log_event("🚫 Trading disabled. Sleeping 60 seconds...")
+            log_event("🚫 Signal scanning disabled. Sleeping 60 seconds...")
             time.sleep(60)
             continue
 
-        # Overnight pause: skip pair scanning (fewer API calls). Telegram polling stays active.
         if config.should_skip_cycle_for_night_quiet():
             now_ts = time.time()
             if now_ts - _last_night_quiet_log_ts >= 600:
@@ -449,7 +445,6 @@ if __name__ == '__main__':
             time.sleep(config.NIGHT_QUIET_SLEEP_SEC)
             continue
 
-        # ✅ Trading enabled
         main()
         log_event(f"🕒 Waiting {MAIN_LOOP_INTERVAL_SEC}s until next cycle...\n")
         for _ in range(MAIN_LOOP_INTERVAL_SEC // 10):

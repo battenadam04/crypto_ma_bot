@@ -1,23 +1,18 @@
 """Tests for configuration loading and defaults."""
 
-import os
 import pytest
 
 
 class TestConfigDefaults:
-    def test_trade_capital_default(self):
+    def test_signals_only_mode(self):
         import config
-        assert isinstance(config.TRADE_CAPITAL, float)
-        assert config.TRADE_CAPITAL > 0
+        assert config.TRADING_SIGNALS_ONLY is True
 
-    def test_trade_capital_pct_range(self):
+    def test_signal_volume_controls(self):
         import config
-        assert 0 < config.TRADE_CAPITAL_PCT <= 1.0
-
-    def test_default_leverage(self):
-        import config
-        assert isinstance(config.DEFAULT_LEVERAGE, int)
-        assert config.DEFAULT_LEVERAGE > 0
+        assert config.SIGNAL_COOLDOWN_SEC > 0
+        assert config.MAX_SIGNALS_PER_CYCLE >= 0
+        assert isinstance(config.ENABLE_LIMIT_IDEA_FALLBACK, bool)
 
     def test_rsi_thresholds(self):
         import config
@@ -31,13 +26,9 @@ class TestConfigDefaults:
         assert config.BACKTEST_LOOKAHEAD > 0
         assert config.BACKTEST_DAYS > 0
 
-    def test_daily_loss_limit_range(self):
-        import config
-        assert 0 < config.DAILY_LOSS_LIMIT <= 1.0
-
     def test_trading_enabled_defaults_off(self):
         import config
-        assert config.TRADING_ENABLED is False or config.TRADING_ENABLED is True
+        assert isinstance(config.TRADING_ENABLED, bool)
 
     def test_crypto_pairs_is_list(self):
         import config
