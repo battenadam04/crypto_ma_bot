@@ -35,15 +35,16 @@ _last_night_quiet_log_ts = 0.0
 # (symbol, direction) -> unix timestamp of last alert — prevents spam on sticky setups
 _recent_signals = {}
 
+# Fallback watchlist excludes mega-caps (same rationale as BACKTEST_EXCLUDE_BASES).
 _DEFAULT_PAIRS_PHEMEX = [
-    'BTC/USDT:USDT', 'ETH/USDT:USDT', 'XRP/USDT:USDT', 'SOL/USDT:USDT',
-    'DOGE/USDT:USDT', 'ADA/USDT:USDT', 'LINK/USDT:USDT', 'AVAX/USDT:USDT',
-    'LTC/USDT:USDT', 'UNI/USDT:USDT', 'DOT/USDT:USDT', 'ATOM/USDT:USDT',
+    'XRP/USDT:USDT', 'SOL/USDT:USDT', 'DOGE/USDT:USDT', 'ADA/USDT:USDT',
+    'LINK/USDT:USDT', 'AVAX/USDT:USDT', 'LTC/USDT:USDT', 'UNI/USDT:USDT',
+    'DOT/USDT:USDT', 'ATOM/USDT:USDT',
 ]
 _DEFAULT_PAIRS_BINANCE_MARGIN = [
-    'BTC/USDT', 'ETH/USDT', 'XRP/USDT', 'SOL/USDT',
-    'DOGE/USDT', 'ADA/USDT', 'LINK/USDT', 'AVAX/USDT',
-    'LTC/USDT', 'UNI/USDT', 'DOT/USDT', 'ATOM/USDT',
+    'XRP/USDT', 'SOL/USDT', 'DOGE/USDT', 'ADA/USDT',
+    'LINK/USDT', 'AVAX/USDT', 'LTC/USDT', 'UNI/USDT',
+    'DOT/USDT', 'ATOM/USDT',
 ]
 
 

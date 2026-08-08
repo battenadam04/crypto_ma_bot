@@ -26,8 +26,8 @@ CRYPTO_PAIRS = []
 
 TP_PERCENT = 2.0
 SL_PERCENT = 1.0
-# Require mild momentum on the signal timeframe for trend entries (0 = disabled).
-MIN_ADX_TREND = 12.0
+# Require clearer momentum on the signal timeframe for trend entries (0 = disabled).
+MIN_ADX_TREND = 18.0
 
 # Signals-only product (live trading lives on tag v1.0.0-live-trading).
 TRADING_SIGNALS_ONLY = True
@@ -67,13 +67,15 @@ SIGNAL_COOLDOWN_SEC = 3600
 MAX_SIGNALS_PER_CYCLE = 3
 ENABLE_LIMIT_IDEA_FALLBACK = False
 
-RSI_OVERSOLD = 32.0
-RSI_OVERBOUGHT = 68.0
-RANGE_ADX_THRESHOLD = 22.0
-RANGE_MAX_PCT = 0.045
+# Slightly wider RSI bands so range mean-reversion can fire in mid-alt chop.
+RSI_OVERSOLD = 36.0
+RSI_OVERBOUGHT = 64.0
+RANGE_ADX_THRESHOLD = 25.0
+RANGE_MAX_PCT = 0.055
 SR_LOOKBACK_BARS = 80  # ~20h on 15m
-RANGE_TOUCH_BUFFER = 0.012
-CONTINUATION_PULLBACK_PCT = 0.005
+RANGE_TOUCH_BUFFER = 0.015
+# Continuations must tag closer to MA10 (reduces chop entries on loose pullbacks).
+CONTINUATION_PULLBACK_PCT = 0.003
 
 LIMIT_ENTRY_OFFSET_PCT = 0.0015
 LIMIT_IDEA_FALLBACK_PCT = 0.003
@@ -102,7 +104,10 @@ BACKTEST_ENFORCE_RR = False
 BACKTEST_APPLY_FEES = True
 BACKTEST_MIN_TRADES = 3
 BACKTEST_AUTO_TOP_PAIRS = True
-BACKTEST_TOP_N = 10
+# After excluding mega-caps, keep this many liquid mid-alts by volume.
+BACKTEST_TOP_N = 20
+# Mega-caps chop too hard for this MA pullback edge — skip them in auto discovery.
+BACKTEST_EXCLUDE_BASES = ["BTC", "ETH", "BNB"]
 BACKTEST_MIN_QUOTE_VOLUME = 1_000_000.0
 # 0 = rank by exchange 24h quote volume only (no large-cap CoinGecko filter)
 BACKTEST_COINGECKO_MIN_CAP = 0.0

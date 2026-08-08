@@ -337,11 +337,12 @@ def check_long_signal(df, lookahead=10):
 
     crossover = prev['ma10'] < prev['ma20'] and last['ma10'] > last['ma20']
 
-    # Continuation only on a pullback that tags MA10 and closes back above (not every green bar).
+    # Continuation: pullback tags MA10 and reclaim closes with a strong body (chop filter).
     continuation = (
         last['ma10'] > last['ma20']
         and last['low'] <= last['ma10'] * (1 + CONTINUATION_PULLBACK_PCT)
         and last['close'] > last['ma10']
+        and _strong_bullish_close(last)
     )
 
     alignment = last['ma20'] > last['ma50']
@@ -366,6 +367,7 @@ def check_short_signal(df, lookahead=10):
         last['ma10'] < last['ma20']
         and last['high'] >= last['ma10'] * (1 - CONTINUATION_PULLBACK_PCT)
         and last['close'] < last['ma10']
+        and _strong_bearish_close(last)
     )
 
     alignment = last['ma20'] < last['ma50']

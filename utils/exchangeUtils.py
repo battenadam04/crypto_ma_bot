@@ -203,10 +203,19 @@ def get_top_phemex_usdt_swaps(
     return rows[: int(top_n)]
 
 
+def _base_asset_from_symbol(symbol: str) -> str:
+    """Extract base asset from ccxt symbols like ADA/USDT:USDT or ADA/USDT."""
+    raw = str(symbol or "").strip()
+    if not raw:
+        return ""
+    return raw.split("/")[0].split(":")[0].upper()
+
+
 def get_auto_backtest_pairs(exchange):
     """
     Optional universe for backtests when BACKTEST_AUTO_TOP_PAIRS=true.
-    Respects BACKTEST_TOP_N, BACKTEST_MIN_QUOTE_VOLUME, BACKTEST_COINGECKO_MIN_CAP (0 = skip CoinGecko, volume only).
+    Respects BACKTEST_TOP_N, BACKTEST_EXCLUDE_BASES, BACKTEST_MIN_QUOTE_VOLUME,
+    BACKTEST_COINGECKO_MIN_CAP (0 = skip CoinGecko, volume only).
     """
     eid = getattr(exchange, "id", None)
     if eid not in ("binance", "phemex", "kucoinfutures"):
@@ -215,12 +224,40 @@ def get_auto_backtest_pairs(exchange):
             f"kucoin_futures (ccxt id was {eid!r}). Set BACKTEST_PAIRS or CRYPTO_PAIRS instead."
         )
         return []
-    return get_top_tradable_pairs(
+    exclude = {
+        str(b).strip().upper()
+        for b in (getattr(config, "BACKTEST_EXCLUDE_BASES", None) or [])
+        if str(b).strip()
+    }
+    top_n = int(config.BACKTEST_TOP_N)
+    # Over-fetch so mega-cap exclusions still leave a full mid-alt shortlist.
+    fetch_n = top_n + len(exclude) + 10
+    ranked = get_top_tradable_pairs(
         exchange,
-        top_n=config.BACKTEST_TOP_N,
+        top_n=fetch_n,
         min_volume=config.BACKTEST_MIN_QUOTE_VOLUME,
         min_market_cap_usd=config.BACKTEST_COINGECKO_MIN_CAP,
     )
+    if not exclude:
+        return ranked[:top_n]
+    kept = []
+    dropped = []
+    for row in ranked:
+        sym = row[0] if isinstance(row, (list, tuple)) else row
+        base = _base_asset_from_symbol(sym)
+        if base in exclude:
+            dropped.append(sym)
+            continue
+        kept.append(row)
+        if len(kept) >= top_n:
+            break
+    if dropped:
+        log_event(
+            f"BACKTEST_EXCLUDE_BASES dropped {len(dropped)} mega-cap(s): "
+            f"{', '.join(str(s) for s in dropped[:8])}"
+            + ("…" if len(dropped) > 8 else "")
+        )
+    return kept
 
 
 def get_top_tradable_pairs(
