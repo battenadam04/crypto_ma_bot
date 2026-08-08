@@ -3,6 +3,7 @@ import json
 import os
 import time
 import requests
+from datetime import datetime, timezone
 from typing import List
 
 from utils.utils import log_event
@@ -117,11 +118,27 @@ def poll_telegram():
             time.sleep(0.2)
 
 
+LEGAL_DISCLAIMER = (
+    "<i>Not financial advice. Signals are educational / informational only. "
+    "Crypto trading involves substantial risk of loss. You use these signals "
+    "entirely at your own risk — we place no orders and accept no liability "
+    "for decisions or losses.</i>"
+)
+
+
 def _cmd_on():
     if config.TRADING_ENABLED:
-        return f"ℹ️ Signal scanning already ON\nInstance: <code>{config.BOT_INSTANCE_ID}</code>"
+        return (
+            f"ℹ️ Signal scanning already ON\n"
+            f"Instance: <code>{config.BOT_INSTANCE_ID}</code>\n\n"
+            f"{LEGAL_DISCLAIMER}"
+        )
     config.set_trading_enabled(True, by="telegram:/on")
-    return f"✅ Signal scanning ON — alerts will be sent (no live orders)\nInstance: <code>{config.BOT_INSTANCE_ID}</code>"
+    return (
+        f"✅ Signal scanning ON — alerts will be sent (no live orders)\n"
+        f"Instance: <code>{config.BOT_INSTANCE_ID}</code>\n\n"
+        f"{LEGAL_DISCLAIMER}"
+    )
 
 
 def _cmd_off():
@@ -131,19 +148,67 @@ def _cmd_off():
     return f"⛔ Signal scanning OFF — no new alerts\nInstance: <code>{config.BOT_INSTANCE_ID}</code>"
 
 
+def _load_backtest_state():
+    """Return last_backtest.json dict, or None if missing/unreadable."""
+    if not os.path.isfile(BACKTEST_STATE_FILE):
+        return None
+    try:
+        with open(BACKTEST_STATE_FILE, "r") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else None
+    except Exception:
+        return None
+
+
+def _fmt_backtest_run_at(run_at) -> str:
+    """Make ISO timestamps readable for Telegram (keep original if parse fails)."""
+    if not run_at or run_at == "?":
+        return "unknown"
+    raw = str(run_at).strip()
+    try:
+        normalized = raw.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(normalized)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    except Exception:
+        return raw
+
+
+def _backtest_confidence_lines(data) -> list:
+    """Short trust summary: portfolio win rate + when last run."""
+    if not data:
+        return ["Backtest: <i>no results yet — waiting for weekly auto-backtest or run simulate_trades.py</i>"]
+    run_at = _fmt_backtest_run_at(data.get("run_at"))
+    portfolio_wr = data.get("portfolio_win_rate")
+    pairs = data.get("pairs") or []
+    results = data.get("results") or {}
+    threshold = data.get("win_rate_threshold", "?")
+    lines = []
+    if portfolio_wr is not None:
+        lines.append(f"Portfolio win rate: <b>{portfolio_wr}%</b>")
+    else:
+        lines.append("Portfolio win rate: <i>n/a</i>")
+    lines.append(f"Last backtest: <code>{run_at}</code>")
+    lines.append(f"Pairs qualifying (≥{threshold}%): <b>{len(pairs)}</b>/{len(results)}")
+    return lines
+
+
 def _cmd_status():
     state = "ON" if config.TRADING_ENABLED else "OFF"
-    exchange_name = os.getenv("EXCHANGE", "phemex")
     lines = [
         f"<b>Bot Status</b>",
         f"Instance: <code>{config.BOT_INSTANCE_ID}</code>",
         f"Started: <code>{config.BOT_STARTED_AT_UTC}</code>",
         f"Scanning: <b>{state}</b>",
         f"Mode: SIGNALS ONLY (no live orders)",
-        f"Exchange (market data): {exchange_name}",
-        f"Cooldownframe: <code>{config.TIMEFRAME}</code>",
-        f"Cooldown/cycle: {config.MAX_SIGNALS_PER_CYCLE} | Cooldown: {config.SIGNAL_COOLDOWN_SEC}s",
+        f"Exchange (market data): {config.EXCHANGE}",
+        f"Timeframe: <code>{config.TIMEFRAME}</code>",
+        f"Alerts/cycle: {config.MAX_SIGNALS_PER_CYCLE} | Cooldown: {config.SIGNAL_COOLDOWN_SEC}s",
+        "",
+        "<b>📊 Edge (last backtest)</b>",
     ]
+    lines.extend(_backtest_confidence_lines(_load_backtest_state()))
     if config.TRADING_ENABLED_LAST_SET_AT_UTC:
         lines.append(
             f"Last toggle: <code>{config.TRADING_ENABLED_LAST_SET_AT_UTC}</code> by "
@@ -156,57 +221,67 @@ def _cmd_status():
             f"Night pause: <b>{nq}</b> ({config.NIGHT_QUIET_START_HOUR}:00–{config.NIGHT_QUIET_END_HOUR}:00 "
             f"{config.NIGHT_QUIET_TZ}, in window now: {inside})"
         )
-    lines.append("\n<i>Toggle with /on /off. Overnight: /night.</i>")
+    lines.append("\n<i>/backtest for full pair breakdown. Toggle: /on /off.</i>")
     return "\n".join(lines)
 
 
 def _cmd_pairs():
-    try:
-        if not os.path.isfile(BACKTEST_STATE_FILE):
-            return "📭 No backtest data available yet."
-        with open(BACKTEST_STATE_FILE, 'r') as f:
-            data = json.load(f)
-        pairs = data.get('pairs', [])
-        results = data.get('results', {})
-        if not pairs:
-            return "📭 No pairs selected by last backtest."
-        lines = ["<b>📋 Active Pairs</b> (from backtest)"]
-        for sym in pairs:
-            wr = results.get(sym, {}).get('win_rate', '?')
-            trades = results.get(sym, {}).get('total_trades', '?')
-            lines.append(f"  • {sym}: <b>{wr}%</b> win rate ({trades} trades)")
-        return "\n".join(lines)
-    except Exception as e:
-        return f"❌ Failed to load pairs: {e}"
+    data = _load_backtest_state()
+    if not data:
+        return "📭 No backtest data available yet."
+    pairs = data.get("pairs", [])
+    results = data.get("results", {})
+    if not pairs:
+        return "📭 No pairs selected by last backtest."
+    lines = [
+        "<b>📋 Active Pairs</b> (from last backtest)",
+        f"Last run: <code>{_fmt_backtest_run_at(data.get('run_at'))}</code>",
+    ]
+    portfolio_wr = data.get("portfolio_win_rate")
+    if portfolio_wr is not None:
+        lines.append(f"Portfolio win rate: <b>{portfolio_wr}%</b>")
+    lines.append("")
+    for sym in pairs:
+        wr = results.get(sym, {}).get("win_rate", "?")
+        trades = results.get(sym, {}).get("total_trades", "?")
+        lines.append(f"  • {sym}: <b>{wr}%</b> win rate ({trades} trades)")
+    return "\n".join(lines)
 
 
 def _cmd_backtest():
-    try:
-        if not os.path.isfile(BACKTEST_STATE_FILE):
-            return "📭 No backtest results available."
-        with open(BACKTEST_STATE_FILE, 'r') as f:
-            data = json.load(f)
-        run_at = data.get('run_at', '?')
-        threshold = data.get('win_rate_threshold', '?')
-        pairs = data.get('pairs', [])
-        results = data.get('results', {})
-        portfolio_wr = data.get('portfolio_win_rate', None)
+    data = _load_backtest_state()
+    if not data:
+        return (
+            "📭 No backtest results available.\n"
+            "Run <code>python strategies/simulate_trades.py</code> to generate them."
+        )
+    pairs = data.get("pairs", [])
+    results = data.get("results", {})
+    threshold = data.get("win_rate_threshold", "?")
 
-        lines = [
-            f"<b>📊 Last Backtest</b>",
-            f"Run: {run_at}",
-            f"Threshold: {threshold}%",
-            f"Pairs passed: {len(pairs)}/{len(results)}",
-        ]
-        if portfolio_wr is not None:
-            lines.append(f"Portfolio win rate: <b>{portfolio_wr}%</b>")
-        for sym, r in results.items():
-            if isinstance(r, dict):
-                mark = "✅" if sym in pairs else "❌"
-                lines.append(f"  {mark} {sym}: {r.get('win_rate', '?')}% ({r.get('total_trades', '?')} trades)")
-        return "\n".join(lines)
-    except Exception as e:
-        return f"❌ Failed to load backtest: {e}"
+    lines = ["<b>📊 Last Backtest</b>"]
+    lines.extend(_backtest_confidence_lines(data))
+    lines.append(f"Qualify threshold: {threshold}%")
+    lines.append("")
+    lines.append("<b>Per-pair results</b>")
+
+    def _wr(sym):
+        r = results.get(sym) or {}
+        try:
+            return float(r.get("win_rate") or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    for sym in sorted(results.keys(), key=_wr, reverse=True):
+        r = results.get(sym)
+        if not isinstance(r, dict):
+            continue
+        mark = "✅" if sym in pairs else "❌"
+        lines.append(
+            f"  {mark} {sym}: <b>{r.get('win_rate', '?')}%</b> "
+            f"({r.get('total_trades', '?')} trades)"
+        )
+    return "\n".join(lines)
 
 
 def _cmd_signals():
@@ -225,7 +300,7 @@ def _cmd_signals():
 def _cmd_config():
     lines = [
         f"<b>Configuration</b>",
-        f"Exchange (market data): {os.getenv('EXCHANGE', 'phemex')}",
+        f"Exchange (market data): {config.EXCHANGE}",
         f"Timeframe: <code>{config.TIMEFRAME}</code>",
         f"Mode: signals only",
         f"Max alerts/cycle: {config.MAX_SIGNALS_PER_CYCLE}",
@@ -277,8 +352,8 @@ def _cmd_night(args=None):
     args = args or []
     if not config.NIGHT_QUIET_ENABLED:
         return (
-            "Overnight pause is off in .env (<code>NIGHT_QUIET_ENABLED=false</code>). "
-            "Set it <code>true</code>, configure hours/TZ, restart the bot, then use <code>/night</code>."
+            "Overnight pause is disabled in <code>config.py</code> "
+            "(<code>NIGHT_QUIET_ENABLED=False</code>)."
         )
     window = f"{config.NIGHT_QUIET_START_HOUR}:00–{config.NIGHT_QUIET_END_HOUR}:00 {config.NIGHT_QUIET_TZ}"
     if not args:
@@ -312,14 +387,15 @@ HELP_TEXT = (
     "<b>📖 Available Commands</b>\n\n"
     "/on — Start signal scanning\n"
     "/off — Pause signal scanning\n"
-    "/status — Bot state and alert caps\n"
+    "/status — Bot state + portfolio win rate & last backtest time\n"
+    "/backtest — Full backtest: win rate, run time, per-pair results\n"
     "/pairs — Active pairs with win rates\n"
     "/signals — Today's signals with outcomes\n"
-    "/backtest — Last backtest results\n"
     "/timeframe — Get/set timeframe (ex: /timeframe 15m)\n"
     "/night — Overnight scan pause\n"
     "/config — Current configuration\n"
-    "/help — This message"
+    "/help — This message\n\n"
+    f"{LEGAL_DISCLAIMER}"
 )
 
 COMMAND_MAP = {

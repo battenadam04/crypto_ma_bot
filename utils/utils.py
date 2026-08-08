@@ -5,7 +5,14 @@ import pandas as pd
 import os
 from datetime import datetime, timezone
 from utils.configUtils import strategy_settings
-from config import RSI_OVERSOLD, RSI_OVERBOUGHT, RANGE_ADX_THRESHOLD
+from config import (
+    RSI_OVERSOLD,
+    RSI_OVERBOUGHT,
+    RANGE_ADX_THRESHOLD,
+    RANGE_MAX_PCT,
+    RANGE_TOUCH_BUFFER,
+    CONTINUATION_PULLBACK_PCT,
+)
 
     
 def set_leverage(exchange, symbol, leverage):
@@ -128,9 +135,8 @@ def calculate_trade_levels(price, direction, df, start_idx, strategy_type="trend
     tp_pct = ((tp - entry) / entry) * 100
     sl_pct = ((entry - sl) / entry) * 100 if direction == 'buy' else ((sl - entry) / entry) * 100
 
-    is_backtesting = os.getenv("BACKTESTING", "false").strip().lower() in ("1", "true", "yes", "y", "on")
-    backtest_verbose = os.getenv("BACKTEST_VERBOSE", "false").strip().lower() in ("1", "true", "yes", "y", "on")
-    if (not is_backtesting) or backtest_verbose:
+    import config as _cfg
+    if (not _cfg.IS_BACKTESTING) or _cfg.BACKTEST_VERBOSE:
         print(f"🎯 {strategy_type.upper()} trade:")
         print(f"• Entry: {entry}")
         print(f"• TP: {tp} ({tp_pct:.2f}%)")
@@ -140,7 +146,10 @@ def calculate_trade_levels(price, direction, df, start_idx, strategy_type="trend
     return {
         'entry': entry,
         'take_profit': tp,
-        'stop_loss': sl
+        'stop_loss': sl,
+        'tp_distance': tp_distance,
+        'sl_distance': sl_distance,
+        'rr_ratio': (tp_distance / sl_distance) if sl_distance > 0 else 0.0,
     }
 
 
@@ -224,7 +233,11 @@ def is_early_breakout(df):
 
     return crossover and (under_ma50 or near_ma50)
 
-def is_ranging(df, window=50, range_threshold=0.05, adx_threshold=RANGE_ADX_THRESHOLD):
+def is_ranging(df, window=50, range_threshold=None, adx_threshold=None):
+    if range_threshold is None:
+        range_threshold = RANGE_MAX_PCT
+    if adx_threshold is None:
+        adx_threshold = RANGE_ADX_THRESHOLD
     if len(df) < window or 'adx' not in df.columns:
         return False
 
@@ -253,11 +266,24 @@ def _bullish_engulfing(curr, prev):
     return curr_bullish and prev_bearish and engulfs
 
 
+def _strong_bullish_close(candle) -> bool:
+    """Bullish close with meaningful body (filters weak dojis)."""
+    body = abs(float(candle['close']) - float(candle['open']))
+    span = max(float(candle['high']) - float(candle['low']), 1e-12)
+    return candle['close'] > candle['open'] and (body / span) >= 0.45
+
+
+def _strong_bearish_close(candle) -> bool:
+    body = abs(float(candle['close']) - float(candle['open']))
+    span = max(float(candle['high']) - float(candle['low']), 1e-12)
+    return candle['close'] < candle['open'] and (body / span) >= 0.45
+
+
 def check_range_trade(df):
     """
     Range signals require confirmation that the range is continuing:
-    - SELL at resistance: wait for bearish candle (or bearish engulfing) showing rejection
-    - BUY at support: wait for bullish candle (or bullish engulfing) showing bounce
+    - SELL at resistance: bearish engulfing or strong bearish rejection candle
+    - BUY at support: bullish engulfing or strong bullish bounce candle
     """
     if len(df) < 2:
         return False, False
@@ -265,34 +291,28 @@ def check_range_trade(df):
     last = df.iloc[-1]
     prev = df.iloc[-2]
 
-    support_buffer = 1.02
-    resistance_buffer = 0.98
+    support_buffer = 1.0 + RANGE_TOUCH_BUFFER
+    resistance_buffer = 1.0 - RANGE_TOUCH_BUFFER
 
     support_level = last['support']
     resistance_level = last['resistance']
 
-    # BUY at support: price touched support + RSI oversold + BULLISH reversal candle
-    # (green candle = bounce confirmation, not a red candle still falling)
     prev_touched_support = prev['low'] <= support_level * support_buffer
     at_or_near_support = last['low'] <= support_level * support_buffer or prev_touched_support
-    bullish_reversal = last['close'] > last['open']
-    bullish_engulfing_confirmed = _bullish_engulfing(last, prev)
+    bullish_confirmed = _bullish_engulfing(last, prev) or _strong_bullish_close(last)
     buy_signal = (
         at_or_near_support
         and last['rsi'] < RSI_OVERSOLD
-        and (bullish_reversal or bullish_engulfing_confirmed)
+        and bullish_confirmed
     )
 
-    # SELL at resistance: price touched resistance + RSI overbought + BEARISH reversal candle
-    # (red candle = rejection confirmation, not a green candle still rising)
     prev_touched_resistance = prev['high'] >= resistance_level * resistance_buffer
     at_or_near_resistance = last['high'] >= resistance_level * resistance_buffer or prev_touched_resistance
-    bearish_reversal = last['close'] < last['open']
-    bearish_engulfing_confirmed = _bearish_engulfing(last, prev)
+    bearish_confirmed = _bearish_engulfing(last, prev) or _strong_bearish_close(last)
     sell_signal = (
         at_or_near_resistance
         and last['rsi'] > RSI_OVERBOUGHT
-        and (bearish_reversal or bearish_engulfing_confirmed)
+        and bearish_confirmed
     )
 
     return buy_signal, sell_signal
@@ -315,25 +335,20 @@ def check_long_signal(df, lookahead=10):
     last = df.iloc[-1]
     prev = df.iloc[-2]
 
-    # Crossover condition: MA10 crosses above MA20
     crossover = prev['ma10'] < prev['ma20'] and last['ma10'] > last['ma20']
 
-    # Continuation condition: MA10 remains above MA20
-    continuation = last['ma10'] > last['ma20']
+    # Continuation only on a pullback that tags MA10 and closes back above (not every green bar).
+    continuation = (
+        last['ma10'] > last['ma20']
+        and last['low'] <= last['ma10'] * (1 + CONTINUATION_PULLBACK_PCT)
+        and last['close'] > last['ma10']
+    )
 
-    # Trend alignment: MA20 above MA50 (higher timeframe trend)
     alignment = last['ma20'] > last['ma50']
-
-    # Momentum: price above MA10 (showing bullish momentum)
     momentum = last['close'] > last['ma10']
-
-    # Optional: bullish candle confirmation (price closed higher than open)
     bullish_candle = last['close'] > last['open']
 
-    # Combine conditions: crossover or continuation + momentum + alignment + bullish candle
-    #  and not is_near_resistance(df)
     if (crossover or continuation) and alignment and momentum and bullish_candle and not is_near_resistance(df):
-        #log_event(f"LONG SIGNAL TRIGGERED at {last['timestamp']}")
         return True
 
     return False
@@ -345,26 +360,19 @@ def check_short_signal(df, lookahead=10):
     last = df.iloc[-1]
     prev = df.iloc[-2]
 
-    # Crossover condition: MA10 crosses below MA20
     crossover = prev['ma10'] > prev['ma20'] and last['ma10'] < last['ma20']
 
-    # Continuation condition: MA10 remains below MA20
-    continuation = last['ma10'] < last['ma20']
+    continuation = (
+        last['ma10'] < last['ma20']
+        and last['high'] >= last['ma10'] * (1 - CONTINUATION_PULLBACK_PCT)
+        and last['close'] < last['ma10']
+    )
 
-    # Trend alignment: MA20 below MA50 (higher timeframe bearish trend)
     alignment = last['ma20'] < last['ma50']
-
-    # Momentum: price below MA10 (bearish momentum)
     momentum = last['close'] < last['ma10']
-
-    # Optional: bearish candle confirmation (close < open)
     bearish_candle = last['close'] < last['open']
 
-    # Avoid signals near support (you can define a function similar to `is_near_resistance`)
-    # not_near_support = not is_near_support(df)  # You need to implement this function
-
-    if (crossover or continuation) and alignment and momentum and bearish_candle and not is_near_support(df) :
-        #log_event(f"SHORT SIGNAL TRIGGERED at {last['timestamp']}")
+    if (crossover or continuation) and alignment and momentum and bearish_candle and not is_near_support(df):
         return True
 
     return False

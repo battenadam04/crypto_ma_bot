@@ -1,6 +1,7 @@
 import config
 import json
 import os
+import threading
 import pandas as pd
 import pandas_ta as ta  # noqa: F401 — registers `DataFrame.ta` for RSI/ADX in process_pair
 import time
@@ -16,11 +17,13 @@ from config import (
     SIGNAL_COOLDOWN_SEC,
     MAX_SIGNALS_PER_CYCLE,
     ENABLE_LIMIT_IDEA_FALLBACK,
+    SR_LOOKBACK_BARS,
+    MIN_SETUP_RR,
 )
 from utils.telegramUtils import poll_telegram, send_telegram
 from utils.utils import (
     add_atr_column, calculate_mas, check_long_signal, check_short_signal,
-    is_ranging, check_range_trade, log_event,
+    is_ranging, check_range_trade, log_event, calculate_trade_levels,
 )
 from utils.exchangeUtils import get_exchange, build_indicative_levels
 from utils.signalTracker import record_signal, send_eod_report
@@ -46,7 +49,7 @@ _DEFAULT_PAIRS_BINANCE_MARGIN = [
 
 def _default_live_pairs():
     """Symbol shape must match EXCHANGE (Phemex perps vs Binance margin spot)."""
-    if os.getenv("EXCHANGE", "phemex").strip().lower() == "binance_margin":
+    if config.EXCHANGE.strip().lower() == "binance_margin":
         return _DEFAULT_PAIRS_BINANCE_MARGIN.copy()
     return _DEFAULT_PAIRS_PHEMEX.copy()
 
@@ -61,6 +64,93 @@ HTF_CACHE_MAX_ROWS = 60
 HTF_CACHE_MAX_SYMBOLS = 32
 higher_timeframe_cache = {}
 _eod_job_scheduled = False
+_auto_backtest_scheduled = False
+_auto_backtest_lock = threading.Lock()
+
+
+def _fmt_symbols_short(symbols, limit=8):
+    syms = [str(s) for s in (symbols or [])]
+    if not syms:
+        return "(none)"
+    if len(syms) <= limit:
+        return ", ".join(syms)
+    return ", ".join(syms[:limit]) + f" (+{len(syms) - limit} more)"
+
+
+def _run_auto_backtest():
+    """Refresh last_backtest.json; run off the main scan loop (daemon thread)."""
+    if not _auto_backtest_lock.acquire(blocking=False):
+        log_event("⏭️ Scheduled backtest skipped — already running")
+        return
+    try:
+        log_event("🧪 Scheduled weekly backtest starting…")
+        if config.AUTO_BACKTEST_NOTIFY:
+            try:
+                send_telegram(
+                    "🧪 Weekly backtest started — refreshing pair universe…",
+                    bypass_rate_limit=True,
+                )
+            except Exception as e:
+                log_event(f"Auto-backtest start notify failed: {e}")
+
+        # Lazy import: simulate_trades pulls heavy deps; safe after IS_BACKTESTING fix.
+        from strategies.simulate_trades import run_backtest, run_portfolio_backtest
+
+        good = run_backtest()
+        portfolio_wr = None
+        if good:
+            portfolio_wr = run_portfolio_backtest(pairs_override=good, max_trades_per_bar=3)
+
+        log_event(
+            f"✅ Scheduled backtest done: {len(good or [])} qualifying pair(s)"
+            + (f", portfolio WR={portfolio_wr}%" if portfolio_wr is not None else "")
+        )
+        if config.AUTO_BACKTEST_NOTIFY:
+            try:
+                lines = [
+                    "✅ <b>Weekly backtest complete</b>",
+                    f"Qualifying pairs: <b>{len(good or [])}</b>",
+                    f"Watchlist: <code>{_fmt_symbols_short(good)}</code>",
+                ]
+                if portfolio_wr is not None:
+                    lines.append(f"Portfolio win rate: <b>{portfolio_wr}%</b>")
+                lines.append("<i>/status or /backtest for details</i>")
+                send_telegram("\n".join(lines), parse_mode="HTML", bypass_rate_limit=True)
+            except Exception as e:
+                log_event(f"Auto-backtest finish notify failed: {e}")
+    except Exception as e:
+        log_event(f"❌ Scheduled backtest failed: {e}")
+        if config.AUTO_BACKTEST_NOTIFY:
+            try:
+                send_telegram(
+                    f"❌ Weekly backtest failed: {e}",
+                    bypass_rate_limit=True,
+                )
+            except Exception:
+                pass
+    finally:
+        _auto_backtest_lock.release()
+
+
+def _kick_auto_backtest():
+    """Schedule callback: spawn a daemon thread so scans / Telegram keep running."""
+    threading.Thread(target=_run_auto_backtest, name="auto-backtest", daemon=True).start()
+
+
+def _schedule_auto_backtest_job():
+    """Register weekly backtest with the schedule library (UTC by default)."""
+    if not config.AUTO_BACKTEST_ENABLED:
+        log_event("Auto-backtest disabled (AUTO_BACKTEST_ENABLED=False)")
+        return
+    day = (config.AUTO_BACKTEST_DAY or "sunday").strip().lower()
+    at = (config.AUTO_BACKTEST_AT or "06:00").strip()
+    tz = (config.AUTO_BACKTEST_TZ or "UTC").strip()
+    day_job = getattr(schedule.every(), day, None)
+    if day_job is None:
+        log_event(f"Invalid AUTO_BACKTEST_DAY={day!r}; expected monday…sunday. Using sunday.")
+        day_job = schedule.every().sunday
+    day_job.at(at, tz).do(_kick_auto_backtest)
+    log_event(f"🗓️ Auto-backtest scheduled: every {day} at {at} {tz}")
 
 
 def _hours_back_for_timeframe(timeframe: str) -> int:
@@ -133,7 +223,7 @@ def handle_signal(symbol, direction, df, strategy_type="trend", signal_source="S
         limit_hint = build_limit_order_hint(df, direction, strategy_type)
         message = (
             f"{'📈 LONG' if direction == 'long' else '📉 SHORT'} SIGNAL for {symbol} ({config.TIMEFRAME})\n"
-            f"Confirmed by 15m {'up' if direction == 'long' else 'down'} {strategy_type}\n\n"
+            f"Confirmed by {config.HTF_TIMEFRAME} {'up' if direction == 'long' else 'down'} {strategy_type}\n\n"
             f"🧭 Src: {signal_source}\n"
             f"ℹ️ Signals only — no orders are placed.\n"
             f"💲 Reference price: {filled_entry}\n"
@@ -250,7 +340,7 @@ def process_pair(symbol):
 
     now = time.time()
     if symbol not in higher_timeframe_cache or now - higher_timeframe_cache[symbol]['timestamp'] > HTF_CACHE_TTL_SEC:
-        higher_df = fetch_data(symbol, '15m', limit=100)
+        higher_df = fetch_data(symbol, config.HTF_TIMEFRAME, limit=100)
         if higher_df is None or len(higher_df) < 51:
             log_event(f"⚠️ Skipping {symbol} — insufficient higher timeframe data.")
             return None
@@ -277,21 +367,31 @@ def process_pair(symbol):
 
     lower_df['rsi'] = lower_df.ta.rsi(length=14)
     lower_df['adx'] = lower_df.ta.adx(length=14)['ADX_14']
-    lower_df['support'] = lower_df['low'].rolling(window=50).min()
-    lower_df['resistance'] = lower_df['high'].rolling(window=50).max()
+    lower_df['support'] = lower_df['low'].rolling(window=SR_LOOKBACK_BARS).min()
+    lower_df['resistance'] = lower_df['high'].rolling(window=SR_LOOKBACK_BARS).max()
 
     adx_ok = (MIN_ADX_TREND <= 0 or
               (pd.notna(lower_df['adx'].iloc[-1]) and lower_df['adx'].iloc[-1] >= MIN_ADX_TREND))
 
-    if adx_ok and check_long_signal(lower_df) and trend_up:
+    def _rr_ok(direction, strategy_type):
+        try:
+            df = add_atr_column(lower_df)
+            side = 'buy' if direction == 'long' else 'sell'
+            price = float(df['close'].iloc[-1])
+            levels = calculate_trade_levels(price, side, df, len(df) - 1, strategy_type)
+            return float(levels.get('rr_ratio') or 0) >= float(MIN_SETUP_RR)
+        except Exception:
+            return False
+
+    if adx_ok and check_long_signal(lower_df) and trend_up and _rr_ok('long', 'trend'):
         return {'symbol': symbol, 'direction': 'long', 'strategy_type': 'trend', 'signal_source': 'SIG', 'df': lower_df}
-    if adx_ok and check_short_signal(lower_df) and trend_down:
+    if adx_ok and check_short_signal(lower_df) and trend_down and _rr_ok('short', 'trend'):
         return {'symbol': symbol, 'direction': 'short', 'strategy_type': 'trend', 'signal_source': 'SIG', 'df': lower_df}
     if is_ranging(lower_df) and not trend_up and not trend_down:
         buy_signal, sell_signal = check_range_trade(lower_df)
-        if buy_signal:
+        if buy_signal and _rr_ok('long', 'range'):
             return {'symbol': symbol, 'direction': 'long', 'strategy_type': 'range', 'signal_source': 'SIG', 'df': lower_df}
-        if sell_signal:
+        if sell_signal and _rr_ok('short', 'range'):
             return {'symbol': symbol, 'direction': 'short', 'strategy_type': 'range', 'signal_source': 'SIG', 'df': lower_df}
 
     fallback = _limit_idea_fallback_signal(lower_df, trend_up, trend_down)
@@ -355,7 +455,7 @@ def main():
     if not generated_pairs:
         log_event(
             "⚠️ No pairs to scan — run `python strategies/simulate_trades.py` to refresh last_backtest.json, "
-            "or set CRYPTO_PAIRS in .env."
+            "or set CRYPTO_PAIRS in config.py."
         )
         return
 
@@ -422,6 +522,10 @@ if __name__ == '__main__':
     if not _eod_job_scheduled:
         schedule.every().day.at("22:00").do(send_eod_report)
         _eod_job_scheduled = True
+
+    if not _auto_backtest_scheduled:
+        _schedule_auto_backtest_job()
+        _auto_backtest_scheduled = True
 
     while True:
         try:

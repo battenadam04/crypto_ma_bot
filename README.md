@@ -21,26 +21,28 @@ Signals-only crypto alerts via Telegram. Scans exchange market data, scores MA /
 
 ```bash
 cp .env.example .env
-# set TELEGRAM_TOKEN and TELEGRAM_CHAT_ID
+# set TELEGRAM_TOKEN and TELEGRAM_CHAT_ID only — all other settings live in config.py
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-python strategies/simulate_trades.py   # optional: refresh last_backtest.json
+python strategies/simulate_trades.py   # optional manual refresh; bot also auto-runs weekly
 python bot.py
 ```
 
 In Telegram: `/on` to start scanning, `/help` for the menu.
 
+Tune signal volume, timeframe defaults, night quiet, exchange, and weekly auto-backtest (`AUTO_BACKTEST_*`) in **`config.py`** (not `.env`). `/timeframe` and `/night` still override at runtime.
+
 ---
 
 ## Controlling signal volume
 
-Bursts happen when many pairs satisfy the same market condition in one 5m cycle. Controls (env):
+Bursts happen when many pairs satisfy the same market condition in one 5m cycle. Controls in `config.py`:
 
-| Variable | Default | Effect |
+| Constant | Default | Effect |
 |---|---|---|
 | `SIGNAL_COOLDOWN_SEC` | `3600` | Same symbol+direction will not re-alert within this window |
 | `MAX_SIGNALS_PER_CYCLE` | `3` | After ranking, only the top N alerts are sent |
-| `ENABLE_LIMIT_IDEA_FALLBACK` | `false` | Speculative LIM ideas near S/R — noisy; keep off for a cleaner product |
+| `ENABLE_LIMIT_IDEA_FALLBACK` | `False` | Speculative LIM ideas near S/R — noisy; keep off for a cleaner product |
 | `MAIN_LOOP_INTERVAL_SEC` | `300` | Scan cadence |
 
 Ranking order: confirmed `SIG` > speculative `LIM`, then trend > range, then backtest win rate.

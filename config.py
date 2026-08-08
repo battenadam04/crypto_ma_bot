@@ -7,31 +7,34 @@ from zoneinfo import ZoneInfo
 import socket
 import uuid
 
-# Always load the project-root .env (same folder as this file). Plain load_dotenv() only
-# reads cwd, so e.g. `cd strategies && python simulate_trades.py` would miss ../.env and
-# BACKTEST_DAYS / API keys would fall back to defaults.
+# Secrets only — everything else is hardcoded below for production.
 _PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(_PROJECT_ROOT, ".env"))
 
-TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
-TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-# Split the crypto pairs string into a list
-CRYPTO_PAIRS = os.getenv('CRYPTO_PAIRS', '').split(',')
+# ---------------------------------------------------------------------------
+# Production settings (edit here if you ever need to change behaviour)
+# ---------------------------------------------------------------------------
 
-TP_PERCENT = float(os.getenv('TP_PERCENT', 2.0))
-SL_PERCENT = float(os.getenv('SL_PERCENT', 1.0))
+# Market-data venue: "phemex" | "binance_margin" | "kucoin" | "kucoin_futures"
+EXCHANGE = "phemex"
 
-# Optional: minimum ADX for trend signals (0 = disabled). Applied in live and backtest.
-MIN_ADX_TREND = float(os.getenv('MIN_ADX_TREND', '0'))
+# Optional fixed watchlist; empty = use last_backtest.json, else built-in defaults.
+CRYPTO_PAIRS = []
 
-# This product is signals-only (live order placement lives on tag v1.0.0-live-trading).
+TP_PERCENT = 2.0
+SL_PERCENT = 1.0
+# Require mild momentum on the signal timeframe for trend entries (0 = disabled).
+MIN_ADX_TREND = 12.0
+
+# Signals-only product (live trading lives on tag v1.0.0-live-trading).
 TRADING_SIGNALS_ONLY = True
 
-# Runtime-controlled (Telegram): master gate for scanning / alerting. Default OFF.
+# Master scan/alert gate — toggled at runtime via Telegram /on /off (default OFF).
 TRADING_ENABLED = False
 
-# Identify this running bot instance (useful when multiple instances run)
 BOT_STARTED_AT_UTC = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
 BOT_HOSTNAME = socket.gethostname()
 BOT_PID = os.getpid()
@@ -40,38 +43,86 @@ BOT_INSTANCE_ID = f"{BOT_HOSTNAME}:{BOT_PID}:{uuid.uuid4().hex[:8]}"
 TRADING_ENABLED_LAST_SET_AT_UTC = None
 TRADING_ENABLED_LAST_SET_BY = None
 
+_RUNTIME_CONFIG_FILE = os.path.join(_PROJECT_ROOT, "runtime_config.json")
+_runtime_lock = threading.Lock()
+
+# Default scan timeframe; /timeframe in Telegram can override and persist.
+TIMEFRAME = "15m"
+# Higher-timeframe trend filter used by live + backtest.
+HTF_TIMEFRAME = "1h"
+
+# Overnight scan pause (Telegram /night on|off arms/disarms; state persists).
+NIGHT_QUIET_ENABLED = True
+NIGHT_QUIET_START_HOUR = 22
+NIGHT_QUIET_END_HOUR = 6
+NIGHT_QUIET_TZ = "UTC"
+NIGHT_QUIET_SLEEP_SEC = 60
+NIGHT_QUIET_ARMED_DEFAULT = True
+NIGHT_QUIET_ARMED = False
+
+MAIN_LOOP_INTERVAL_SEC = 300
+
+# Signal volume controls
+SIGNAL_COOLDOWN_SEC = 3600
+MAX_SIGNALS_PER_CYCLE = 3
+ENABLE_LIMIT_IDEA_FALLBACK = False
+
+RSI_OVERSOLD = 32.0
+RSI_OVERBOUGHT = 68.0
+RANGE_ADX_THRESHOLD = 22.0
+RANGE_MAX_PCT = 0.045
+SR_LOOKBACK_BARS = 80  # ~20h on 15m
+RANGE_TOUCH_BUFFER = 0.012
+CONTINUATION_PULLBACK_PCT = 0.005
+
+LIMIT_ENTRY_OFFSET_PCT = 0.0015
+LIMIT_IDEA_FALLBACK_PCT = 0.003
+
+# Backtest (strategies/simulate_trades.py)
+# Weekly in-bot refresh of last_backtest.json (Sunday 06:00 UTC by default).
+AUTO_BACKTEST_ENABLED = True
+AUTO_BACKTEST_DAY = "sunday"  # schedule.every().<day>
+AUTO_BACKTEST_AT = "06:00"  # HH:MM
+AUTO_BACKTEST_TZ = "UTC"
+AUTO_BACKTEST_NOTIFY = True  # Telegram start + finish summary
+BACKTEST_INTERVAL_HOURS = 168  # documentation alias for weekly cadence
+BACKTEST_SLIPPAGE_BPS = 5.0
+BACKTEST_COMMISSION_BPS = 4.0
+# ~1h at 15m
+BACKTEST_COOLDOWN_BARS = 4
+# ~12h at 15m
+BACKTEST_LOOKAHEAD = 48
+BACKTEST_DAYS = 42
+BACKTEST_USE_LIMIT_IDEAS = False
+BACKTEST_LIMIT_FILL_BARS = 3
+BACKTEST_MIN_RR_RATIO = 1.5
+BACKTEST_WIN_RATE_THRESHOLD = 40.0
+MIN_SETUP_RR = 1.5
+BACKTEST_ENFORCE_RR = False
+BACKTEST_APPLY_FEES = True
+BACKTEST_MIN_TRADES = 3
+BACKTEST_AUTO_TOP_PAIRS = True
+BACKTEST_TOP_N = 10
+BACKTEST_MIN_QUOTE_VOLUME = 1_000_000.0
+# 0 = rank by exchange 24h quote volume only (no large-cap CoinGecko filter)
+BACKTEST_COINGECKO_MIN_CAP = 0.0
+BACKTEST_PAIRS = []  # leave empty so auto top-N volume discovery is used
+BACKTEST_PER_PAIR_LIMIT_FALLBACK = False
+BACKTEST_OHLCV_LIMIT = 1000
+BACKTEST_FETCH_SLEEP_SEC = 0.05
+BACKTEST_VERBOSE = False
+
+# Set True by simulate_trades.py for quieter shared helpers during backtests.
+IS_BACKTESTING = False
+
 
 def set_trading_enabled(enabled: bool, by: str = "unknown") -> bool:
-    """Set trading enabled flag and record provenance for observability."""
+    """Set scanning enabled flag and record provenance for observability."""
     global TRADING_ENABLED, TRADING_ENABLED_LAST_SET_AT_UTC, TRADING_ENABLED_LAST_SET_BY
     TRADING_ENABLED = bool(enabled)
     TRADING_ENABLED_LAST_SET_AT_UTC = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
     TRADING_ENABLED_LAST_SET_BY = (by or "unknown").strip()[:120]
     return TRADING_ENABLED
-
-# Runtime-controlled (Telegram): active chart timeframe for signal generation
-# Defaults to env var, but can be overridden at runtime and persisted to disk.
-_RUNTIME_CONFIG_FILE = os.path.join(os.path.dirname(__file__), "runtime_config.json")
-_runtime_lock = threading.Lock()
-
-TIMEFRAME = os.getenv("TIMEFRAME", "5m")
-
-# Overnight pause: skip exchange scanning during a daily window (Telegram stays on).
-NIGHT_QUIET_ENABLED = os.getenv("NIGHT_QUIET_ENABLED", "false").strip().lower() in (
-    "1", "true", "yes", "y", "on",
-)
-NIGHT_QUIET_START_HOUR = max(0, min(23, int(os.getenv("NIGHT_QUIET_START_HOUR", "22"))))
-NIGHT_QUIET_END_HOUR = max(0, min(23, int(os.getenv("NIGHT_QUIET_END_HOUR", "6"))))
-NIGHT_QUIET_TZ = (os.getenv("NIGHT_QUIET_TZ", "UTC") or "UTC").strip()
-NIGHT_QUIET_SLEEP_SEC = max(30, int(os.getenv("NIGHT_QUIET_SLEEP_SEC", "60")))
-
-NIGHT_QUIET_ARMED = False
-
-
-def _night_quiet_armed_default() -> bool:
-    return os.getenv("NIGHT_QUIET_ARMED_DEFAULT", "true").strip().lower() in (
-        "1", "true", "yes", "y", "on",
-    )
 
 
 def _load_runtime_config():
@@ -88,7 +139,6 @@ def _load_runtime_config():
         if NIGHT_QUIET_ENABLED and isinstance(armed, bool):
             NIGHT_QUIET_ARMED = armed
     except Exception:
-        # Never crash import on config load failures
         return
 
 
@@ -109,7 +159,7 @@ def _persist_runtime_config():
     os.replace(tmp, _RUNTIME_CONFIG_FILE)
 
 
-NIGHT_QUIET_ARMED = NIGHT_QUIET_ENABLED and _night_quiet_armed_default()
+NIGHT_QUIET_ARMED = NIGHT_QUIET_ENABLED and NIGHT_QUIET_ARMED_DEFAULT
 _load_runtime_config()
 
 
@@ -131,8 +181,9 @@ def _night_quiet_now_local_hour() -> int:
 def in_night_quiet_window() -> bool:
     if not NIGHT_QUIET_ENABLED:
         return False
-    h = _night_quiet_now_local_hour()
-    return hour_in_night_quiet_window(h, NIGHT_QUIET_START_HOUR, NIGHT_QUIET_END_HOUR)
+    return hour_in_night_quiet_window(
+        _night_quiet_now_local_hour(), NIGHT_QUIET_START_HOUR, NIGHT_QUIET_END_HOUR
+    )
 
 
 def should_skip_cycle_for_night_quiet() -> bool:
@@ -143,7 +194,7 @@ def set_night_quiet_armed(armed: bool) -> bool:
     """Persist whether overnight pause is armed (Telegram /night on|off)."""
     global NIGHT_QUIET_ARMED
     if not NIGHT_QUIET_ENABLED:
-        raise ValueError("NIGHT_QUIET_ENABLED is false in .env; set it true to use overnight pause.")
+        raise ValueError("Overnight pause is disabled in config.py (NIGHT_QUIET_ENABLED=False).")
     with _runtime_lock:
         NIGHT_QUIET_ARMED = bool(armed)
         _persist_runtime_config()
@@ -160,34 +211,3 @@ def set_timeframe(new_timeframe: str) -> str:
         TIMEFRAME = tf
         _persist_runtime_config()
     return TIMEFRAME
-
-MAIN_LOOP_INTERVAL_SEC = int(os.getenv('MAIN_LOOP_INTERVAL_SEC', '300'))
-
-# Signal volume controls (reduce Telegram floods when many pairs fire together)
-# Don't re-alert the same symbol+direction within this window (default 1 hour).
-SIGNAL_COOLDOWN_SEC = int(os.getenv('SIGNAL_COOLDOWN_SEC', '3600'))
-# Max alerts dispatched per scan cycle (0 = unlimited). Ranked by quality first.
-MAX_SIGNALS_PER_CYCLE = int(os.getenv('MAX_SIGNALS_PER_CYCLE', '3'))
-# Speculative near-support/resistance "LIM" ideas — noisier than confirmed SIG; off by default.
-ENABLE_LIMIT_IDEA_FALLBACK = os.getenv('ENABLE_LIMIT_IDEA_FALLBACK', 'false').lower() == 'true'
-
-# Signal thresholds
-RSI_OVERSOLD = float(os.getenv('RSI_OVERSOLD', '35'))
-RSI_OVERBOUGHT = float(os.getenv('RSI_OVERBOUGHT', '65'))
-RANGE_ADX_THRESHOLD = float(os.getenv('RANGE_ADX_THRESHOLD', '25'))
-
-# Suggested limit-entry placement for signal messages
-# Example: 0.0015 = 0.15% away from level to improve fills.
-LIMIT_ENTRY_OFFSET_PCT = float(os.getenv('LIMIT_ENTRY_OFFSET_PCT', '0.0015'))
-LIMIT_IDEA_FALLBACK_PCT = float(os.getenv('LIMIT_IDEA_FALLBACK_PCT', '0.003'))
-
-# Backtest parameters (manual via strategies/simulate_trades.py)
-BACKTEST_INTERVAL_HOURS = int(os.getenv('BACKTEST_INTERVAL_HOURS', '168'))  # 168h = weekly
-BACKTEST_SLIPPAGE_BPS = float(os.getenv('BACKTEST_SLIPPAGE_BPS', '5'))
-BACKTEST_COMMISSION_BPS = float(os.getenv('BACKTEST_COMMISSION_BPS', '4'))
-BACKTEST_COOLDOWN_BARS = int(os.getenv('BACKTEST_COOLDOWN_BARS', '10'))
-BACKTEST_LOOKAHEAD = int(os.getenv('BACKTEST_LOOKAHEAD', '50'))
-BACKTEST_DAYS = int(os.getenv('BACKTEST_DAYS', '28'))
-BACKTEST_USE_LIMIT_IDEAS = os.getenv('BACKTEST_USE_LIMIT_IDEAS', 'false').lower() == 'true'
-BACKTEST_LIMIT_FILL_BARS = int(os.getenv('BACKTEST_LIMIT_FILL_BARS', '3'))
-BACKTEST_MIN_RR_RATIO = float(os.getenv('BACKTEST_MIN_RR_RATIO', '2.0'))

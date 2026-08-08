@@ -121,4 +121,10 @@ class TestCheckTradeOutcome:
         prices = [100.0] * 65
         df = _make_price_df(prices)
         outcome = check_trade_outcome(df, 60, 'buy', 100.0, max_lookahead=3)
-        assert outcome['result'] in ('win', 'loss')
+        assert outcome['result'] in ('win', 'loss', 'none')
+
+    def test_timeout_is_unresolved(self):
+        prices = [100.0] * 80
+        df = _make_price_df(prices)
+        outcome = check_trade_outcome(df, 60, 'buy', 100.0, max_lookahead=5)
+        assert outcome['result'] == 'none'

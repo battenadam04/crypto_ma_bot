@@ -13,7 +13,7 @@ from utils.telegramUtils import handle_telegram_command, _rate_limited, _send_ti
 class TestHandleTelegramCommand:
     def setup_method(self):
         config.TRADING_ENABLED = False
-        config.TIMEFRAME = "5m"
+        config.TIMEFRAME = "15m"
 
     def test_on_enables_scanning(self):
         response, mode = handle_telegram_command("/on")
@@ -41,6 +41,7 @@ class TestHandleTelegramCommand:
         response, mode = handle_telegram_command("/status")
         assert "ON" in response
         assert "SIGNALS ONLY" in response
+        assert "Edge" in response or "win rate" in response.lower()
         assert mode == 'HTML'
 
     def test_status_disabled(self):
@@ -53,6 +54,7 @@ class TestHandleTelegramCommand:
         assert "/pairs" in response
         assert "/signals" in response
         assert "/backtest" in response
+        assert "win rate" in response.lower()
         assert "/night" in response
         assert "/balance" not in response
         assert "/positions" not in response
@@ -62,7 +64,7 @@ class TestHandleTelegramCommand:
     def test_night_disabled_without_env(self, monkeypatch):
         monkeypatch.setattr(config, "NIGHT_QUIET_ENABLED", False)
         response, mode = handle_telegram_command("/night")
-        assert "NIGHT_QUIET_ENABLED=false" in response
+        assert "NIGHT_QUIET_ENABLED=False" in response
         assert mode == "HTML"
 
     def test_night_arm_toggle(self, monkeypatch, tmp_path):
@@ -98,7 +100,7 @@ class TestHandleTelegramCommand:
     def test_timeframe_shows_current_and_help(self):
         response, mode = handle_telegram_command("/timeframe")
         assert "Timeframe" in response
-        assert "5m" in response
+        assert "15m" in response
         assert mode == "HTML"
 
     def test_timeframe_set_valid(self, monkeypatch):
@@ -155,7 +157,7 @@ class TestBacktestCommand:
         state_file = tmp_path / 'last_backtest.json'
         state_file.write_text(json.dumps({
             'pairs': ['ETH/USDT'],
-            'run_at': '2025-01-01T00:00:00',
+            'run_at': '2025-01-01T12:30:00+00:00',
             'win_rate_threshold': 55,
             'results': {'ETH/USDT': {'win_rate': 60.0, 'total_trades': 30}},
             'portfolio_win_rate': 58.5,
@@ -167,7 +169,26 @@ class TestBacktestCommand:
         response, mode = handle_telegram_command("/backtest")
         assert "ETH/USDT" in response
         assert "58.5" in response
+        assert "2025-01-01" in response
+        assert "Portfolio win rate" in response
 
+    def test_status_includes_backtest_confidence(self, tmp_path, monkeypatch):
+        state_file = tmp_path / 'last_backtest.json'
+        state_file.write_text(json.dumps({
+            'pairs': ['BTC/USDT'],
+            'run_at': '2026-04-11T20:42:56+00:00',
+            'win_rate_threshold': 40,
+            'results': {'BTC/USDT': {'win_rate': 55.0, 'total_trades': 10}},
+            'portfolio_win_rate': 39.95,
+        }))
+        monkeypatch.setattr(
+            'utils.telegramUtils.BACKTEST_STATE_FILE',
+            str(state_file)
+        )
+        response, mode = handle_telegram_command("/status")
+        assert "39.95" in response
+        assert "2026-04-11" in response
+        assert mode == "HTML"
 
 class TestRateLimiting:
     def setup_method(self):

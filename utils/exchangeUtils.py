@@ -1,41 +1,28 @@
 import ccxt
-import os
 
+import config
 from utils.coinGeckoData import fetch_market_caps
 from utils.utils import calculate_trade_levels, get_decimal_places, log_event
 
-
-# Normalize so Render/dashboard env vars like "PHEMEX" or "phemex " still match.
-EXCHANGE_RAW = os.getenv("EXCHANGE", "phemex") or "phemex"
-EXCHANGE_NAME = EXCHANGE_RAW.strip().lower()
+EXCHANGE_NAME = (config.EXCHANGE or "phemex").strip().lower()
 
 
 def init_exchange():
-    """Public/read-only market-data client. API keys are optional (not used for orders)."""
+    """Public/read-only market-data client (no trading keys)."""
     if EXCHANGE_NAME == "phemex":
         exchange = ccxt.phemex({
             'enableRateLimit': True,
             'options': {'defaultType': 'swap'},
         })
-        if os.getenv("PHEMEX_SANDBOX", "false").lower() == "true":
-            exchange.set_sandbox_mode(True)
-            log_event("PHEMEX_SANDBOX=true: using Phemex testnet API.")
-
     elif EXCHANGE_NAME == "kucoin":
         exchange = ccxt.kucoin({'enableRateLimit': True})
-
     elif EXCHANGE_NAME == "kucoin_futures":
         exchange = ccxt.kucoinfutures({'enableRateLimit': True})
-
     elif EXCHANGE_NAME == "binance_margin":
         exchange = ccxt.binance({
             'enableRateLimit': True,
             'options': {'defaultType': 'margin'},
         })
-        if os.getenv("BINANCE_SANDBOX", "false").lower() == "true":
-            exchange.set_sandbox_mode(True)
-            log_event("BINANCE_SANDBOX=true: using Binance testnet (testnet.binance.vision).")
-
     else:
         raise ValueError(f"Unsupported exchange: {EXCHANGE_NAME}")
 
@@ -228,18 +215,11 @@ def get_auto_backtest_pairs(exchange):
             f"kucoin_futures (ccxt id was {eid!r}). Set BACKTEST_PAIRS or CRYPTO_PAIRS instead."
         )
         return []
-    top_n = int(os.getenv("BACKTEST_TOP_N", "20"))
-    min_vol = float(os.getenv("BACKTEST_MIN_QUOTE_VOLUME", "1000000"))
-    cap_raw = os.getenv("BACKTEST_COINGECKO_MIN_CAP", "1000000000").strip()
-    try:
-        min_cap = float(cap_raw) if cap_raw else 0.0
-    except ValueError:
-        min_cap = 1_000_000_000.0
     return get_top_tradable_pairs(
         exchange,
-        top_n=top_n,
-        min_volume=min_vol,
-        min_market_cap_usd=min_cap,
+        top_n=config.BACKTEST_TOP_N,
+        min_volume=config.BACKTEST_MIN_QUOTE_VOLUME,
+        min_market_cap_usd=config.BACKTEST_COINGECKO_MIN_CAP,
     )
 
 

@@ -10,15 +10,18 @@ import time
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 
-# Mark this process as backtesting so shared helpers can suppress noisy prints.
-os.environ.setdefault("BACKTESTING", "true")
+import config
 
 from config import (
     BACKTEST_SLIPPAGE_BPS, BACKTEST_COMMISSION_BPS,
     BACKTEST_COOLDOWN_BARS, BACKTEST_LOOKAHEAD, BACKTEST_DAYS,
     MIN_ADX_TREND, LIMIT_ENTRY_OFFSET_PCT, LIMIT_IDEA_FALLBACK_PCT,
     BACKTEST_USE_LIMIT_IDEAS, BACKTEST_LIMIT_FILL_BARS, BACKTEST_MIN_RR_RATIO,
-    CRYPTO_PAIRS,
+    BACKTEST_WIN_RATE_THRESHOLD, BACKTEST_ENFORCE_RR, BACKTEST_APPLY_FEES,
+    BACKTEST_AUTO_TOP_PAIRS, BACKTEST_PAIRS, BACKTEST_PER_PAIR_LIMIT_FALLBACK,
+    BACKTEST_OHLCV_LIMIT, BACKTEST_FETCH_SLEEP_SEC, BACKTEST_VERBOSE,
+    CRYPTO_PAIRS, EXCHANGE, SR_LOOKBACK_BARS, ENABLE_LIMIT_IDEA_FALLBACK,
+    MIN_SETUP_RR, TIMEFRAME, HTF_TIMEFRAME, BACKTEST_MIN_TRADES,
 )
 from utils.utils import (
     check_long_signal,
@@ -33,12 +36,8 @@ from utils.utils import (
 from utils.exchangeUtils import get_exchange, get_auto_backtest_pairs
 
 BACKTEST_STATE_FILE = os.path.join(os.path.dirname(__file__), '..', 'last_backtest.json')
-BACKTEST_VERBOSE = os.getenv("BACKTEST_VERBOSE", "false").strip().lower() in ("1", "true", "yes", "y", "on")
 # Per-pair win-rate screening: false = trend + range trades only (legacy; higher pass rate).
-# true = include limit-idea proximity signals (matches live bot + portfolio backtest).
-_BACKTEST_PER_PAIR_LIMIT_FALLBACK = os.getenv(
-    "BACKTEST_PER_PAIR_LIMIT_FALLBACK", "false"
-).strip().lower() in ("1", "true", "yes", "y", "on")
+_BACKTEST_PER_PAIR_LIMIT_FALLBACK = BACKTEST_PER_PAIR_LIMIT_FALLBACK
 # Fallback universes when CRYPTO_PAIRS / BACKTEST_PAIRS / auto-discovery are unset.
 DEFAULT_BACKTEST_PAIRS_PHEMEX = [
     'BTC/USDT:USDT', 'ETH/USDT:USDT', 'XRP/USDT:USDT', 'SOL/USDT:USDT',
@@ -53,7 +52,7 @@ DEFAULT_BACKTEST_PAIRS_BINANCE = [
 
 
 def _default_backtest_pair_symbols():
-    if os.getenv("EXCHANGE", "phemex").strip().lower() == "binance_margin":
+    if EXCHANGE.strip().lower() == "binance_margin":
         return DEFAULT_BACKTEST_PAIRS_BINANCE
     return DEFAULT_BACKTEST_PAIRS_PHEMEX
 
@@ -168,29 +167,26 @@ def _compute_risk_metrics(pnl_list):
 def _get_backtest_pairs(pairs_override=None):
     """
     Resolve pair list:
-    override → BACKTEST_PAIRS → BACKTEST_AUTO_TOP_PAIRS (exchange + optional CoinGecko) →
-    CRYPTO_PAIRS → defaults (symbol shape matches EXCHANGE: phemex vs binance_margin).
+    override → BACKTEST_PAIRS → BACKTEST_AUTO_TOP_PAIRS → CRYPTO_PAIRS → defaults.
     """
     if pairs_override:
         return [(s, None, None) if isinstance(s, str) else s for s in pairs_override]
-    env_pairs = os.getenv("BACKTEST_PAIRS", "").strip().split(",")
-    env_pairs = [p.strip() for p in env_pairs if p.strip()]
-    if env_pairs:
-        return [(s, None, None) for s in env_pairs]
-    if os.getenv("BACKTEST_AUTO_TOP_PAIRS", "false").strip().lower() in ("1", "true", "yes", "y", "on"):
+    configured_bt = [p.strip() for p in (BACKTEST_PAIRS or []) if isinstance(p, str) and p.strip()]
+    if configured_bt:
+        return [(s, None, None) for s in configured_bt]
+    if BACKTEST_AUTO_TOP_PAIRS:
         try:
             auto = get_auto_backtest_pairs(_get_exchange())
             if auto:
                 return auto
             log_event(
                 "BACKTEST_AUTO_TOP_PAIRS=true but discovery returned 0 pairs — "
-                "check EXCHANGE (phemex / binance_margin / kucoin_futures), API keys if required, "
-                "or lower BACKTEST_MIN_QUOTE_VOLUME / set BACKTEST_COINGECKO_MIN_CAP=0. "
-                "Falling back to CRYPTO_PAIRS / defaults."
+                "check EXCHANGE in config.py, or lower BACKTEST_MIN_QUOTE_VOLUME / "
+                "set BACKTEST_COINGECKO_MIN_CAP=0. Falling back to CRYPTO_PAIRS / defaults."
             )
         except Exception as e:
             log_event(f"BACKTEST_AUTO_TOP_PAIRS failed: {e}")
-    configured = [p.strip() for p in (CRYPTO_PAIRS or []) if p.strip()]
+    configured = [p.strip() for p in (CRYPTO_PAIRS or []) if isinstance(p, str) and p.strip()]
     if configured:
         return [(s, None, None) for s in configured]
     return [(s, None, None) for s in _default_backtest_pair_symbols()]
@@ -228,17 +224,11 @@ def _approx_bars_per_calendar_day(timeframe: str) -> int:
 
 def _backtest_ohlcv_limit() -> int:
     """Larger pages = far fewer HTTP round-trips (Phemex/CCXT often allows up to 1000–2000)."""
-    try:
-        raw = int(os.getenv("BACKTEST_OHLCV_LIMIT", "1000"))
-    except ValueError:
-        raw = 1000
-    return max(200, min(raw, 2000))
+    return max(200, min(int(BACKTEST_OHLCV_LIMIT), 2000))
 
 
 def _backtest_fetch_sleep_sec() -> float:
-    if os.getenv("BACKTESTING", "").strip().lower() in ("1", "true", "yes", "y", "on"):
-        return float(os.getenv("BACKTEST_FETCH_SLEEP_SEC", "0.05"))
-    return 0.3
+    return float(BACKTEST_FETCH_SLEEP_SEC) if config.IS_BACKTESTING else 0.3
 
 
 def fetch_data(pair, timeframe='5m', days=BACKTEST_DAYS):
@@ -289,8 +279,8 @@ def fetch_data(pair, timeframe='5m', days=BACKTEST_DAYS):
     df = calculate_mas(df)
     df['rsi'] = df.ta.rsi(length=14)
     df['adx'] = df.ta.adx(length=14)['ADX_14']
-    df['support'] = df['low'].rolling(window=50).min()
-    df['resistance'] = df['high'].rolling(window=50).max()
+    df['support'] = df['low'].rolling(window=SR_LOOKBACK_BARS).min()
+    df['resistance'] = df['high'].rolling(window=SR_LOOKBACK_BARS).max()
 
     return df
 
@@ -346,7 +336,7 @@ def check_trade_outcome(df, start_idx, direction, entry_price,
     if 'ATR' not in df.columns:
         df = add_atr_column(df, period=7)
 
-    apply_fees = os.getenv("BACKTEST_APPLY_FEES", "true").strip().lower() in ("1", "true", "yes", "y", "on")
+    apply_fees = BACKTEST_APPLY_FEES
     if apply_fees:
         entry_price = _apply_slippage(entry_price, direction)
         commission = _commission_cost(entry_price) * 2
@@ -384,8 +374,20 @@ def check_trade_outcome(df, start_idx, direction, entry_price,
     else:
         pnl_pct = (entry_price - final_close - commission) / entry_price
 
-    result = 'win' if pnl_pct > 0 else 'loss'
-    return {'result': result, 'pnl_pct': pnl_pct}
+    # Unresolved at lookahead — do not coin-flip into win/loss (dilutes true edge).
+    return {'result': 'none', 'pnl_pct': pnl_pct}
+
+
+def _setup_rr_ok(slice_df, entry_price, side, strategy_type) -> bool:
+    """Reject setups whose indicative TP/SL offer weak reward:risk."""
+    try:
+        df = slice_df
+        if 'ATR' not in df.columns:
+            df = add_atr_column(df, period=7)
+        levels = calculate_trade_levels(entry_price, side, df, len(df) - 1, strategy_type)
+        return float(levels.get('rr_ratio') or 0) >= float(MIN_SETUP_RR)
+    except Exception:
+        return False
 
 
 def _get_signal_at_bar(
@@ -413,14 +415,16 @@ def _get_signal_at_bar(
     )
     adx_ok = (MIN_ADX_TREND <= 0 or ('adx' in slice_df.columns and pd.notna(slice_df['adx'].iloc[-1]) and slice_df['adx'].iloc[-1] >= MIN_ADX_TREND))
     if adx_ok and check_long_signal(slice_df) and trend_up:
-        return ('buy', 'trend')
+        if _setup_rr_ok(slice_df, entry_price, 'buy', 'trend'):
+            return ('buy', 'trend')
     if adx_ok and check_short_signal(slice_df) and trend_down:
-        return ('sell', 'trend')
+        if _setup_rr_ok(slice_df, entry_price, 'sell', 'trend'):
+            return ('sell', 'trend')
     if is_ranging(slice_df) and not trend_up and not trend_down:
         buy_signal, sell_signal = check_range_trade(slice_df)
-        if buy_signal:
+        if buy_signal and _setup_rr_ok(slice_df, entry_price, 'buy', 'range'):
             return ('buy', 'range')
-        if sell_signal:
+        if sell_signal and _setup_rr_ok(slice_df, entry_price, 'sell', 'range'):
             return ('sell', 'range')
 
     if not include_limit_idea_fallback:
@@ -454,9 +458,9 @@ def simulate_combined_strategy(pair, df_5m, df_1h):
     htf_end_idx = df_1h['timestamp'].searchsorted(df_5m['timestamp'], side='right') - 1
 
     # Signal helpers only need recent rows + precomputed indicators on full df (fixed window).
-    _slice_lookback = 80
+    _slice_lookback = max(120, SR_LOOKBACK_BARS + 20)
 
-    for i in range(60, len(df_5m) - 10):
+    for i in range(max(60, SR_LOOKBACK_BARS), len(df_5m) - 10):
         if (i - last_trade_bar) < BACKTEST_COOLDOWN_BARS:
             continue
 
@@ -489,16 +493,17 @@ def simulate_combined_strategy(pair, df_5m, df_1h):
         last_trade_bar = i
         outcome = check_trade_outcome(df_5m, i, direction, entry_price, BACKTEST_LOOKAHEAD, strat)
         result = outcome['result']
-        pnl_list.append(outcome['pnl_pct'])
         strategy_used.append('ma' if strat == 'trend' else 'range')
 
         is_long = direction == 'buy'
         if result == 'win':
+            pnl_list.append(outcome['pnl_pct'])
             if is_long:
                 long_wins += 1
             else:
                 short_wins += 1
         elif result == 'loss':
+            pnl_list.append(outcome['pnl_pct'])
             if is_long:
                 long_losses += 1
             else:
@@ -517,15 +522,16 @@ def simulate_combined_strategy(pair, df_5m, df_1h):
                     df_5m, fill_idx, direction, filled_entry_price, BACKTEST_LOOKAHEAD, strat
                 )
                 limit_result = limit_outcome['result']
-                pnl_list.append(limit_outcome['pnl_pct'])
                 strategy_used.append('ma' if strat == 'trend' else 'range')
 
                 if limit_result == 'win':
+                    pnl_list.append(limit_outcome['pnl_pct'])
                     if is_long:
                         long_wins += 1
                     else:
                         short_wins += 1
                 elif limit_result == 'loss':
+                    pnl_list.append(limit_outcome['pnl_pct'])
                     if is_long:
                         long_losses += 1
                     else:
@@ -536,7 +542,8 @@ def simulate_combined_strategy(pair, df_5m, df_1h):
                     else:
                         short_none += 1
 
-    total_trades = long_wins + long_losses + long_none + short_wins + short_losses + short_none
+    resolved = long_wins + long_losses + short_wins + short_losses
+    total_trades = resolved
     total_wins = long_wins + short_wins
     win_rate = round(total_wins / total_trades * 100, 2) if total_trades > 0 else 0
     range_used = strategy_used.count('range')
@@ -545,7 +552,7 @@ def simulate_combined_strategy(pair, df_5m, df_1h):
     risk_metrics = _compute_risk_metrics(pnl_list)
 
     _bt_log(f"\n--- Results for {pair} ---", verbose=True)
-    _bt_log(f"Total Trades: {total_trades}", verbose=True)
+    _bt_log(f"Resolved trades: {total_trades} (unresolved timeouts: {long_none + short_none})", verbose=True)
     _bt_log(f"Wins: {total_wins} (Long: {long_wins}, Short: {short_wins})", verbose=True)
     _bt_log(f"Losses: {long_losses + short_losses} (Long: {long_losses}, Short: {short_losses})", verbose=True)
     _bt_log(f"Win Rate: {win_rate}%", verbose=True)
@@ -556,6 +563,7 @@ def simulate_combined_strategy(pair, df_5m, df_1h):
     result = {
         'win_rate': win_rate,
         'total_trades': total_trades,
+        'unresolved': long_none + short_none,
         'ma_used': ma_used,
         'range_used': range_used,
     }
@@ -565,51 +573,56 @@ def simulate_combined_strategy(pair, df_5m, df_1h):
 
 def run_backtest(pairs_override=None):
     """Run backtest on pairs. Only pairs with win_rate >= threshold (default 50%) are kept. No fallback."""
-    pairs = _get_backtest_pairs(pairs_override)
-    win_rate_threshold = float(os.getenv("BACKTEST_WIN_RATE_THRESHOLD", "50"))
-    enforce_rr = os.getenv("BACKTEST_ENFORCE_RR", "false").strip().lower() in ("1", "true", "yes", "y", "on")
-    min_rr_ratio = float(BACKTEST_MIN_RR_RATIO) if enforce_rr else 0.0
-    min_trades = 3  # require at least 3 trades so 1-trade flukes don't qualify
-
-    good_pairs = []
-    results_by_symbol = {}
-
-    _bt_log(f"Backtesting {len(pairs)} pairs...", verbose=False)
-    for idx, pair in enumerate(pairs):
-        symbol = pair[0] if isinstance(pair, (list, tuple)) else pair
-        _bt_log(f"[{idx + 1}/{len(pairs)}] Backtesting {symbol}", verbose=False)
-        try:
-            df = fetch_data(symbol, '5m', days=BACKTEST_DAYS)
-            df_1h = fetch_higher_timeframe_data(symbol, '15m', days=BACKTEST_DAYS)
-            if len(df) > 300:
-                result = simulate_combined_strategy(pair, df, df_1h)
-                result_save = {k: v for k, v in result.items() if k != 'equity_curve'}
-                results_by_symbol[symbol] = result_save
-                _bt_log(f"Result: {result_save}", verbose=True)
-                total_trades = result.get('total_trades', 0)
-                rr_ratio = float(result.get('rr_ratio', 0.0))
-                if total_trades >= min_trades and result['win_rate'] >= win_rate_threshold and rr_ratio >= min_rr_ratio:
-                    good_pairs.append(symbol)
-        except Exception as e:
-            _bt_log(f"❌ Error backtesting {symbol}: {e}", verbose=False)
-
-    state = {
-        "pairs": good_pairs,
-        "run_at": datetime.now(timezone.utc).isoformat(),
-        "win_rate_threshold": win_rate_threshold,
-        "results": results_by_symbol,
-    }
+    prev_flag = config.IS_BACKTESTING
+    config.IS_BACKTESTING = True
     try:
-        path = os.path.abspath(BACKTEST_STATE_FILE)
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w") as f:
-            json.dump(state, f, indent=2)
-        _bt_log(f"Backtest complete: {len(good_pairs)} good pairs (threshold {win_rate_threshold}%, min trades {min_trades}, min RR {min_rr_ratio}).", verbose=False)
-        _bt_log(f"Wrote backtest state to {path}", verbose=False)
-    except Exception as e:
-        _bt_log(f"Failed to write last_backtest.json: {e}", verbose=False)
+        pairs = _get_backtest_pairs(pairs_override)
+        win_rate_threshold = float(BACKTEST_WIN_RATE_THRESHOLD)
+        enforce_rr = BACKTEST_ENFORCE_RR
+        min_rr_ratio = float(BACKTEST_MIN_RR_RATIO) if enforce_rr else 0.0
+        min_trades = max(2, int(BACKTEST_MIN_TRADES))  # require enough resolved trades so flukes don't qualify
 
-    return good_pairs
+        good_pairs = []
+        results_by_symbol = {}
+
+        _bt_log(f"Backtesting {len(pairs)} pairs...", verbose=False)
+        for idx, pair in enumerate(pairs):
+            symbol = pair[0] if isinstance(pair, (list, tuple)) else pair
+            _bt_log(f"[{idx + 1}/{len(pairs)}] Backtesting {symbol}", verbose=False)
+            try:
+                df = fetch_data(symbol, TIMEFRAME, days=BACKTEST_DAYS)
+                df_htf = fetch_higher_timeframe_data(symbol, HTF_TIMEFRAME, days=BACKTEST_DAYS)
+                if len(df) > 300:
+                    result = simulate_combined_strategy(pair, df, df_htf)
+                    result_save = {k: v for k, v in result.items() if k != 'equity_curve'}
+                    results_by_symbol[symbol] = result_save
+                    _bt_log(f"Result: {result_save}", verbose=True)
+                    total_trades = result.get('total_trades', 0)
+                    rr_ratio = float(result.get('rr_ratio', 0.0))
+                    if total_trades >= min_trades and result['win_rate'] >= win_rate_threshold and rr_ratio >= min_rr_ratio:
+                        good_pairs.append(symbol)
+            except Exception as e:
+                _bt_log(f"❌ Error backtesting {symbol}: {e}", verbose=False)
+
+        state = {
+            "pairs": good_pairs,
+            "run_at": datetime.now(timezone.utc).isoformat(),
+            "win_rate_threshold": win_rate_threshold,
+            "results": results_by_symbol,
+        }
+        try:
+            path = os.path.abspath(BACKTEST_STATE_FILE)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
+                json.dump(state, f, indent=2)
+            _bt_log(f"Backtest complete: {len(good_pairs)} good pairs (threshold {win_rate_threshold}%, min trades {min_trades}, min RR {min_rr_ratio}).", verbose=False)
+            _bt_log(f"Wrote backtest state to {path}", verbose=False)
+        except Exception as e:
+            _bt_log(f"Failed to write last_backtest.json: {e}", verbose=False)
+
+        return good_pairs
+    finally:
+        config.IS_BACKTESTING = prev_flag
 
 
 def run_portfolio_backtest(pairs_override=None, max_trades_per_bar=3):
@@ -633,11 +646,11 @@ def run_portfolio_backtest(pairs_override=None, max_trades_per_bar=3):
     data_by_symbol = {}
     for sym in symbols:
         try:
-            df_5m = fetch_data(sym, '5m', days=BACKTEST_DAYS)
-            df_15m = fetch_higher_timeframe_data(sym, '15m', days=BACKTEST_DAYS)
-            if len(df_5m) > 300 and len(df_15m) > 50:
-                df_5m = add_atr_column(df_5m, period=7)
-                data_by_symbol[sym] = (df_5m, df_15m)
+            df_ltf = fetch_data(sym, TIMEFRAME, days=BACKTEST_DAYS)
+            df_htf = fetch_higher_timeframe_data(sym, HTF_TIMEFRAME, days=BACKTEST_DAYS)
+            if len(df_ltf) > 300 and len(df_htf) > 50:
+                df_ltf = add_atr_column(df_ltf, period=7)
+                data_by_symbol[sym] = (df_ltf, df_htf)
         except Exception as e:
             log_event(f"Portfolio backtest: skip {sym}: {e}")
 
@@ -649,7 +662,7 @@ def run_portfolio_backtest(pairs_override=None, max_trades_per_bar=3):
         sym: df_15m['timestamp'].searchsorted(df_5m['timestamp'], side='right') - 1
         for sym, (df_5m, df_15m) in data_by_symbol.items()
     }
-    _slice_lookback = 80
+    _slice_lookback = max(120, SR_LOOKBACK_BARS + 20)
 
     min_len = min(len(data_by_symbol[s][0]) for s in data_by_symbol) - 10
     if min_len < 70:
@@ -676,7 +689,10 @@ def run_portfolio_backtest(pairs_override=None, max_trades_per_bar=3):
                 continue
             entry_price = float(df_5m['close'].iat[i])
             sig = _get_signal_at_bar(
-                slice_df, htf_slice, entry_price, include_limit_idea_fallback=True
+                slice_df,
+                htf_slice,
+                entry_price,
+                include_limit_idea_fallback=ENABLE_LIMIT_IDEA_FALLBACK,
             )
             if sig is not None:
                 direction, strategy_type = sig
@@ -693,6 +709,9 @@ def run_portfolio_backtest(pairs_override=None, max_trades_per_bar=3):
             outcome = check_trade_outcome(
                 df_5m, idx, direction, signal_entry_price, BACKTEST_LOOKAHEAD, strategy_type
             )
+            if outcome['result'] == 'none':
+                last_trade_bar_by_sym[symbol] = idx
+                continue
             pnl_list.append(outcome['pnl_pct'])
             last_trade_bar_by_sym[symbol] = idx
 
@@ -702,7 +721,8 @@ def run_portfolio_backtest(pairs_override=None, max_trades_per_bar=3):
                     limit_outcome = check_trade_outcome(
                         df_5m, fill_idx, direction, filled_entry_price, BACKTEST_LOOKAHEAD, strategy_type
                     )
-                    pnl_list.append(limit_outcome['pnl_pct'])
+                    if limit_outcome['result'] != 'none':
+                        pnl_list.append(limit_outcome['pnl_pct'])
 
     total_wins = sum(1 for p in pnl_list if p > 0)
     total_losses = sum(1 for p in pnl_list if p <= 0)
@@ -735,6 +755,7 @@ def run_portfolio_backtest(pairs_override=None, max_trades_per_bar=3):
 
 
 if __name__ == "__main__":
+    config.IS_BACKTESTING = True
     log_event(f"Backtest OHLCV depth: BACKTEST_DAYS={BACKTEST_DAYS} (from config / project .env)")
     results = run_backtest()
     print("Backtest completed, good pairs:", results)
