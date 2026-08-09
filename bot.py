@@ -154,21 +154,40 @@ def _schedule_auto_backtest_job():
     log_event(f"🗓️ Auto-backtest scheduled: every {day} at {at} {tz}")
 
 
-def _hours_back_for_timeframe(timeframe: str) -> int:
-    """Heuristic to bound historical fetch size per timeframe."""
+def _minutes_per_bar(timeframe: str) -> int:
     tf = (timeframe or "").strip().lower()
-    if tf in {"1m", "3m", "5m"}:
-        return 6
-    if tf in {"15m", "30m", "1h"}:
-        return 48
-    return 168
+    return {
+        "1m": 1,
+        "3m": 3,
+        "5m": 5,
+        "15m": 15,
+        "30m": 30,
+        "1h": 60,
+        "2h": 120,
+        "4h": 240,
+        "1d": 1440,
+    }.get(tf, 15)
+
+
+def _hours_back_for_timeframe(timeframe: str, min_bars: int = 90) -> int:
+    """
+    Bound OHLCV history so we always have enough bars for MA50 (+buffer).
+
+    Previously 1h used a flat 48h window (~48 candles), which failed the HTF
+    len>=51 gate and skipped every pair after HTF moved to 1h.
+    """
+    minutes = _minutes_per_bar(timeframe)
+    hours_needed = int((min_bars * minutes + 59) // 60)
+    return max(hours_needed, 6)
 
 
 def fetch_data(symbol, timeframe=None, limit=350):
     """Fetch OHLCV; limit size to avoid large allocations."""
     try:
         timeframe = timeframe or config.TIMEFRAME
-        hours_back = _hours_back_for_timeframe(timeframe)
+        # Signal TF needs SR lookback; HTF needs MA50 — size window from the stricter need.
+        min_bars = max(90, int(SR_LOOKBACK_BARS) + 20)
+        hours_back = _hours_back_for_timeframe(timeframe, min_bars=min_bars)
         since_dt = datetime.now(timezone.utc) - timedelta(hours=hours_back)
         since_ms = int(since_dt.timestamp() * 1000)
         ohlcv = exchange.fetch_ohlcv(symbol, timeframe=timeframe, since=since_ms, limit=min(limit, 500))
@@ -341,9 +360,14 @@ def process_pair(symbol):
 
     now = time.time()
     if symbol not in higher_timeframe_cache or now - higher_timeframe_cache[symbol]['timestamp'] > HTF_CACHE_TTL_SEC:
-        higher_df = fetch_data(symbol, config.HTF_TIMEFRAME, limit=100)
+        # Need >=51 1h bars for MA50; request a comfortable buffer.
+        higher_df = fetch_data(symbol, config.HTF_TIMEFRAME, limit=200)
         if higher_df is None or len(higher_df) < 51:
-            log_event(f"⚠️ Skipping {symbol} — insufficient higher timeframe data.")
+            got = 0 if higher_df is None else len(higher_df)
+            log_event(
+                f"⚠️ Skipping {symbol} — insufficient higher timeframe data "
+                f"({config.HTF_TIMEFRAME}: {got} bars, need ≥51)."
+            )
             return None
         higher_df = calculate_mas(higher_df)
         higher_df = higher_df.tail(HTF_CACHE_MAX_ROWS).copy()
@@ -353,6 +377,16 @@ def process_pair(symbol):
         higher_timeframe_cache[symbol] = {'timestamp': now, 'data': higher_df}
     else:
         higher_df = higher_timeframe_cache[symbol]['data']
+
+    # Guard against stale cache rows with NaN MAs (should be rare after the fetch fix).
+    if (
+        pd.isna(higher_df['ma20'].iloc[-1])
+        or pd.isna(higher_df['ma50'].iloc[-1])
+        or len(higher_df) < 5
+    ):
+        log_event(f"⚠️ Skipping {symbol} — HTF MAs not ready yet.")
+        higher_timeframe_cache.pop(symbol, None)
+        return None
 
     ma20_slope = higher_df['ma20'].iloc[-1] - higher_df['ma20'].iloc[-4]
     trend_up = (
