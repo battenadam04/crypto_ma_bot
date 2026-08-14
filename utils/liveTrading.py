@@ -270,8 +270,22 @@ def execute_trade(symbol, side, entry_price, tp_price, sl_price, strategy_type="
         # Record trade for daily tracking
         record_trade(symbol)
 
-        # Place TP/SL
-        _place_tp_sl_orders(exchange, symbol, side, contracts, tp_price, sl_price)
+        # Place TP/SL — SL is CRITICAL. If SL fails, emergency close.
+        sl_ok = _place_sl_with_retries(exchange, symbol, side, contracts, sl_price)
+        if not sl_ok:
+            log_event(f"🚨 CRITICAL: SL failed for {symbol} — emergency closing position")
+            _emergency_close(exchange, symbol, side, contracts)
+            from utils.telegramUtils import send_telegram
+            send_telegram(
+                f"🚨 EMERGENCY CLOSE: {symbol}\n"
+                f"Stop-loss order could not be placed after retries.\n"
+                f"Position was closed at market to prevent unprotected exposure.",
+                bypass_rate_limit=True,
+            )
+            return {'success': False, 'error': 'SL placement failed — position emergency closed'}
+
+        # TP is nice-to-have but not critical
+        _place_tp_order(exchange, symbol, side, contracts, tp_price)
 
         return {'success': True, 'order_id': order_id, 'contracts': contracts}
 
@@ -280,26 +294,19 @@ def execute_trade(symbol, side, entry_price, tp_price, sl_price, strategy_type="
         return {'success': False, 'error': str(e)}
 
 
-def _place_tp_sl_orders(exchange, symbol, side, contracts, tp_price, sl_price):
-    """Place take-profit and stop-loss orders after entry fill."""
+def _place_sl_with_retries(exchange, symbol, side, contracts, sl_price, max_retries=3):
+    """
+    Place stop-loss order with retries. Returns True if successful, False if all attempts fail.
+    SL is the critical safety net — this MUST succeed or the position gets closed.
+    """
+    if not sl_price:
+        log_event(f"🚨 No SL price provided for {symbol} — cannot protect position")
+        return False
+
     close_side = 'sell' if side == 'buy' else 'buy'
 
-    try:
-        if tp_price:
-            exchange.create_order(
-                symbol=symbol,
-                type='limit',
-                side=close_side,
-                amount=contracts,
-                price=tp_price,
-                params={'reduceOnly': True},
-            )
-            log_event(f"TP order placed for {symbol} @ {tp_price}")
-    except Exception as e:
-        log_event(f"Failed to place TP for {symbol}: {e}")
-
-    try:
-        if sl_price:
+    for attempt in range(1, max_retries + 1):
+        try:
             exchange.create_order(
                 symbol=symbol,
                 type='stop',
@@ -312,9 +319,139 @@ def _place_tp_sl_orders(exchange, symbol, side, contracts, tp_price, sl_price):
                     'triggerType': 'ByLastPrice',
                 },
             )
-            log_event(f"SL order placed for {symbol} @ {sl_price}")
+            log_event(f"SL order placed for {symbol} @ {sl_price} (attempt {attempt})")
+            return True
+        except Exception as e:
+            log_event(f"SL attempt {attempt}/{max_retries} failed for {symbol}: {e}")
+            if attempt < max_retries:
+                time.sleep(2 * attempt)
+
+    return False
+
+
+def _place_tp_order(exchange, symbol, side, contracts, tp_price):
+    """Place take-profit order. Non-critical — failure is logged but doesn't trigger emergency."""
+    if not tp_price:
+        return
+
+    close_side = 'sell' if side == 'buy' else 'buy'
+    try:
+        exchange.create_order(
+            symbol=symbol,
+            type='limit',
+            side=close_side,
+            amount=contracts,
+            price=tp_price,
+            params={'reduceOnly': True},
+        )
+        log_event(f"TP order placed for {symbol} @ {tp_price}")
     except Exception as e:
-        log_event(f"Failed to place SL for {symbol}: {e}")
+        log_event(f"⚠️ TP placement failed for {symbol} (non-critical): {e}")
+
+
+def _emergency_close(exchange, symbol, side, contracts):
+    """Immediately close a position at market when SL cannot be placed."""
+    close_side = 'sell' if side == 'buy' else 'buy'
+    try:
+        exchange.create_order(
+            symbol=symbol,
+            type='market',
+            side=close_side,
+            amount=contracts,
+            params={'reduceOnly': True},
+        )
+        log_event(f"🚨 Emergency close executed for {symbol}")
+    except Exception as e:
+        log_event(f"🚨🚨 CRITICAL: Emergency close ALSO failed for {symbol}: {e}")
+
+
+def verify_position_has_sl(exchange, symbol) -> bool:
+    """
+    Check if a position has an active stop-loss order on the exchange.
+    Returns True if protected, False if naked.
+    """
+    try:
+        open_orders = exchange.fetch_open_orders(symbol)
+        for order in open_orders:
+            order_type = (order.get('type') or '').lower()
+            is_reduce = order.get('reduceOnly', False) or order.get('info', {}).get('reduceOnly', False)
+            if order_type in ('stop', 'stop_market', 'stopmarket') and is_reduce:
+                return True
+        return False
+    except Exception as e:
+        log_event(f"Error checking SL orders for {symbol}: {e}")
+        return False
+
+
+def watchdog_check_positions():
+    """
+    Periodic safety check: verify all open positions have SL orders.
+    If any position is unprotected, attempt to place SL or emergency close.
+    Call this from the main loop every cycle.
+    """
+    if not config.LIVE_TRADING_ENABLED:
+        return
+
+    try:
+        exchange = get_authenticated_exchange()
+        positions = get_open_positions(exchange)
+
+        for pos in positions:
+            symbol = pos.get('symbol')
+            if not symbol:
+                continue
+
+            has_sl = verify_position_has_sl(exchange, symbol)
+            if has_sl:
+                continue
+
+            # Position has no SL — this is dangerous
+            contracts = float(pos.get('contracts', 0))
+            pos_side = pos.get('side', 'long')
+            entry_price = float(pos.get('entryPrice', 0) or pos.get('markPrice', 0) or 0)
+
+            if contracts <= 0 or entry_price <= 0:
+                continue
+
+            log_event(f"🚨 WATCHDOG: {symbol} has no SL order — attempting to place emergency SL")
+
+            # Calculate emergency SL at 2% from entry (wider than normal to avoid immediate trigger)
+            if pos_side == 'long':
+                emergency_sl = entry_price * 0.98
+                side = 'buy'
+            else:
+                emergency_sl = entry_price * 1.02
+                side = 'sell'
+
+            sl_ok = _place_sl_with_retries(exchange, symbol, side, contracts, emergency_sl, max_retries=2)
+            if not sl_ok:
+                log_event(f"🚨 WATCHDOG: Cannot place SL for {symbol} — emergency closing")
+                close_side = 'sell' if pos_side == 'long' else 'buy'
+                _emergency_close(exchange, symbol, close_side, contracts)
+
+                try:
+                    from utils.telegramUtils import send_telegram
+                    send_telegram(
+                        f"🚨 WATCHDOG EMERGENCY CLOSE: {symbol}\n"
+                        f"Position had no stop-loss and SL placement failed.\n"
+                        f"Emergency closed at market to prevent liquidation.",
+                        bypass_rate_limit=True,
+                    )
+                except Exception:
+                    pass
+            else:
+                try:
+                    from utils.telegramUtils import send_telegram
+                    send_telegram(
+                        f"⚠️ WATCHDOG: Placed emergency SL for {symbol} @ {emergency_sl:.6f}\n"
+                        f"Position was found without stop-loss protection.",
+                        bypass_rate_limit=True,
+                    )
+                except Exception:
+                    pass
+
+    except Exception as e:
+        log_event(f"Watchdog check error: {e}")
 
 
 def close_position(symbol, reason="manual"):

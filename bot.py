@@ -631,6 +631,15 @@ if __name__ == '__main__':
             continue
 
         main()
+
+        # Watchdog: verify all live positions have SL protection
+        if config.LIVE_TRADING_ENABLED:
+            try:
+                from utils.liveTrading import watchdog_check_positions
+                watchdog_check_positions()
+            except Exception as e:
+                log_event(f"Watchdog error: {e}")
+
         log_event(f"🕒 Waiting {MAIN_LOOP_INTERVAL_SEC}s until next cycle...\n")
         for _ in range(MAIN_LOOP_INTERVAL_SEC // 10):
             try:
