@@ -24,6 +24,7 @@ from utils.telegramUtils import poll_telegram, send_telegram
 from utils.utils import (
     add_atr_column, calculate_mas, check_long_signal, check_short_signal,
     is_ranging, check_range_trade, log_event, calculate_trade_levels,
+    check_breakout_signal,
 )
 from utils.exchangeUtils import get_exchange, build_indicative_levels
 from utils.signalTracker import record_signal, send_eod_report
@@ -214,12 +215,14 @@ def _mark_signal_sent(symbol, direction) -> None:
         del _recent_signals[oldest_key]
 
 
-def handle_signal(symbol, direction, df, strategy_type="trend", signal_source="SIG"):
-    """Compose and send a signals-only Telegram alert with indicative TP/SL."""
+def handle_signal(symbol, direction, df, strategy_type="trend", signal_source="SIG", timeframe=None):
+    """Compose and send a signals-only Telegram alert with indicative TP/SL.
+    If live trading is enabled, also execute the trade on Phemex."""
     try:
+        timeframe = timeframe or config.TIMEFRAME
         df = add_atr_column(df)
         side = 'buy' if direction == 'long' else 'sell'
-        log_event(f"📣 Signal: {strategy_type} {direction} for {symbol} (src={signal_source})")
+        log_event(f"📣 Signal: {strategy_type} {direction} for {symbol} (src={signal_source}, tf={timeframe})")
 
         levels = build_indicative_levels(
             exchange=exchange,
@@ -241,11 +244,24 @@ def handle_signal(symbol, direction, df, strategy_type="trend", signal_source="S
         sl = levels.get('sl_order') if sl_price is None else sl_price
 
         limit_hint = build_limit_order_hint(df, direction, strategy_type)
+
+        live_status = ""
+        if config.LIVE_TRADING_ENABLED and status == 'success':
+            try:
+                from utils.liveTrading import execute_trade
+                result = execute_trade(symbol, side, filled_entry, tp_price, sl_price, strategy_type)
+                if result and result.get('success'):
+                    live_status = f"\n🟢 LIVE ORDER PLACED: {result.get('order_id', 'ok')}"
+                else:
+                    live_status = f"\n🔴 Live order failed: {result.get('error', 'unknown')}"
+            except Exception as e:
+                live_status = f"\n🔴 Live execution error: {e}"
+
         message = (
-            f"{'📈 LONG' if direction == 'long' else '📉 SHORT'} SIGNAL for {symbol} ({config.TIMEFRAME})\n"
+            f"{'📈 LONG' if direction == 'long' else '📉 SHORT'} SIGNAL for {symbol} ({timeframe})\n"
             f"Confirmed by {config.HTF_TIMEFRAME} {'up' if direction == 'long' else 'down'} {strategy_type}\n\n"
             f"🧭 Src: {signal_source}\n"
-            f"ℹ️ Signals only — no orders are placed.\n"
+            f"{'ℹ️ Signals only — no orders are placed.' if not config.LIVE_TRADING_ENABLED else '⚡ LIVE TRADING ACTIVE'}\n"
             f"💲 Reference price: {filled_entry}\n"
             f"🎯 TP (indicative): {tp}\n"
             f"🛑 SL (indicative): {sl}\n"
@@ -253,6 +269,7 @@ def handle_signal(symbol, direction, df, strategy_type="trend", signal_source="S
         if status != "success":
             message += f"⚙️ Status: {status}\n⚙️ Detail: {error}\n"
         message += limit_hint
+        message += live_status
 
         send_telegram(message)
         log_event(f"Signal: {message}")
@@ -422,6 +439,12 @@ def process_pair(symbol):
         return {'symbol': symbol, 'direction': 'long', 'strategy_type': 'trend', 'signal_source': 'SIG', 'df': lower_df}
     if adx_ok and check_short_signal(lower_df) and trend_down and _rr_ok('short', 'trend'):
         return {'symbol': symbol, 'direction': 'short', 'strategy_type': 'trend', 'signal_source': 'SIG', 'df': lower_df}
+
+    if check_breakout_signal(lower_df, "long") and trend_up and _rr_ok('long', 'trend'):
+        return {'symbol': symbol, 'direction': 'long', 'strategy_type': 'breakout', 'signal_source': 'SIG', 'df': lower_df}
+    if check_breakout_signal(lower_df, "short") and trend_down and _rr_ok('short', 'trend'):
+        return {'symbol': symbol, 'direction': 'short', 'strategy_type': 'breakout', 'signal_source': 'SIG', 'df': lower_df}
+
     if is_ranging(lower_df) and not trend_up and not trend_down:
         buy_signal, sell_signal = check_range_trade(lower_df)
         if buy_signal and _rr_ok('long', 'range'):
@@ -478,9 +501,10 @@ def get_trading_pairs():
 
 
 def _rank_key(sig, win_rates):
-    """Prefer confirmed SIG over LIM, trend over range, then backtest win rate."""
+    """Prefer confirmed SIG over LIM, trend/breakout over range, then backtest win rate."""
     source_rank = 1 if sig.get('signal_source') == 'SIG' else 0
-    strategy_rank = 1 if sig.get('strategy_type') == 'trend' else 0
+    st = sig.get('strategy_type', '')
+    strategy_rank = 2 if st == 'trend' else (1 if st == 'breakout' else 0)
     wr = win_rates.get(sig['symbol'], 0.0)
     return (source_rank, strategy_rank, wr)
 
@@ -500,10 +524,31 @@ def main():
     )
 
     signals = []
+
+    # Primary timeframe scan
     for pair in generated_pairs:
         sig = process_pair(pair)
         if sig is not None:
             signals.append(sig)
+
+    # Multi-timeframe scan: check additional timeframes for more entry opportunities
+    if config.MULTI_TF_ENABLED and config.MULTI_TF_EXTRA:
+        primary_tf = config.TIMEFRAME
+        for extra_tf in config.MULTI_TF_EXTRA:
+            if extra_tf == primary_tf:
+                continue
+            log_event(f"🔄 Multi-TF scan: checking {extra_tf} timeframe...")
+            old_tf = config.TIMEFRAME
+            config.TIMEFRAME = extra_tf
+            for pair in generated_pairs:
+                already_signalled = any(s['symbol'] == pair for s in signals)
+                if already_signalled:
+                    continue
+                sig = process_pair(pair)
+                if sig is not None:
+                    sig['timeframe'] = extra_tf
+                    signals.append(sig)
+            config.TIMEFRAME = old_tf
 
     win_rates = get_backtest_win_rates()
 
@@ -537,6 +582,7 @@ def main():
             sig['df'],
             strategy_type=sig['strategy_type'],
             signal_source=sig.get('signal_source', 'SIG'),
+            timeframe=sig.get('timeframe', config.TIMEFRAME),
         )
 
     if len(higher_timeframe_cache) > len(generated_pairs) + 5:

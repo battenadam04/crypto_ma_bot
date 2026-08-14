@@ -53,6 +53,7 @@ class TestStrategySettings:
         from utils.configUtils import strategy_settings
         assert 'trend' in strategy_settings
         assert 'range' in strategy_settings
+        assert 'breakout' in strategy_settings
         assert 'scalp' in strategy_settings
 
     def test_strategy_keys(self):

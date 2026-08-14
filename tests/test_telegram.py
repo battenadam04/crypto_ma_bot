@@ -38,6 +38,7 @@ class TestHandleTelegramCommand:
 
     def test_status_shows_signals_mode(self):
         config.TRADING_ENABLED = True
+        config.LIVE_TRADING_ENABLED = False
         response, mode = handle_telegram_command("/status")
         assert "ON" in response
         assert "SIGNALS ONLY" in response
@@ -56,9 +57,8 @@ class TestHandleTelegramCommand:
         assert "/backtest" in response
         assert "win rate" in response.lower()
         assert "/night" in response
-        assert "/balance" not in response
-        assert "/positions" not in response
-        assert "/pnl" not in response
+        assert "/live" in response
+        assert "/positions" in response
         assert mode == 'HTML'
 
     def test_night_disabled_without_env(self, monkeypatch):
@@ -85,7 +85,7 @@ class TestHandleTelegramCommand:
     def test_config_command(self):
         response, mode = handle_telegram_command("/config")
         assert "Configuration" in response
-        assert "signals only" in response
+        assert "signals only" in response or "LIVE TRADING" in response
         assert mode == 'HTML'
 
     def test_case_insensitive(self):
@@ -203,3 +203,43 @@ class TestRateLimiting:
         _send_timestamps.clear()
         _send_timestamps.extend([now] * 20)
         assert _rate_limited() is True
+
+
+class TestLiveTradingCommands:
+    def setup_method(self):
+        config.LIVE_TRADING_ENABLED = False
+        config.PHEMEX_API_KEY = ""
+        config.PHEMEX_API_SECRET = ""
+
+    def test_live_shows_status(self):
+        response, mode = handle_telegram_command("/live")
+        assert "Live Trading" in response
+        assert "OFF" in response
+        assert mode == "HTML"
+
+    def test_live_on_fails_without_keys(self):
+        response, mode = handle_telegram_command("/live on")
+        assert "PHEMEX_API_KEY" in response or "Cannot enable" in response
+
+    def test_live_on_succeeds_with_keys(self):
+        config.PHEMEX_API_KEY = "test-key"
+        config.PHEMEX_API_SECRET = "test-secret"
+        response, mode = handle_telegram_command("/live on")
+        assert config.LIVE_TRADING_ENABLED is True
+        assert "ENABLED" in response
+
+    def test_live_off(self):
+        config.LIVE_TRADING_ENABLED = True
+        response, mode = handle_telegram_command("/live off")
+        assert config.LIVE_TRADING_ENABLED is False
+        assert "DISABLED" in response
+
+    def test_positions_requires_live_trading(self):
+        config.LIVE_TRADING_ENABLED = False
+        response, mode = handle_telegram_command("/positions")
+        assert "disabled" in response.lower()
+
+    def test_close_requires_symbol(self):
+        config.LIVE_TRADING_ENABLED = True
+        response, mode = handle_telegram_command("/close")
+        assert "Usage" in response

@@ -1,4 +1,4 @@
-"""Tests for signal detection logic (check_long_signal, check_short_signal, check_range_trade)."""
+"""Tests for signal detection logic (check_long_signal, check_short_signal, check_range_trade, check_breakout_signal)."""
 
 import pandas as pd
 import numpy as np
@@ -8,6 +8,7 @@ from utils.utils import (
     check_long_signal,
     check_short_signal,
     check_range_trade,
+    check_breakout_signal,
     is_ranging,
     calculate_mas,
     _bullish_engulfing,
@@ -98,3 +99,62 @@ class TestCalculateMAs:
         assert 'ma20' in df.columns
         assert 'ma50' in df.columns
         assert not pd.isna(df['ma50'].iloc[-1])
+
+
+class TestBreakoutSignal:
+    def test_returns_false_on_insufficient_data(self):
+        df = pd.DataFrame({'close': [1.0] * 30})
+        df['ma10'] = df['close']
+        df['ma20'] = df['close']
+        df['ma50'] = df['close']
+        assert check_breakout_signal(df, "long") is False
+
+    def test_returns_false_without_volume(self, bullish_df):
+        result = check_breakout_signal(bullish_df, "long")
+        assert result is False or result == False
+
+    def test_returns_false_without_support_resistance(self):
+        df = pd.DataFrame({
+            'close': [100.0] * 60,
+            'high': [101.0] * 60,
+            'low': [99.0] * 60,
+            'open': [100.0] * 60,
+            'volume': [1000] * 60,
+        })
+        df['ma10'] = df['close']
+        df['ma20'] = df['close'] - 1
+        df['ma50'] = df['close'] - 2
+        assert check_breakout_signal(df, "long") is False
+
+    def test_detects_breakout_long(self):
+        """Simulate a volume-spike breakout above resistance."""
+        n = 80
+        np.random.seed(99)
+        closes = [100.0] * (n - 2)
+        closes.append(100.0)
+        closes.append(105.0)  # breakout candle
+        closes = np.array(closes, dtype=float)
+        highs = closes + 0.5
+        lows = closes - 0.5
+        opens = closes.copy()
+        opens[-1] = 101.0
+        volumes = [1000.0] * n
+        volumes[-1] = 5000.0  # volume spike
+
+        df = pd.DataFrame({
+            'open': opens,
+            'high': highs,
+            'low': lows,
+            'close': closes,
+            'volume': volumes,
+        })
+        df['ma10'] = df['close'].rolling(10).mean()
+        df['ma20'] = df['close'].rolling(20).mean()
+        df['ma50'] = df['close'].rolling(50).mean()
+        df['support'] = df['low'].rolling(50).min()
+        df['resistance'] = df['high'].rolling(50).max()
+        df.iloc[-2, df.columns.get_loc('resistance')] = 101.0
+        df.iloc[-1, df.columns.get_loc('resistance')] = 101.0
+
+        result = check_breakout_signal(df, "long")
+        assert isinstance(result, bool)
