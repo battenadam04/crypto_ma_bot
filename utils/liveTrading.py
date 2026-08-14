@@ -2,18 +2,33 @@
 
 Handles authenticated order placement, position sizing, and TP/SL management.
 Only active when LIVE_TRADING_ENABLED is True and API keys are configured.
+
+Capital protection:
+- Daily trade count limit
+- Daily loss auto-disable
+- Minimum balance floor
+- Maximum capital deployed cap
+- Cooldown after losses
+- Exchange consistency validation (signals must come from same exchange as execution)
 """
 
-import ccxt
+import time
 import config
 from utils.utils import log_event
 
 
 _authenticated_exchange = None
 
+# Rolling trade log: list of {'timestamp': float, 'symbol': str, 'pnl': float|None}
+_daily_trades: list[dict] = []
+_daily_start_balance: float | None = None
+_last_loss_timestamp: float = 0.0
+
 
 def get_authenticated_exchange():
     """Return a Phemex exchange instance with trading credentials."""
+    import ccxt
+
     global _authenticated_exchange
     if _authenticated_exchange is not None:
         return _authenticated_exchange
@@ -38,6 +53,118 @@ def reset_authenticated_exchange():
     _authenticated_exchange = None
 
 
+def validate_exchange_consistency():
+    """Ensure signal source and execution venue are the same exchange (Phemex)."""
+    if config.EXCHANGE.strip().lower() != config.LIVE_TRADING_PLATFORM.strip().lower():
+        return False, (
+            f"Exchange mismatch: signals from '{config.EXCHANGE}' but "
+            f"live trading on '{config.LIVE_TRADING_PLATFORM}'. "
+            f"Prices may differ — refusing to trade."
+        )
+    return True, None
+
+
+def _prune_daily_trades():
+    """Remove trades older than 24h from the rolling window."""
+    cutoff = time.time() - 86400
+    _daily_trades[:] = [t for t in _daily_trades if t['timestamp'] > cutoff]
+
+
+def _daily_trade_count() -> int:
+    """Number of trades placed in the last 24 hours."""
+    _prune_daily_trades()
+    return len(_daily_trades)
+
+
+def _daily_realised_pnl() -> float:
+    """Sum of realised PnL (USDT) in the last 24h from recorded trades."""
+    _prune_daily_trades()
+    return sum(t.get('pnl', 0) or 0 for t in _daily_trades)
+
+
+def record_trade(symbol: str, pnl: float | None = None):
+    """Record a trade for daily tracking."""
+    _daily_trades.append({
+        'timestamp': time.time(),
+        'symbol': symbol,
+        'pnl': pnl,
+    })
+
+
+def record_loss():
+    """Mark a loss event to trigger cooldown."""
+    global _last_loss_timestamp
+    _last_loss_timestamp = time.time()
+
+
+def check_capital_guards(exchange) -> tuple[bool, str | None]:
+    """
+    Run all capital protection checks before allowing a new trade.
+    Returns (allowed, rejection_reason).
+    """
+    global _daily_start_balance
+
+    # 1. Exchange consistency
+    ok, err = validate_exchange_consistency()
+    if not ok:
+        return False, err
+
+    # 2. Daily trade count limit
+    if _daily_trade_count() >= config.LIVE_TRADING_DAILY_MAX_TRADES:
+        return False, f"Daily trade limit reached ({config.LIVE_TRADING_DAILY_MAX_TRADES} trades in 24h)"
+
+    # 3. Post-loss cooldown
+    since_loss = time.time() - _last_loss_timestamp
+    if _last_loss_timestamp > 0 and since_loss < config.LIVE_TRADING_COOLDOWN_AFTER_LOSS_SEC:
+        remaining = int(config.LIVE_TRADING_COOLDOWN_AFTER_LOSS_SEC - since_loss)
+        return False, f"Cooling off after loss ({remaining}s remaining)"
+
+    # 4. Balance checks
+    try:
+        balance = exchange.fetch_balance()
+        usdt_total = float(balance.get('USDT', {}).get('total', 0) or 0)
+        usdt_free = float(balance.get('USDT', {}).get('free', 0) or 0)
+        usdt_used = float(balance.get('USDT', {}).get('used', 0) or 0)
+    except Exception as e:
+        return False, f"Cannot fetch balance: {e}"
+
+    # Record starting balance on first check of the day
+    if _daily_start_balance is None:
+        _daily_start_balance = usdt_total
+        log_event(f"Daily starting balance recorded: {usdt_total:.2f} USDT")
+
+    # 5. Minimum balance floor
+    if usdt_free < config.LIVE_TRADING_MIN_BALANCE_USDT:
+        return False, (
+            f"Balance too low: {usdt_free:.2f} USDT free "
+            f"(minimum: {config.LIVE_TRADING_MIN_BALANCE_USDT} USDT)"
+        )
+
+    # 6. Daily loss limit
+    if _daily_start_balance > 0:
+        loss_pct = (((_daily_start_balance - usdt_total) / _daily_start_balance) * 100)
+        if loss_pct >= config.LIVE_TRADING_DAILY_LOSS_LIMIT_PCT:
+            config.LIVE_TRADING_ENABLED = False
+            msg = (
+                f"DAILY LOSS LIMIT HIT: {loss_pct:.1f}% drawdown "
+                f"(limit: {config.LIVE_TRADING_DAILY_LOSS_LIMIT_PCT}%). "
+                f"Live trading auto-disabled. Use /live on to re-enable."
+            )
+            log_event(f"🚨 {msg}")
+            return False, msg
+
+    # 7. Maximum capital deployed
+    if usdt_total > 0:
+        deployed_pct = (usdt_used / usdt_total) * 100
+        if deployed_pct >= config.LIVE_TRADING_MAX_CAPITAL_DEPLOYED_PCT:
+            return False, (
+                f"Max capital deployed: {deployed_pct:.1f}% in use "
+                f"(limit: {config.LIVE_TRADING_MAX_CAPITAL_DEPLOYED_PCT}%)"
+            )
+
+    return True, None
+
+
 def get_position_size(exchange, symbol, entry_price, sl_price):
     """Calculate position size based on risk percentage of available balance."""
     try:
@@ -47,14 +174,19 @@ def get_position_size(exchange, symbol, entry_price, sl_price):
         if usdt_free <= 0:
             return None, "No available USDT balance"
 
+        # Never risk more than the configured % of free balance
         risk_amount = usdt_free * (config.LIVE_TRADING_RISK_PCT / 100.0)
         sl_distance = abs(entry_price - sl_price)
 
         if sl_distance <= 0:
             return None, "Invalid SL distance"
 
+        # Position size = risk / (SL distance as fraction of entry)
         position_size_usd = risk_amount / (sl_distance / entry_price)
-        position_size_usd = min(position_size_usd, usdt_free * 0.9)
+
+        # Hard cap: never use more than 30% of free balance for one trade's margin
+        max_single_trade = usdt_free * 0.30
+        position_size_usd = min(position_size_usd, max_single_trade)
 
         market = exchange.market(symbol)
         min_amount = market.get('limits', {}).get('amount', {}).get('min', 0)
@@ -62,7 +194,7 @@ def get_position_size(exchange, symbol, entry_price, sl_price):
 
         contracts = position_size_usd / (entry_price * contract_size)
 
-        if contracts < min_amount:
+        if contracts < (min_amount or 0):
             return None, f"Position too small ({contracts:.4f} < min {min_amount})"
 
         return contracts, None
@@ -84,6 +216,7 @@ def execute_trade(symbol, side, entry_price, tp_price, sl_price, strategy_type="
     """
     Execute a live trade on Phemex with TP/SL.
 
+    Runs all capital protection checks before placing any order.
     Returns dict with 'success', 'order_id', 'error' keys.
     """
     if not config.LIVE_TRADING_ENABLED:
@@ -92,6 +225,13 @@ def execute_trade(symbol, side, entry_price, tp_price, sl_price, strategy_type="
     try:
         exchange = get_authenticated_exchange()
 
+        # Run all capital guards
+        allowed, reason = check_capital_guards(exchange)
+        if not allowed:
+            log_event(f"Trade blocked for {symbol}: {reason}")
+            return {'success': False, 'error': reason}
+
+        # Position limits
         open_positions = get_open_positions(exchange)
         if len(open_positions) >= config.LIVE_TRADING_MAX_POSITIONS:
             return {'success': False, 'error': f'Max positions reached ({config.LIVE_TRADING_MAX_POSITIONS})'}
@@ -100,11 +240,13 @@ def execute_trade(symbol, side, entry_price, tp_price, sl_price, strategy_type="
         if symbol_positions:
             return {'success': False, 'error': f'Already in position for {symbol}'}
 
+        # Set leverage
         try:
             exchange.set_leverage(config.LIVE_TRADING_LEVERAGE, symbol)
         except Exception as e:
             log_event(f"Leverage set warning for {symbol}: {e}")
 
+        # Size the position
         contracts, err = get_position_size(exchange, symbol, entry_price, sl_price)
         if err:
             return {'success': False, 'error': err}
@@ -113,7 +255,7 @@ def execute_trade(symbol, side, entry_price, tp_price, sl_price, strategy_type="
         amount_precision = market.get('precision', {}).get('amount', 8)
         contracts = round(contracts, amount_precision)
 
-        log_event(f"Placing {side} order: {symbol} x{contracts} @ market")
+        log_event(f"Placing {side} order: {symbol} x{contracts} @ market (leverage: {config.LIVE_TRADING_LEVERAGE}x)")
 
         order = exchange.create_order(
             symbol=symbol,
@@ -125,6 +267,10 @@ def execute_trade(symbol, side, entry_price, tp_price, sl_price, strategy_type="
         order_id = order.get('id', 'unknown')
         log_event(f"Order placed: {order_id} for {symbol}")
 
+        # Record trade for daily tracking
+        record_trade(symbol)
+
+        # Place TP/SL
         _place_tp_sl_orders(exchange, symbol, side, contracts, tp_price, sl_price)
 
         return {'success': True, 'order_id': order_id, 'contracts': contracts}
@@ -185,7 +331,11 @@ def close_position(symbol, reason="manual"):
             return {'success': False, 'error': f'No open position for {symbol}'}
 
         contracts = float(pos.get('contracts', 0))
-        side = 'sell' if pos.get('side') == 'long' else 'buy'
+        pos_side = pos.get('side', 'long')
+        side = 'sell' if pos_side == 'long' else 'buy'
+
+        # Record PnL for daily tracking
+        pnl = float(pos.get('unrealizedPnl', 0) or 0)
 
         order = exchange.create_order(
             symbol=symbol,
@@ -195,8 +345,14 @@ def close_position(symbol, reason="manual"):
             params={'reduceOnly': True},
         )
 
-        log_event(f"Position closed for {symbol} (reason: {reason}): {order.get('id')}")
-        return {'success': True, 'order_id': order.get('id')}
+        # Track the result
+        record_trade(symbol, pnl=pnl)
+        if pnl < 0:
+            record_loss()
+            log_event(f"Loss recorded for {symbol}: {pnl:.2f} USDT — cooldown active")
+
+        log_event(f"Position closed for {symbol} (reason: {reason}): {order.get('id')} PnL: {pnl:+.2f}")
+        return {'success': True, 'order_id': order.get('id'), 'pnl': pnl}
 
     except Exception as e:
         log_event(f"Failed to close position for {symbol}: {e}")
@@ -219,15 +375,41 @@ def get_account_summary():
             'balance_free': usdt_free,
             'balance_used': usdt_used,
             'open_positions': len(positions),
+            'daily_trades': _daily_trade_count(),
+            'daily_trade_limit': config.LIVE_TRADING_DAILY_MAX_TRADES,
+            'daily_pnl': _daily_realised_pnl(),
             'positions': [
                 {
                     'symbol': p.get('symbol'),
                     'side': p.get('side'),
                     'contracts': p.get('contracts'),
                     'pnl': p.get('unrealizedPnl'),
+                    'leverage': p.get('leverage'),
                 }
                 for p in positions
             ],
         }
     except Exception as e:
         return {'error': str(e)}
+
+
+def get_protection_status():
+    """Return current state of all capital protection mechanisms."""
+    _prune_daily_trades()
+    since_loss = time.time() - _last_loss_timestamp if _last_loss_timestamp > 0 else None
+    cooldown_active = (
+        since_loss is not None and since_loss < config.LIVE_TRADING_COOLDOWN_AFTER_LOSS_SEC
+    )
+
+    return {
+        'exchange_match': config.EXCHANGE.strip().lower() == config.LIVE_TRADING_PLATFORM.strip().lower(),
+        'daily_trades': _daily_trade_count(),
+        'daily_limit': config.LIVE_TRADING_DAILY_MAX_TRADES,
+        'daily_pnl': _daily_realised_pnl(),
+        'daily_loss_limit_pct': config.LIVE_TRADING_DAILY_LOSS_LIMIT_PCT,
+        'min_balance_usdt': config.LIVE_TRADING_MIN_BALANCE_USDT,
+        'max_capital_deployed_pct': config.LIVE_TRADING_MAX_CAPITAL_DEPLOYED_PCT,
+        'cooldown_active': cooldown_active,
+        'cooldown_remaining_sec': max(0, int(config.LIVE_TRADING_COOLDOWN_AFTER_LOSS_SEC - since_loss)) if cooldown_active else 0,
+        'starting_balance': _daily_start_balance,
+    }

@@ -59,6 +59,7 @@ class TestHandleTelegramCommand:
         assert "/night" in response
         assert "/live" in response
         assert "/positions" in response
+        assert "/guards" in response
         assert mode == 'HTML'
 
     def test_night_disabled_without_env(self, monkeypatch):
@@ -243,3 +244,9 @@ class TestLiveTradingCommands:
         config.LIVE_TRADING_ENABLED = True
         response, mode = handle_telegram_command("/close")
         assert "Usage" in response
+
+    def test_guards_shows_protection_status(self):
+        config.PHEMEX_API_KEY = "test-key"
+        response, mode = handle_telegram_command("/guards")
+        assert "Capital Protection" in response
+        assert mode == "HTML"

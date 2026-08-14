@@ -161,15 +161,23 @@ def _cmd_live(args=None):
             f"Risk/trade: {config.LIVE_TRADING_RISK_PCT}%",
             f"Max positions: {config.LIVE_TRADING_MAX_POSITIONS}",
             f"API key: {'configured' if config.PHEMEX_API_KEY else '<b>NOT SET</b>'}",
+            "",
+            "<b>🛡️ Protection</b>",
+            f"Max trades/day: {config.LIVE_TRADING_DAILY_MAX_TRADES}",
+            f"Daily loss limit: {config.LIVE_TRADING_DAILY_LOSS_LIMIT_PCT}%",
+            f"Min balance floor: {config.LIVE_TRADING_MIN_BALANCE_USDT} USDT",
+            f"Max capital deployed: {config.LIVE_TRADING_MAX_CAPITAL_DEPLOYED_PCT}%",
+            f"Post-loss cooldown: {config.LIVE_TRADING_COOLDOWN_AFTER_LOSS_SEC}s",
         ]
         if config.LIVE_TRADING_LAST_SET_AT_UTC:
             lines.append(
-                f"Last toggle: <code>{config.LIVE_TRADING_LAST_SET_AT_UTC}</code> "
+                f"\nLast toggle: <code>{config.LIVE_TRADING_LAST_SET_AT_UTC}</code> "
                 f"by <code>{config.LIVE_TRADING_LAST_SET_BY or 'unknown'}</code>"
             )
         lines.append("")
         lines.append("<code>/live on</code> — enable live order execution")
         lines.append("<code>/live off</code> — disable live orders (signals only)")
+        lines.append("<code>/guards</code> — real-time protection status")
         return "\n".join(lines)
 
     sub = (args[0] or "").strip().lower()
@@ -207,13 +215,49 @@ def _cmd_positions():
             f"Available: {summary['balance_free']:.2f} USDT",
             f"In use: {summary['balance_used']:.2f} USDT",
             f"Open positions: <b>{summary['open_positions']}</b>/{config.LIVE_TRADING_MAX_POSITIONS}",
+            f"Trades today: {summary.get('daily_trades', 0)}/{summary.get('daily_trade_limit', '?')}",
+            f"Daily PnL: {summary.get('daily_pnl', 0):+.2f} USDT",
         ]
         for p in summary.get('positions', []):
             pnl = p.get('pnl') or 0
             icon = "🟢" if float(pnl) >= 0 else "🔴"
+            lev = p.get('leverage') or '?'
             lines.append(
-                f"  {icon} {p['symbol']} {p['side']} x{p['contracts']} (PnL: {float(pnl):+.2f})"
+                f"  {icon} {p['symbol']} {p['side']} x{p['contracts']} ({lev}x) PnL: {float(pnl):+.2f}"
             )
+        return "\n".join(lines)
+    except Exception as e:
+        return f"❌ Error: {e}"
+
+
+def _cmd_guards():
+    """Show capital protection status."""
+    try:
+        from utils.liveTrading import get_protection_status
+        status = get_protection_status()
+        exchange_ok = "✅" if status['exchange_match'] else "❌ MISMATCH"
+        cooldown_str = (
+            f"🔴 Active ({status['cooldown_remaining_sec']}s left)"
+            if status['cooldown_active'] else "✅ Clear"
+        )
+        lines = [
+            "<b>🛡️ Capital Protection Status</b>",
+            "",
+            f"Exchange match: {exchange_ok} (signals: {config.EXCHANGE}, execution: {config.LIVE_TRADING_PLATFORM})",
+            f"Daily trades: <b>{status['daily_trades']}</b>/{status['daily_limit']}",
+            f"Daily PnL: {status['daily_pnl']:+.2f} USDT",
+            f"Daily loss limit: {status['daily_loss_limit_pct']}% of starting balance",
+            f"Starting balance: {status['starting_balance']:.2f}" if status['starting_balance'] else "Starting balance: <i>not yet recorded</i>",
+            f"Min balance floor: {status['min_balance_usdt']} USDT",
+            f"Max capital deployed: {status['max_capital_deployed_pct']}%",
+            f"Post-loss cooldown: {cooldown_str}",
+            "",
+            "<b>Settings</b>",
+            f"Risk/trade: {config.LIVE_TRADING_RISK_PCT}% of free balance",
+            f"Leverage: {config.LIVE_TRADING_LEVERAGE}x",
+            f"Max positions: {config.LIVE_TRADING_MAX_POSITIONS}",
+            f"Max trades/day: {config.LIVE_TRADING_DAILY_MAX_TRADES}",
+        ]
         return "\n".join(lines)
     except Exception as e:
         return f"❌ Error: {e}"
@@ -501,6 +545,7 @@ HELP_TEXT = (
     "<b>Live Trading (Admin)</b>\n"
     "/live — View/toggle live trading on Phemex\n"
     "/positions — Open positions & account balance\n"
+    "/guards — Capital protection status & limits\n"
     "/close — Close a position (ex: /close ADA)\n\n"
     "/help — This message\n\n"
     f"{LEGAL_DISCLAIMER}"
@@ -523,6 +568,8 @@ COMMAND_MAP = {
     "config": _cmd_config,
     "/positions": _cmd_positions,
     "positions": _cmd_positions,
+    "/guards": _cmd_guards,
+    "guards": _cmd_guards,
     "/help": lambda: HELP_TEXT,
     "help": lambda: HELP_TEXT,
 }
@@ -535,6 +582,7 @@ HTML_COMMANDS = {
     "/config", "config", "/help", "help",
     "/night", "night",
     "/live", "live", "/positions", "positions", "/close", "close",
+    "/guards", "guards",
 }
 
 
