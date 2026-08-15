@@ -600,7 +600,10 @@ def monitor_trade_outcomes():
 
     for symbol in closed_symbols:
         pos_info = _tracked_positions.pop(symbol)
-        _send_outcome_alert(exchange, symbol, pos_info)
+        if config.TRADE_OUTCOME_ALERTS_ENABLED:
+            _send_outcome_alert(exchange, symbol, pos_info)
+        else:
+            log_event(f"Trade closed for {symbol} (outcome alerts disabled)")
 
 
 def _send_outcome_alert(exchange, symbol: str, pos_info: dict):

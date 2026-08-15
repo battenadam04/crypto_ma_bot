@@ -198,6 +198,30 @@ def _cmd_live(args=None):
     return "Use <code>/live</code>, <code>/live on</code>, or <code>/live off</code>"
 
 
+def _cmd_alerts(args=None):
+    """Toggle trade outcome alerts (Telegram notifications when TP/SL hit)."""
+    args = args or []
+    if not args:
+        state = "ON ✅" if config.TRADE_OUTCOME_ALERTS_ENABLED else "OFF ❌"
+        return (
+            f"<b>🔔 Trade Outcome Alerts</b>\n"
+            f"Status: <b>{state}</b>\n\n"
+            f"When enabled, you'll receive a Telegram message\n"
+            f"every time a trade hits its TP or SL.\n\n"
+            f"<code>/alerts on</code> — enable notifications\n"
+            f"<code>/alerts off</code> — disable notifications"
+        )
+
+    sub = (args[0] or "").strip().lower()
+    if sub in ("on", "enable", "true", "1", "yes"):
+        config.TRADE_OUTCOME_ALERTS_ENABLED = True
+        return "🔔 Trade outcome alerts <b>ENABLED</b>. You'll be notified when trades hit TP or SL."
+    if sub in ("off", "disable", "false", "0", "no"):
+        config.TRADE_OUTCOME_ALERTS_ENABLED = False
+        return "🔕 Trade outcome alerts <b>DISABLED</b>. Trades will close silently."
+    return "Use <code>/alerts</code>, <code>/alerts on</code>, or <code>/alerts off</code>"
+
+
 def _cmd_positions():
     """Show open Phemex positions."""
     if not config.LIVE_TRADING_ENABLED:
@@ -546,7 +570,8 @@ HELP_TEXT = (
     "/live — View/toggle live trading on Phemex\n"
     "/positions — Open positions & account balance\n"
     "/guards — Capital protection status & limits\n"
-    "/close — Close a position (ex: /close ADA)\n\n"
+    "/close — Close a position (ex: /close ADA)\n"
+    "/alerts — Toggle trade outcome notifications (TP/SL hit)\n\n"
     "/help — This message\n\n"
     f"{LEGAL_DISCLAIMER}"
 )
@@ -605,6 +630,9 @@ def handle_telegram_command(text):
 
     if cmd in {"/close", "close"}:
         return _cmd_close(args), "HTML"
+
+    if cmd in {"/alerts", "alerts"}:
+        return _cmd_alerts(args), "HTML"
 
     handler = COMMAND_MAP.get(cmd)
     if handler:

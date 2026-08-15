@@ -139,3 +139,47 @@ class TestMonitorTradeOutcomes:
         msg = mock_tg.call_args[0][0]
         assert "TP HIT" in msg
         assert "sell" in msg.lower() or "SELL" in msg
+
+    @patch('utils.liveTrading.get_authenticated_exchange')
+    @patch('utils.liveTrading.get_open_positions')
+    @patch('utils.telegramUtils.send_telegram')
+    def test_alerts_disabled_skips_telegram(self, mock_tg, mock_positions, mock_exchange):
+        exchange_mock = MagicMock()
+        mock_exchange.return_value = exchange_mock
+        mock_positions.return_value = []
+
+        config.TRADE_OUTCOME_ALERTS_ENABLED = False
+        track_position("SUI/USDT:USDT", "buy", 1.50, 1.60, 1.45, "trend", "15m")
+
+        monitor_trade_outcomes()
+
+        mock_tg.assert_not_called()
+        assert "SUI/USDT:USDT" not in _tracked_positions
+        config.TRADE_OUTCOME_ALERTS_ENABLED = True
+
+
+class TestAlertsCommand:
+    def setup_method(self):
+        config.TRADE_OUTCOME_ALERTS_ENABLED = True
+
+    def teardown_method(self):
+        config.TRADE_OUTCOME_ALERTS_ENABLED = True
+
+    def test_alerts_shows_status(self):
+        from utils.telegramUtils import handle_telegram_command
+        response, _ = handle_telegram_command("/alerts")
+        assert "Trade Outcome Alerts" in response
+        assert "ON" in response
+
+    def test_alerts_on(self):
+        from utils.telegramUtils import handle_telegram_command
+        config.TRADE_OUTCOME_ALERTS_ENABLED = False
+        response, _ = handle_telegram_command("/alerts on")
+        assert "ENABLED" in response
+        assert config.TRADE_OUTCOME_ALERTS_ENABLED is True
+
+    def test_alerts_off(self):
+        from utils.telegramUtils import handle_telegram_command
+        response, _ = handle_telegram_command("/alerts off")
+        assert "DISABLED" in response
+        assert config.TRADE_OUTCOME_ALERTS_ENABLED is False
