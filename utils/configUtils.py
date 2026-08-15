@@ -12,6 +12,12 @@ strategy_settings = {
         "min_tp_pct": 0.009,    # 0.9%
         "min_sl_pct": 0.0045,   # 0.45%
     },
+    "breakout": {
+        "atr_tp": 3.5,
+        "atr_sl": 1.3,
+        "min_tp_pct": 0.014,    # 1.4%
+        "min_sl_pct": 0.006,    # 0.6%
+    },
     "scalp": {
         "atr_tp": 2.0,
         "atr_sl": 1.0,

@@ -148,6 +148,141 @@ def _cmd_off():
     return f"⛔ Signal scanning OFF — no new alerts\nInstance: <code>{config.BOT_INSTANCE_ID}</code>"
 
 
+def _cmd_live(args=None):
+    """Admin command: toggle live trading on Phemex."""
+    args = args or []
+    if not args:
+        state = "ON" if config.LIVE_TRADING_ENABLED else "OFF"
+        lines = [
+            f"<b>⚡ Live Trading</b>",
+            f"Status: <b>{state}</b>",
+            f"Platform: {config.LIVE_TRADING_PLATFORM}",
+            f"Leverage: {config.LIVE_TRADING_LEVERAGE}x",
+            f"Risk/trade: {config.LIVE_TRADING_RISK_PCT}%",
+            f"Max positions: {config.LIVE_TRADING_MAX_POSITIONS}",
+            f"API key: {'configured' if config.PHEMEX_API_KEY else '<b>NOT SET</b>'}",
+            "",
+            "<b>🛡️ Protection</b>",
+            f"Max trades/day: {config.LIVE_TRADING_DAILY_MAX_TRADES}",
+            f"Daily loss limit: {config.LIVE_TRADING_DAILY_LOSS_LIMIT_PCT}%",
+            f"Min balance floor: {config.LIVE_TRADING_MIN_BALANCE_USDT} USDT",
+            f"Max capital deployed: {config.LIVE_TRADING_MAX_CAPITAL_DEPLOYED_PCT}%",
+            f"Post-loss cooldown: {config.LIVE_TRADING_COOLDOWN_AFTER_LOSS_SEC}s",
+        ]
+        if config.LIVE_TRADING_LAST_SET_AT_UTC:
+            lines.append(
+                f"\nLast toggle: <code>{config.LIVE_TRADING_LAST_SET_AT_UTC}</code> "
+                f"by <code>{config.LIVE_TRADING_LAST_SET_BY or 'unknown'}</code>"
+            )
+        lines.append("")
+        lines.append("<code>/live on</code> — enable live order execution")
+        lines.append("<code>/live off</code> — disable live orders (signals only)")
+        lines.append("<code>/guards</code> — real-time protection status")
+        return "\n".join(lines)
+
+    sub = (args[0] or "").strip().lower()
+    if sub in ("on", "enable", "true", "1", "yes"):
+        try:
+            config.set_live_trading_enabled(True, by="telegram:/live on")
+        except ValueError as e:
+            return f"❌ {e}"
+        return (
+            f"⚡ <b>Live trading ENABLED</b> on {config.LIVE_TRADING_PLATFORM}\n"
+            f"Leverage: {config.LIVE_TRADING_LEVERAGE}x | Risk: {config.LIVE_TRADING_RISK_PCT}%\n"
+            f"Max positions: {config.LIVE_TRADING_MAX_POSITIONS}\n\n"
+            f"⚠️ Real orders will be placed. Use /live off to disable."
+        )
+    if sub in ("off", "disable", "false", "0", "no"):
+        config.set_live_trading_enabled(False, by="telegram:/live off")
+        return "⛔ Live trading <b>DISABLED</b>. Signals-only mode."
+    return "Use <code>/live</code>, <code>/live on</code>, or <code>/live off</code>"
+
+
+def _cmd_positions():
+    """Show open Phemex positions."""
+    if not config.LIVE_TRADING_ENABLED:
+        return "ℹ️ Live trading is disabled. Use <code>/live on</code> first."
+    if not config.PHEMEX_API_KEY:
+        return "❌ Phemex API keys not configured."
+    try:
+        from utils.liveTrading import get_account_summary
+        summary = get_account_summary()
+        if 'error' in summary:
+            return f"❌ {summary['error']}"
+        lines = [
+            "<b>📊 Phemex Account</b>",
+            f"Balance: <b>{summary['balance_total']:.2f}</b> USDT",
+            f"Available: {summary['balance_free']:.2f} USDT",
+            f"In use: {summary['balance_used']:.2f} USDT",
+            f"Open positions: <b>{summary['open_positions']}</b>/{config.LIVE_TRADING_MAX_POSITIONS}",
+            f"Trades today: {summary.get('daily_trades', 0)}/{summary.get('daily_trade_limit', '?')}",
+            f"Daily PnL: {summary.get('daily_pnl', 0):+.2f} USDT",
+        ]
+        for p in summary.get('positions', []):
+            pnl = p.get('pnl') or 0
+            icon = "🟢" if float(pnl) >= 0 else "🔴"
+            lev = p.get('leverage') or '?'
+            lines.append(
+                f"  {icon} {p['symbol']} {p['side']} x{p['contracts']} ({lev}x) PnL: {float(pnl):+.2f}"
+            )
+        return "\n".join(lines)
+    except Exception as e:
+        return f"❌ Error: {e}"
+
+
+def _cmd_guards():
+    """Show capital protection status."""
+    try:
+        from utils.liveTrading import get_protection_status
+        status = get_protection_status()
+        exchange_ok = "✅" if status['exchange_match'] else "❌ MISMATCH"
+        cooldown_str = (
+            f"🔴 Active ({status['cooldown_remaining_sec']}s left)"
+            if status['cooldown_active'] else "✅ Clear"
+        )
+        lines = [
+            "<b>🛡️ Capital Protection Status</b>",
+            "",
+            f"Exchange match: {exchange_ok} (signals: {config.EXCHANGE}, execution: {config.LIVE_TRADING_PLATFORM})",
+            f"Daily trades: <b>{status['daily_trades']}</b>/{status['daily_limit']}",
+            f"Daily PnL: {status['daily_pnl']:+.2f} USDT",
+            f"Daily loss limit: {status['daily_loss_limit_pct']}% of starting balance",
+            f"Starting balance: {status['starting_balance']:.2f}" if status['starting_balance'] else "Starting balance: <i>not yet recorded</i>",
+            f"Min balance floor: {status['min_balance_usdt']} USDT",
+            f"Max capital deployed: {status['max_capital_deployed_pct']}%",
+            f"Post-loss cooldown: {cooldown_str}",
+            "",
+            "<b>Settings</b>",
+            f"Risk/trade: {config.LIVE_TRADING_RISK_PCT}% of free balance",
+            f"Leverage: {config.LIVE_TRADING_LEVERAGE}x",
+            f"Max positions: {config.LIVE_TRADING_MAX_POSITIONS}",
+            f"Max trades/day: {config.LIVE_TRADING_DAILY_MAX_TRADES}",
+        ]
+        return "\n".join(lines)
+    except Exception as e:
+        return f"❌ Error: {e}"
+
+
+def _cmd_close(args=None):
+    """Close a specific position or all positions."""
+    args = args or []
+    if not config.LIVE_TRADING_ENABLED:
+        return "ℹ️ Live trading is disabled."
+    if not args:
+        return "Usage: <code>/close SYMBOL</code> (e.g. /close ADA/USDT:USDT)"
+    symbol = args[0].strip().upper()
+    if '/' not in symbol:
+        symbol = f"{symbol}/USDT:USDT"
+    try:
+        from utils.liveTrading import close_position
+        result = close_position(symbol, reason="telegram:/close")
+        if result.get('success'):
+            return f"✅ Position closed: {symbol} (order: {result.get('order_id')})"
+        return f"❌ {result.get('error', 'Unknown error')}"
+    except Exception as e:
+        return f"❌ Error closing position: {e}"
+
+
 def _load_backtest_state():
     """Return last_backtest.json dict, or None if missing/unreadable."""
     if not os.path.isfile(BACKTEST_STATE_FILE):
@@ -196,14 +331,17 @@ def _backtest_confidence_lines(data) -> list:
 
 def _cmd_status():
     state = "ON" if config.TRADING_ENABLED else "OFF"
+    live_state = "ON" if config.LIVE_TRADING_ENABLED else "OFF"
     lines = [
         f"<b>Bot Status</b>",
         f"Instance: <code>{config.BOT_INSTANCE_ID}</code>",
         f"Started: <code>{config.BOT_STARTED_AT_UTC}</code>",
         f"Scanning: <b>{state}</b>",
-        f"Mode: SIGNALS ONLY (no live orders)",
+        f"Live trading: <b>{live_state}</b> ({config.LIVE_TRADING_PLATFORM})",
+        f"Mode: {'LIVE TRADING' if config.LIVE_TRADING_ENABLED else 'SIGNALS ONLY'}",
         f"Exchange (market data): {config.EXCHANGE}",
         f"Timeframe: <code>{config.TIMEFRAME}</code>",
+        f"Multi-TF: {'ON (' + ','.join(config.MULTI_TF_EXTRA) + ')' if config.MULTI_TF_ENABLED else 'OFF'}",
         f"Alerts/cycle: {config.MAX_SIGNALS_PER_CYCLE} | Cooldown: {config.SIGNAL_COOLDOWN_SEC}s",
         "",
         "<b>📊 Edge (last backtest)</b>",
@@ -221,7 +359,7 @@ def _cmd_status():
             f"Night pause: <b>{nq}</b> ({config.NIGHT_QUIET_START_HOUR}:00–{config.NIGHT_QUIET_END_HOUR}:00 "
             f"{config.NIGHT_QUIET_TZ}, in window now: {inside})"
         )
-    lines.append("\n<i>/backtest for full pair breakdown. Toggle: /on /off.</i>")
+    lines.append("\n<i>/backtest for full pair breakdown. Toggle: /on /off. Live: /live</i>")
     return "\n".join(lines)
 
 
@@ -302,12 +440,21 @@ def _cmd_config():
         f"<b>Configuration</b>",
         f"Exchange (market data): {config.EXCHANGE}",
         f"Timeframe: <code>{config.TIMEFRAME}</code>",
-        f"Mode: signals only",
+        f"Multi-TF: {'ON (' + ','.join(config.MULTI_TF_EXTRA) + ')' if config.MULTI_TF_ENABLED else 'OFF'}",
+        f"Mode: {'LIVE TRADING' if config.LIVE_TRADING_ENABLED else 'signals only'}",
         f"Max alerts/cycle: {config.MAX_SIGNALS_PER_CYCLE}",
         f"Signal cooldown: {config.SIGNAL_COOLDOWN_SEC}s",
         f"Limit-idea fallback: {config.ENABLE_LIMIT_IDEA_FALLBACK}",
         f"Min ADX: {config.MIN_ADX_TREND}",
         f"RSI bounds: {config.RSI_OVERSOLD}/{config.RSI_OVERBOUGHT}",
+        "",
+        f"<b>Live Trading</b>",
+        f"Platform: {config.LIVE_TRADING_PLATFORM}",
+        f"Enabled: {config.LIVE_TRADING_ENABLED}",
+        f"Leverage: {config.LIVE_TRADING_LEVERAGE}x",
+        f"Risk/trade: {config.LIVE_TRADING_RISK_PCT}%",
+        f"Max positions: {config.LIVE_TRADING_MAX_POSITIONS}",
+        f"API key: {'configured' if config.PHEMEX_API_KEY else 'NOT SET'}",
     ]
     if config.NIGHT_QUIET_ENABLED:
         lines.append(
@@ -385,6 +532,7 @@ def _cmd_night(args=None):
 
 HELP_TEXT = (
     "<b>📖 Available Commands</b>\n\n"
+    "<b>Signals</b>\n"
     "/on — Start signal scanning\n"
     "/off — Pause signal scanning\n"
     "/status — Bot state + portfolio win rate & last backtest time\n"
@@ -393,7 +541,12 @@ HELP_TEXT = (
     "/signals — Today's signals with outcomes\n"
     "/timeframe — Get/set timeframe (ex: /timeframe 15m)\n"
     "/night — Overnight scan pause\n"
-    "/config — Current configuration\n"
+    "/config — Current configuration\n\n"
+    "<b>Live Trading (Admin)</b>\n"
+    "/live — View/toggle live trading on Phemex\n"
+    "/positions — Open positions & account balance\n"
+    "/guards — Capital protection status & limits\n"
+    "/close — Close a position (ex: /close ADA)\n\n"
     "/help — This message\n\n"
     f"{LEGAL_DISCLAIMER}"
 )
@@ -413,6 +566,10 @@ COMMAND_MAP = {
     "backtest": _cmd_backtest,
     "/config": _cmd_config,
     "config": _cmd_config,
+    "/positions": _cmd_positions,
+    "positions": _cmd_positions,
+    "/guards": _cmd_guards,
+    "guards": _cmd_guards,
     "/help": lambda: HELP_TEXT,
     "help": lambda: HELP_TEXT,
 }
@@ -424,6 +581,8 @@ HTML_COMMANDS = {
     "/timeframe", "timeframe", "/tf", "tf",
     "/config", "config", "/help", "help",
     "/night", "night",
+    "/live", "live", "/positions", "positions", "/close", "close",
+    "/guards", "guards",
 }
 
 
@@ -440,6 +599,12 @@ def handle_telegram_command(text):
 
     if cmd in {"/night", "night"}:
         return _cmd_night(args), "HTML"
+
+    if cmd in {"/live", "live"}:
+        return _cmd_live(args), "HTML"
+
+    if cmd in {"/close", "close"}:
+        return _cmd_close(args), "HTML"
 
     handler = COMMAND_MAP.get(cmd)
     if handler:

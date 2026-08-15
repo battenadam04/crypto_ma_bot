@@ -14,6 +14,10 @@ load_dotenv(os.path.join(_PROJECT_ROOT, ".env"))
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
+# Phemex API credentials for live trading (optional; signals work without these).
+PHEMEX_API_KEY = os.getenv("PHEMEX_API_KEY", "")
+PHEMEX_API_SECRET = os.getenv("PHEMEX_API_SECRET", "")
+
 # ---------------------------------------------------------------------------
 # Production settings (edit here if you ever need to change behaviour)
 # ---------------------------------------------------------------------------
@@ -35,6 +39,24 @@ TRADING_SIGNALS_ONLY = True
 # Master scan/alert gate — toggled at runtime via Telegram /on /off (default OFF).
 TRADING_ENABLED = False
 
+# ---------------------------------------------------------------------------
+# Live trading via Phemex (admin-controlled, independent of signal scanning)
+# ---------------------------------------------------------------------------
+LIVE_TRADING_ENABLED = False
+LIVE_TRADING_PLATFORM = "phemex"
+LIVE_TRADING_LEVERAGE = 5
+LIVE_TRADING_RISK_PCT = 1.0  # % of balance to risk per trade
+LIVE_TRADING_MAX_POSITIONS = 3
+LIVE_TRADING_LAST_SET_AT_UTC = None
+LIVE_TRADING_LAST_SET_BY = None
+
+# Capital protection — hard limits to prevent blowing the account
+LIVE_TRADING_DAILY_MAX_TRADES = 5        # max new trades per 24h rolling window
+LIVE_TRADING_DAILY_LOSS_LIMIT_PCT = 10.0 # auto-disable if daily losses exceed this % of starting balance
+LIVE_TRADING_MIN_BALANCE_USDT = 20.0     # stop opening trades if free balance drops below this
+LIVE_TRADING_COOLDOWN_AFTER_LOSS_SEC = 1800  # 30min pause after a losing trade closes
+LIVE_TRADING_MAX_CAPITAL_DEPLOYED_PCT = 50.0  # never use more than 50% of total balance across all positions
+
 BOT_STARTED_AT_UTC = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
 BOT_HOSTNAME = socket.gethostname()
 BOT_PID = os.getpid()
@@ -50,6 +72,9 @@ _runtime_lock = threading.Lock()
 TIMEFRAME = "15m"
 # Higher-timeframe trend filter used by live + backtest.
 HTF_TIMEFRAME = "1h"
+# Multi-timeframe scanning: also check these timeframes each cycle for more entries.
+MULTI_TF_ENABLED = True
+MULTI_TF_EXTRA = ["5m"]
 
 # Overnight scan pause (Telegram /night on|off arms/disarms; state persists).
 NIGHT_QUIET_ENABLED = True
@@ -63,9 +88,9 @@ NIGHT_QUIET_ARMED = False
 MAIN_LOOP_INTERVAL_SEC = 300
 
 # Signal volume controls
-SIGNAL_COOLDOWN_SEC = 3600
-MAX_SIGNALS_PER_CYCLE = 3
-ENABLE_LIMIT_IDEA_FALLBACK = False
+SIGNAL_COOLDOWN_SEC = 1800
+MAX_SIGNALS_PER_CYCLE = 5
+ENABLE_LIMIT_IDEA_FALLBACK = True
 
 # Slightly wider RSI bands so range mean-reversion can fire in mid-alt chop.
 RSI_OVERSOLD = 36.0
@@ -105,7 +130,7 @@ BACKTEST_APPLY_FEES = True
 BACKTEST_MIN_TRADES = 3
 BACKTEST_AUTO_TOP_PAIRS = True
 # After excluding mega-caps, keep this many liquid mid-alts by volume.
-BACKTEST_TOP_N = 20
+BACKTEST_TOP_N = 30
 # Mega-caps chop too hard for this MA pullback edge — skip them in auto discovery.
 BACKTEST_EXCLUDE_BASES = ["BTC", "ETH", "BNB"]
 BACKTEST_MIN_QUOTE_VOLUME = 1_000_000.0
@@ -128,6 +153,19 @@ def set_trading_enabled(enabled: bool, by: str = "unknown") -> bool:
     TRADING_ENABLED_LAST_SET_AT_UTC = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
     TRADING_ENABLED_LAST_SET_BY = (by or "unknown").strip()[:120]
     return TRADING_ENABLED
+
+
+def set_live_trading_enabled(enabled: bool, by: str = "unknown") -> bool:
+    """Toggle live order execution on Phemex. Requires API keys to be configured."""
+    global LIVE_TRADING_ENABLED, LIVE_TRADING_LAST_SET_AT_UTC, LIVE_TRADING_LAST_SET_BY
+    if enabled and (not PHEMEX_API_KEY or not PHEMEX_API_SECRET):
+        raise ValueError(
+            "Cannot enable live trading: PHEMEX_API_KEY and PHEMEX_API_SECRET must be set in .env"
+        )
+    LIVE_TRADING_ENABLED = bool(enabled)
+    LIVE_TRADING_LAST_SET_AT_UTC = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    LIVE_TRADING_LAST_SET_BY = (by or "unknown").strip()[:120]
+    return LIVE_TRADING_ENABLED
 
 
 def _load_runtime_config():

@@ -96,7 +96,7 @@ def calculate_trade_levels(price, direction, df, start_idx, strategy_type="trend
         atr = price * 0.003  # fallback ATR (0.3% of price)
         print(f"⚠️ Using fallback ATR at index {start_idx}: {atr:.10f}")
 
-    config = strategy_settings.get(strategy_type, strategy_settings[strategy_type])
+    config = strategy_settings.get(strategy_type, strategy_settings["trend"])
 
     # Calculate distances
     sl_distance = max(atr * config["atr_sl"], price * config["min_sl_pct"])
@@ -327,6 +327,48 @@ def check_trend_continuation(df):
         last['ma20'] > last['ma50'] and
         last['close'] > last['ma10']
     )
+
+
+def check_breakout_signal(df, direction="long"):
+    """
+    Breakout/momentum strategy: detects volume-backed moves out of consolidation.
+    Does NOT relax the existing trend/range criteria — this is an additional signal type.
+
+    Long breakout: price closes above resistance with above-average volume + MA alignment.
+    Short breakout: price closes below support with above-average volume + MA alignment.
+    """
+    if len(df) < 51 or 'support' not in df.columns or 'resistance' not in df.columns:
+        return False
+
+    last = df.iloc[-1]
+    prev = df.iloc[-2]
+
+    vol_avg = df['volume'].rolling(20).mean().iloc[-1]
+    if pd.isna(vol_avg) or vol_avg <= 0:
+        return False
+
+    volume_spike = last['volume'] > vol_avg * 1.5
+
+    if not volume_spike:
+        return False
+
+    if direction == "long":
+        resistance = last['resistance']
+        if pd.isna(resistance):
+            return False
+        breakout = last['close'] > resistance and prev['close'] <= resistance
+        alignment = last['ma10'] > last['ma20']
+        strong_candle = _strong_bullish_close(last)
+        return breakout and alignment and strong_candle
+
+    else:
+        support = last['support']
+        if pd.isna(support):
+            return False
+        breakdown = last['close'] < support and prev['close'] >= support
+        alignment = last['ma10'] < last['ma20']
+        strong_candle = _strong_bearish_close(last)
+        return breakdown and alignment and strong_candle
 
 def check_long_signal(df, lookahead=10):
     if len(df) < 51:
