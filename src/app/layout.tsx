@@ -68,8 +68,16 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-[100] focus:rounded-xl focus:bg-brand-600 focus:px-6 focus:py-3 focus:text-white focus:shadow-lg focus:outline-none"
+        >
+          Skip to main content
+        </a>
         <Header />
-        <main className="min-h-screen">{children}</main>
+        <main id="main-content" className="min-h-screen" tabIndex={-1}>
+          {children}
+        </main>
         <Footer />
       </body>
     </html>

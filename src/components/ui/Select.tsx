@@ -1,6 +1,6 @@
 "use client";
 
-import { forwardRef, type SelectHTMLAttributes } from "react";
+import { forwardRef, useId, type SelectHTMLAttributes } from "react";
 
 interface SelectProps extends SelectHTMLAttributes<HTMLSelectElement> {
   label?: string;
@@ -10,7 +10,12 @@ interface SelectProps extends SelectHTMLAttributes<HTMLSelectElement> {
 }
 
 const Select = forwardRef<HTMLSelectElement, SelectProps>(
-  ({ label, error, options, placeholder, className = "", id, ...props }, ref) => {
+  ({ label, error, options, placeholder, className = "", id: externalId, required, ...props }, ref) => {
+    const generatedId = useId();
+    const id = externalId || generatedId;
+    const errorId = `${id}-error`;
+    const isRequired = required || label?.includes("*");
+
     return (
       <div className="w-full">
         {label && (
@@ -24,6 +29,9 @@ const Select = forwardRef<HTMLSelectElement, SelectProps>(
         <select
           ref={ref}
           id={id}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={error ? errorId : undefined}
+          aria-required={isRequired || undefined}
           className={`w-full rounded-xl border bg-surface-0 px-4 py-3 text-surface-900 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent appearance-none ${
             error
               ? "border-error-500 focus:ring-error-500"
@@ -43,7 +51,7 @@ const Select = forwardRef<HTMLSelectElement, SelectProps>(
           ))}
         </select>
         {error && (
-          <p className="mt-1 text-sm text-error-500" role="alert">
+          <p id={errorId} className="mt-1 text-sm text-error-500" role="alert">
             {error}
           </p>
         )}

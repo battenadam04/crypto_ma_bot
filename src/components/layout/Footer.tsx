@@ -3,12 +3,12 @@ import { NAV_LINKS, SOCIAL_LINKS } from "@/lib/constants";
 
 export default function Footer() {
   return (
-    <footer className="border-t border-surface-200 bg-surface-50">
+    <footer className="border-t border-surface-200 bg-surface-50" aria-label="Site footer">
       <div className="mx-auto max-w-7xl px-6 py-16">
         <div className="grid gap-12 md:grid-cols-4">
           <div className="md:col-span-2">
-            <Link href="/" className="flex items-center gap-2">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-brand-500 to-accent-500 text-white font-bold text-lg">
+            <Link href="/" className="flex items-center gap-2" aria-label="DevCraft Studio home">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-brand-500 to-accent-500 text-white font-bold text-lg" aria-hidden="true">
                 D
               </div>
               <span className="text-xl font-bold text-surface-900">

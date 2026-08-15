@@ -1,6 +1,6 @@
 "use client";
 
-import { forwardRef, type TextareaHTMLAttributes } from "react";
+import { forwardRef, useId, type TextareaHTMLAttributes } from "react";
 
 interface TextareaProps extends TextareaHTMLAttributes<HTMLTextAreaElement> {
   label?: string;
@@ -8,7 +8,12 @@ interface TextareaProps extends TextareaHTMLAttributes<HTMLTextAreaElement> {
 }
 
 const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
-  ({ label, error, className = "", id, ...props }, ref) => {
+  ({ label, error, className = "", id: externalId, required, ...props }, ref) => {
+    const generatedId = useId();
+    const id = externalId || generatedId;
+    const errorId = `${id}-error`;
+    const isRequired = required || label?.includes("*");
+
     return (
       <div className="w-full">
         {label && (
@@ -22,6 +27,9 @@ const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
         <textarea
           ref={ref}
           id={id}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={error ? errorId : undefined}
+          aria-required={isRequired || undefined}
           className={`w-full rounded-xl border bg-surface-0 px-4 py-3 text-surface-900 placeholder:text-surface-400 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent resize-y min-h-[120px] ${
             error
               ? "border-error-500 focus:ring-error-500"
@@ -30,7 +38,7 @@ const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
           {...props}
         />
         {error && (
-          <p className="mt-1 text-sm text-error-500" role="alert">
+          <p id={errorId} className="mt-1 text-sm text-error-500" role="alert">
             {error}
           </p>
         )}

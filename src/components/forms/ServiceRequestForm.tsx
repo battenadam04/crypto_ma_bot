@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { motion, AnimatePresence } from "framer-motion";
@@ -38,6 +38,7 @@ export default function ServiceRequestForm({
   const [selectedService, setSelectedService] = useState<ServiceOption | null>(
     null,
   );
+  const statusRef = useRef<HTMLDivElement>(null);
 
   const {
     register,
@@ -54,6 +55,7 @@ export default function ServiceRequestForm({
   });
 
   const watchedServiceId = watch("serviceId");
+  const errorCount = Object.keys(errors).length;
 
   useEffect(() => {
     if (preselectedServiceId) {
@@ -89,115 +91,147 @@ export default function ServiceRequestForm({
 
       setStatus("success");
       reset();
+      statusRef.current?.focus();
     } catch (err) {
       setStatus("error");
       setErrorMessage(
         err instanceof Error ? err.message : "Something went wrong",
       );
+      statusRef.current?.focus();
     }
   };
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-6" noValidate>
-      <div className="grid gap-6 sm:grid-cols-2">
-        <Input
-          id="request-name"
-          label="Full Name *"
-          placeholder="John Doe"
-          error={errors.name?.message}
-          {...register("name")}
-        />
-        <Input
-          id="request-email"
-          label="Email *"
-          type="email"
-          placeholder="john@example.com"
-          error={errors.email?.message}
-          {...register("email")}
-        />
-      </div>
+    <form
+      onSubmit={handleSubmit(onSubmit)}
+      className="space-y-6"
+      noValidate
+      aria-label="Service request form"
+    >
+      {errorCount > 0 && (
+        <div className="sr-only" role="alert">
+          {errorCount} {errorCount === 1 ? "error" : "errors"} in the form.
+          Please correct them before submitting.
+        </div>
+      )}
 
-      <div className="grid gap-6 sm:grid-cols-2">
-        <Input
-          id="request-company"
-          label="Company"
-          placeholder="Your company name"
-          {...register("company")}
-        />
-        <Input
-          id="request-phone"
-          label="Phone"
-          type="tel"
-          placeholder="+1 (555) 123-4567"
-          {...register("phone")}
-        />
-      </div>
+      <fieldset className="space-y-6">
+        <legend className="text-lg font-semibold text-surface-900 mb-2">
+          Your Details
+        </legend>
+        <div className="grid gap-6 sm:grid-cols-2">
+          <Input
+            id="request-name"
+            label="Full Name *"
+            placeholder="John Doe"
+            autoComplete="name"
+            error={errors.name?.message}
+            {...register("name")}
+          />
+          <Input
+            id="request-email"
+            label="Email *"
+            type="email"
+            placeholder="john@example.com"
+            autoComplete="email"
+            error={errors.email?.message}
+            {...register("email")}
+          />
+        </div>
 
-      <Select
-        id="request-service"
-        label="Service *"
-        placeholder="Select a service"
-        options={serviceOptions}
-        error={errors.serviceId?.message}
-        {...register("serviceId")}
-      />
+        <div className="grid gap-6 sm:grid-cols-2">
+          <Input
+            id="request-company"
+            label="Company"
+            placeholder="Your company name"
+            autoComplete="organization"
+            {...register("company")}
+          />
+          <Input
+            id="request-phone"
+            label="Phone"
+            type="tel"
+            placeholder="+1 (555) 123-4567"
+            autoComplete="tel"
+            {...register("phone")}
+          />
+        </div>
+      </fieldset>
 
-      <AnimatePresence>
-        {selectedService && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            className="rounded-xl bg-brand-50 p-4 border border-brand-100"
-          >
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-brand-700">
-                  Estimated Price Range
-                </p>
-                <p className="text-xl font-bold text-brand-600">
-                  ${selectedService.priceFrom.toLocaleString()} — $
-                  {selectedService.priceTo.toLocaleString()}
-                </p>
-              </div>
-              <div className="text-right">
-                <p className="text-sm font-medium text-brand-700">
-                  Estimated Delivery
-                </p>
-                <p className="text-xl font-bold text-brand-600">
-                  ~{selectedService.estimatedDays} days
-                </p>
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <fieldset className="space-y-6">
+        <legend className="text-lg font-semibold text-surface-900 mb-2">
+          Project Details
+        </legend>
 
-      <div className="grid gap-6 sm:grid-cols-2">
         <Select
-          id="request-budget"
-          label="Budget Range"
-          placeholder="Select budget range"
-          options={[...BUDGET_OPTIONS]}
-          {...register("budget")}
+          id="request-service"
+          label="Service *"
+          placeholder="Select a service"
+          options={serviceOptions}
+          error={errors.serviceId?.message}
+          {...register("serviceId")}
         />
-        <Select
-          id="request-timeline"
-          label="Preferred Timeline"
-          placeholder="Select timeline"
-          options={[...TIMELINE_OPTIONS]}
-          {...register("timeline")}
-        />
-      </div>
 
-      <Textarea
-        id="request-description"
-        label="Project Description *"
-        placeholder="Tell us about your project requirements, goals, and any specific features you need..."
-        rows={6}
-        error={errors.description?.message}
-        {...register("description")}
-      />
+        <AnimatePresence>
+          {selectedService && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+              className="rounded-xl bg-brand-50 p-4 border border-brand-100"
+              role="region"
+              aria-label="Pricing estimate for selected service"
+              aria-live="polite"
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-brand-700">
+                    Estimated Price Range
+                  </p>
+                  <p className="text-xl font-bold text-brand-600">
+                    ${selectedService.priceFrom.toLocaleString()} — $
+                    {selectedService.priceTo.toLocaleString()}
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className="text-sm font-medium text-brand-700">
+                    Estimated Delivery
+                  </p>
+                  <p className="text-xl font-bold text-brand-600">
+                    ~{selectedService.estimatedDays} days
+                  </p>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <div className="grid gap-6 sm:grid-cols-2">
+          <Select
+            id="request-budget"
+            label="Budget Range"
+            placeholder="Select budget range"
+            options={[...BUDGET_OPTIONS]}
+            {...register("budget")}
+          />
+          <Select
+            id="request-timeline"
+            label="Preferred Timeline"
+            placeholder="Select timeline"
+            options={[...TIMELINE_OPTIONS]}
+            {...register("timeline")}
+          />
+        </div>
+
+        <Textarea
+          id="request-description"
+          label="Project Description *"
+          placeholder="Tell us about your project requirements, goals, and any specific features you need..."
+          rows={6}
+          error={errors.description?.message}
+          {...register("description")}
+        />
+      </fieldset>
 
       <Button
         type="submit"
@@ -209,32 +243,40 @@ export default function ServiceRequestForm({
         Submit Request — Get Free Quote
       </Button>
 
-      <AnimatePresence>
-        {status === "success" && (
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            className="rounded-xl bg-success-50 p-4 text-success-600 text-sm font-medium"
-            role="status"
-          >
-            Your service request has been submitted! We&apos;ll review it and
-            get back to you with a detailed quote within 24 hours.
-          </motion.div>
-        )}
+      <div
+        ref={statusRef}
+        tabIndex={-1}
+        aria-live="polite"
+        aria-atomic="true"
+        className="outline-none"
+      >
+        <AnimatePresence>
+          {status === "success" && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              className="rounded-xl bg-success-50 p-4 text-success-600 text-sm font-medium"
+              role="status"
+            >
+              Your service request has been submitted! We&apos;ll review it and
+              get back to you with a detailed quote within 24 hours.
+            </motion.div>
+          )}
 
-        {status === "error" && (
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            className="rounded-xl bg-error-50 p-4 text-error-500 text-sm font-medium"
-            role="alert"
-          >
-            {errorMessage}
-          </motion.div>
-        )}
-      </AnimatePresence>
+          {status === "error" && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              className="rounded-xl bg-error-50 p-4 text-error-500 text-sm font-medium"
+              role="alert"
+            >
+              {errorMessage}
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
     </form>
   );
 }
