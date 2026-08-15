@@ -24,6 +24,10 @@ _daily_trades: list[dict] = []
 _daily_start_balance: float | None = None
 _last_loss_timestamp: float = 0.0
 
+# Active positions tracker for outcome monitoring
+# key=symbol, value={'side','entry','tp','sl','strategy','timeframe','opened_at'}
+_tracked_positions: dict[str, dict] = {}
+
 
 def get_authenticated_exchange():
     """Return a Phemex exchange instance with trading credentials."""
@@ -95,6 +99,26 @@ def record_loss():
     """Mark a loss event to trigger cooldown."""
     global _last_loss_timestamp
     _last_loss_timestamp = time.time()
+
+
+def track_position(symbol: str, side: str, entry: float, tp: float, sl: float,
+                   strategy: str = "trend", timeframe: str = "15m"):
+    """Register an opened position for outcome monitoring."""
+    _tracked_positions[symbol] = {
+        'side': side,
+        'entry': entry,
+        'tp': tp,
+        'sl': sl,
+        'strategy': strategy,
+        'timeframe': timeframe,
+        'opened_at': time.time(),
+    }
+    log_event(f"📌 Tracking position: {symbol} {side} entry={entry} TP={tp} SL={sl}")
+
+
+def untrack_position(symbol: str):
+    """Remove a position from outcome monitoring (manual close, emergency, etc.)."""
+    _tracked_positions.pop(symbol, None)
 
 
 def check_capital_guards(exchange) -> tuple[bool, str | None]:
@@ -286,6 +310,9 @@ def execute_trade(symbol, side, entry_price, tp_price, sl_price, strategy_type="
 
         # TP is nice-to-have but not critical
         _place_tp_order(exchange, symbol, side, contracts, tp_price)
+
+        # Track position for outcome monitoring
+        track_position(symbol, side, entry_price, tp_price, sl_price, strategy_type)
 
         return {'success': True, 'order_id': order_id, 'contracts': contracts}
 
@@ -488,6 +515,7 @@ def close_position(symbol, reason="manual"):
             record_loss()
             log_event(f"Loss recorded for {symbol}: {pnl:.2f} USDT — cooldown active")
 
+        untrack_position(symbol)
         log_event(f"Position closed for {symbol} (reason: {reason}): {order.get('id')} PnL: {pnl:+.2f}")
         return {'success': True, 'order_id': order.get('id'), 'pnl': pnl}
 
@@ -550,3 +578,105 @@ def get_protection_status():
         'cooldown_remaining_sec': max(0, int(config.LIVE_TRADING_COOLDOWN_AFTER_LOSS_SEC - since_loss)) if cooldown_active else 0,
         'starting_balance': _daily_start_balance,
     }
+
+
+def monitor_trade_outcomes():
+    """
+    Check tracked positions and send Telegram alerts when trades complete.
+    Called each cycle from the main loop. Detects TP hit, SL hit, or unknown close.
+    """
+    if not _tracked_positions:
+        return
+
+    try:
+        exchange = get_authenticated_exchange()
+        open_positions = get_open_positions(exchange)
+        open_symbols = {p.get('symbol') for p in open_positions}
+    except Exception as e:
+        log_event(f"Outcome monitor: cannot fetch positions: {e}")
+        return
+
+    closed_symbols = [sym for sym in list(_tracked_positions) if sym not in open_symbols]
+
+    for symbol in closed_symbols:
+        pos_info = _tracked_positions.pop(symbol)
+        if config.TRADE_OUTCOME_ALERTS_ENABLED:
+            _send_outcome_alert(exchange, symbol, pos_info)
+        else:
+            log_event(f"Trade closed for {symbol} (outcome alerts disabled)")
+
+
+def _send_outcome_alert(exchange, symbol: str, pos_info: dict):
+    """Determine trade outcome and send Telegram notification."""
+    from utils.telegramUtils import send_telegram
+
+    side = pos_info['side']
+    entry = pos_info['entry']
+    tp = pos_info['tp']
+    sl = pos_info['sl']
+    strategy = pos_info.get('strategy', 'unknown')
+    timeframe = pos_info.get('timeframe', '?')
+    opened_at = pos_info.get('opened_at', 0)
+
+    # Try to get the last price to determine outcome
+    outcome = "CLOSED"
+    pnl_estimate = None
+    try:
+        ticker = exchange.fetch_ticker(symbol)
+        last_price = float(ticker.get('last', 0) or 0)
+
+        if side == 'buy':
+            tp_distance = abs(last_price - tp) if tp else float('inf')
+            sl_distance = abs(last_price - sl) if sl else float('inf')
+            pnl_estimate = ((last_price - entry) / entry) * 100
+        else:
+            tp_distance = abs(last_price - tp) if tp else float('inf')
+            sl_distance = abs(last_price - sl) if sl else float('inf')
+            pnl_estimate = ((entry - last_price) / entry) * 100
+
+        if tp and sl:
+            if tp_distance < sl_distance:
+                outcome = "TP HIT ✅"
+            else:
+                outcome = "SL HIT ❌"
+        elif pnl_estimate is not None:
+            outcome = "TP HIT ✅" if pnl_estimate > 0 else "SL HIT ❌"
+    except Exception:
+        pass
+
+    # Calculate duration
+    duration_sec = int(time.time() - opened_at) if opened_at else 0
+    if duration_sec >= 3600:
+        duration_str = f"{duration_sec // 3600}h {(duration_sec % 3600) // 60}m"
+    elif duration_sec >= 60:
+        duration_str = f"{duration_sec // 60}m"
+    else:
+        duration_str = f"{duration_sec}s"
+
+    # Record PnL in daily tracking
+    if pnl_estimate is not None and pnl_estimate < 0:
+        record_loss()
+
+    emoji = "🎯" if "TP" in outcome else "🛑" if "SL" in outcome else "📊"
+
+    msg = (
+        f"{emoji} <b>Trade {outcome}</b>\n"
+        f"\n"
+        f"<b>Pair:</b> {symbol}\n"
+        f"<b>Side:</b> {side.upper()}\n"
+        f"<b>Strategy:</b> {strategy} ({timeframe})\n"
+        f"\n"
+        f"<b>Entry:</b> {entry}\n"
+        f"<b>TP:</b> {tp}\n"
+        f"<b>SL:</b> {sl}\n"
+    )
+
+    if pnl_estimate is not None:
+        msg += f"<b>Est. P&L:</b> {pnl_estimate:+.2f}%\n"
+
+    msg += f"<b>Duration:</b> {duration_str}\n"
+
+    try:
+        send_telegram(msg, parse_mode="HTML", bypass_rate_limit=True)
+    except Exception as e:
+        log_event(f"Failed to send outcome alert for {symbol}: {e}")

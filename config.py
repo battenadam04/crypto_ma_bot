@@ -57,6 +57,9 @@ LIVE_TRADING_MIN_BALANCE_USDT = 20.0     # stop opening trades if free balance d
 LIVE_TRADING_COOLDOWN_AFTER_LOSS_SEC = 1800  # 30min pause after a losing trade closes
 LIVE_TRADING_MAX_CAPITAL_DEPLOYED_PCT = 50.0  # never use more than 50% of total balance across all positions
 
+# Trade outcome alerts — Telegram notifications when TP/SL hit
+TRADE_OUTCOME_ALERTS_ENABLED = True
+
 BOT_STARTED_AT_UTC = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
 BOT_HOSTNAME = socket.gethostname()
 BOT_PID = os.getpid()
