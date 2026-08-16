@@ -148,6 +148,23 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Light-page titles: near-black ink so headings stay readable on
+   white / surface-50 / brand-50 backgrounds even if a utility is missing. */
+h1,
+h2,
+h3 {
+  color: var(--surface-950);
+}
+
+h1.text-white,
+h2.text-white,
+h3.text-white,
+.text-white h1,
+.text-white h2,
+.text-white h3 {
+  color: #ffffff;
+}
+
 ::selection {
   background-color: var(--brand-200);
   color: var(--brand-900);

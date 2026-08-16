@@ -106,10 +106,10 @@ export default function WhyChooseUs() {
                 {reason.icon}
               </div>
               <div>
-                <h3 className="font-semibold text-surface-900">
+                <h3 className="font-semibold text-surface-950">
                   {reason.title}
                 </h3>
-                <p className="mt-2 text-sm text-surface-500 leading-relaxed">
+                <p className="mt-2 text-sm text-surface-700 leading-relaxed">
                   {reason.description}
                 </p>
               </div>

@@ -66,7 +66,7 @@ export default function ServicesOverview({ services }: ServicesOverviewProps) {
                 <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-brand-100 text-brand-700">
                   <ServiceIcon name={service.icon} className="h-6 w-6" />
                 </div>
-                <h3 className="text-lg font-semibold text-surface-900">
+                <h3 className="text-lg font-semibold text-surface-950">
                   {service.title}
                 </h3>
                 <p className="mt-2 text-sm text-surface-500 leading-relaxed">

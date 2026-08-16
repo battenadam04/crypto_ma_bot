@@ -77,7 +77,7 @@ export default function Hero() {
               </span>
             </motion.div>
 
-            <h1 className="text-4xl font-extrabold tracking-tight text-surface-900 sm:text-5xl lg:text-6xl xl:text-7xl">
+            <h1 className="text-4xl font-extrabold tracking-tight text-surface-950 sm:text-5xl lg:text-6xl xl:text-7xl">
               I Build{" "}
               <span className="bg-gradient-to-r from-brand-600 via-accent-500 to-pop-500 bg-clip-text text-transparent animate-gradient">
                 Digital Experiences
@@ -167,7 +167,7 @@ await project.launch(); 🚀`}</code>
                   </svg>
                 </div>
                 <div>
-                  <div className="text-sm font-semibold text-surface-900">Project Deployed</div>
+                  <div className="text-sm font-semibold text-surface-950">Project Deployed</div>
                   <div className="text-xs text-surface-400">Just now</div>
                 </div>
               </div>
@@ -185,7 +185,7 @@ await project.launch(); 🚀`}</code>
                   </svg>
                 </div>
                 <div>
-                  <div className="text-sm font-semibold text-surface-900">100/100</div>
+                  <div className="text-sm font-semibold text-surface-950">100/100</div>
                   <div className="text-xs text-surface-400">Lighthouse Score</div>
                 </div>
               </div>

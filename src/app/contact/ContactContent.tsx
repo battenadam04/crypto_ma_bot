@@ -45,7 +45,7 @@ export default function ContactContent() {
     <>
       <section className="bg-gradient-to-b from-brand-50 to-surface-0 py-20">
         <div className="mx-auto max-w-7xl px-6 text-center">
-          <h1 className="text-4xl font-bold tracking-tight text-surface-900 sm:text-5xl">
+          <h1 className="text-4xl font-bold tracking-tight text-surface-950 sm:text-5xl">
             Get in{" "}
             <span className="bg-gradient-to-r from-brand-600 to-accent-500 bg-clip-text text-transparent">
               Touch
@@ -73,7 +73,7 @@ export default function ContactContent() {
                   <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-brand-100 text-brand-700">
                     {info.icon}
                   </div>
-                  <h3 className="font-semibold text-surface-900">
+                  <h3 className="font-semibold text-surface-950">
                     {info.title}
                   </h3>
                   {info.href ? (

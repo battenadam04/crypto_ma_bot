@@ -52,7 +52,7 @@ export default function ServicesContent({ services }: ServicesContentProps) {
           <Badge variant="pop" className="mb-4">
             {FIRST_TIME_OFFER.discount}% off first project — {FIRST_TIME_OFFER.code}
           </Badge>
-          <h1 className="text-4xl font-bold tracking-tight text-surface-900 sm:text-5xl">
+          <h1 className="text-4xl font-bold tracking-tight text-surface-950 sm:text-5xl">
             My{" "}
             <span className="bg-gradient-to-r from-brand-600 to-accent-500 bg-clip-text text-transparent">
               Services
@@ -91,7 +91,7 @@ export default function ServicesContent({ services }: ServicesContentProps) {
                     <ServiceIcon name={service.icon} className="h-7 w-7" />
                   </div>
 
-                  <h3 className="text-xl font-semibold text-surface-900">
+                  <h3 className="text-xl font-semibold text-surface-950">
                     {service.title}
                   </h3>
 

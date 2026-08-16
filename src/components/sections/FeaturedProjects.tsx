@@ -59,7 +59,7 @@ export default function FeaturedProjects({ projects }: FeaturedProjectsProps) {
                     {project.title.charAt(0)}
                   </div>
                 </div>
-                <h3 className="text-lg font-semibold text-surface-900">
+                <h3 className="text-lg font-semibold text-surface-950">
                   {project.title}
                 </h3>
                 <p className="mt-2 flex-1 text-sm text-surface-500">

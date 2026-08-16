@@ -30,7 +30,7 @@ export default function Header() {
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-brand-500 to-accent-500 text-white font-bold text-lg shadow-lg shadow-brand-500/25 group-hover:shadow-brand-500/40 transition-shadow" aria-hidden="true">
             AB
           </div>
-          <span className="text-xl font-bold text-surface-900">
+          <span className="text-xl font-bold text-surface-950">
             Adam <span className="text-brand-600">Batten</span>
           </span>
         </Link>

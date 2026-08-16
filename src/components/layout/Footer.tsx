@@ -11,7 +11,7 @@ export default function Footer() {
               <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-brand-500 to-accent-500 text-white font-bold text-lg" aria-hidden="true">
                 AB
               </div>
-              <span className="text-xl font-bold text-surface-900">
+              <span className="text-xl font-bold text-surface-950">
                 Adam <span className="text-brand-600">Batten</span>
               </span>
             </Link>
@@ -58,7 +58,7 @@ export default function Footer() {
           </div>
 
           <div>
-            <h3 className="text-sm font-semibold uppercase tracking-wider text-surface-900">
+            <h3 className="text-sm font-semibold uppercase tracking-wider text-surface-950">
               Navigation
             </h3>
             <ul className="mt-4 space-y-3">
@@ -76,7 +76,7 @@ export default function Footer() {
           </div>
 
           <div>
-            <h3 className="text-sm font-semibold uppercase tracking-wider text-surface-900">
+            <h3 className="text-sm font-semibold uppercase tracking-wider text-surface-950">
               Contact
             </h3>
             <div className="mt-4 space-y-4">

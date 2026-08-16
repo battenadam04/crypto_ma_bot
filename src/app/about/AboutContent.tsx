@@ -109,7 +109,7 @@ export default function AboutContent() {
       <section className="bg-gradient-to-b from-brand-50 to-surface-0 py-20">
         <div className="mx-auto max-w-7xl px-6">
           <div className="mx-auto max-w-3xl text-center">
-            <h1 className="text-4xl font-bold tracking-tight text-surface-900 sm:text-5xl">
+            <h1 className="text-4xl font-bold tracking-tight text-surface-950 sm:text-5xl">
               About{" "}
               <span className="bg-gradient-to-r from-brand-600 to-accent-500 bg-clip-text text-transparent">
                 Adam Batten
@@ -149,10 +149,10 @@ export default function AboutContent() {
                 <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-brand-100 text-brand-700">
                   {v.icon}
                 </div>
-                <h3 className="text-lg font-semibold text-surface-900">
+                <h3 className="text-lg font-semibold text-surface-950">
                   {v.title}
                 </h3>
-                <p className="mt-2 text-sm text-surface-600 leading-relaxed">
+                <p className="mt-2 text-sm text-surface-700 leading-relaxed">
                   {v.description}
                 </p>
               </motion.div>
@@ -188,10 +188,10 @@ export default function AboutContent() {
                     {step.step}
                   </div>
                   <div className="pt-2">
-                    <h3 className="text-xl font-semibold text-surface-900">
+                    <h3 className="text-xl font-semibold text-surface-950">
                       {step.title}
                     </h3>
-                    <p className="mt-2 text-surface-500 leading-relaxed max-w-lg">
+                    <p className="mt-2 text-surface-700 leading-relaxed max-w-lg">
                       {step.description}
                     </p>
                   </div>
@@ -222,7 +222,7 @@ export default function AboutContent() {
                 key={tech}
                 variants={item}
                 whileHover={{ scale: 1.05 }}
-                className="rounded-xl bg-surface-0 border border-surface-200 px-6 py-3 text-sm font-medium text-surface-700 shadow-sm hover:shadow-md hover:border-brand-200 transition-all"
+                className="rounded-xl bg-surface-0 border border-surface-200 px-6 py-3 text-sm font-semibold text-surface-950 shadow-sm hover:shadow-md hover:border-brand-200 transition-all"
               >
                 {tech}
               </motion.div>
@@ -233,10 +233,10 @@ export default function AboutContent() {
 
       <section className="py-20 bg-gradient-to-b from-surface-0 to-surface-50">
         <div className="mx-auto max-w-3xl px-6 text-center">
-          <h2 className="text-3xl font-bold text-surface-900 sm:text-4xl">
+          <h2 className="text-3xl font-bold text-surface-950 sm:text-4xl">
             Ready to start your project?
           </h2>
-          <p className="mt-4 text-lg text-surface-500">
+          <p className="mt-4 text-lg text-surface-700">
             Let&apos;s discuss your ideas and turn them into reality.
           </p>
           <div className="mt-8 flex flex-col sm:flex-row gap-4 justify-center">

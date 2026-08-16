@@ -17,22 +17,23 @@ export default function SectionHeading({
 }: SectionHeadingProps) {
   return (
     <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      whileInView={{ opacity: 1, y: 0 }}
+      initial={{ y: 16 }}
+      whileInView={{ y: 0 }}
       viewport={{ once: true, margin: "-50px" }}
-      transition={{ duration: 0.5 }}
+      transition={{ duration: 0.45 }}
       className={`mb-12 ${centered ? "text-center" : ""}`}
     >
       {eyebrow && (
-        <span className="mb-3 inline-block rounded-full bg-brand-100 px-4 py-1.5 text-sm font-semibold text-brand-700">
+        <span className="mb-3 inline-block rounded-full bg-brand-100 px-4 py-1.5 text-sm font-semibold text-brand-800">
           {eyebrow}
         </span>
       )}
-      <h2 className="mt-2 text-3xl font-bold tracking-tight text-surface-900 sm:text-4xl lg:text-5xl">
+      {/* Explicit near-black: light section backgrounds need max title contrast */}
+      <h2 className="mt-2 text-3xl font-bold tracking-tight text-surface-950 sm:text-4xl lg:text-5xl">
         {title}
       </h2>
       {description && (
-        <p className="mt-4 text-lg text-surface-600 max-w-2xl mx-auto">
+        <p className="mt-4 text-lg text-surface-700 max-w-2xl mx-auto">
           {description}
         </p>
       )}

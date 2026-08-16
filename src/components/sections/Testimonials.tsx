@@ -75,7 +75,7 @@ export default function Testimonials({ testimonials }: TestimonialsProps) {
                       .join("")}
                   </div>
                   <div>
-                    <div className="text-sm font-semibold text-surface-900">
+                    <div className="text-sm font-semibold text-surface-950">
                       {t.name}
                     </div>
                     <div className="text-xs text-surface-400">

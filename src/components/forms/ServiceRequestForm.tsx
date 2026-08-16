@@ -118,7 +118,7 @@ export default function ServiceRequestForm({
       )}
 
       <fieldset className="space-y-6">
-        <legend className="text-lg font-semibold text-surface-900 mb-2">
+        <legend className="text-lg font-semibold text-surface-950 mb-2">
           Your Details
         </legend>
         <div className="grid gap-6 sm:grid-cols-2">
@@ -161,7 +161,7 @@ export default function ServiceRequestForm({
       </fieldset>
 
       <fieldset className="space-y-6">
-        <legend className="text-lg font-semibold text-surface-900 mb-2">
+        <legend className="text-lg font-semibold text-surface-950 mb-2">
           Project Details
         </legend>
 

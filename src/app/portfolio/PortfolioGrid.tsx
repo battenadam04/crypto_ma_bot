@@ -87,7 +87,7 @@ export default function PortfolioGrid({ projects, tags }: PortfolioGridProps) {
                     </div>
                   </div>
 
-                  <h3 className="text-xl font-semibold text-surface-900">
+                  <h3 className="text-xl font-semibold text-surface-950">
                     {project.title}
                   </h3>
 
