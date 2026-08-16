@@ -1,0 +1,79 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Project {
+  id          String   @id @default(uuid())
+  title       String
+  slug        String   @unique
+  description String
+  longDescription String?
+  imageUrl    String
+  tags        String
+  liveUrl     String?
+  githubUrl   String?
+  featured    Boolean  @default(false)
+  order       Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Service {
+  id              String   @id @default(uuid())
+  title           String
+  slug            String   @unique
+  description     String
+  features        String
+  priceFrom       Float
+  priceTo         Float
+  estimatedDays   Int
+  icon            String
+  popular         Boolean  @default(false)
+  order           Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  requests        ServiceRequest[]
+}
+
+model ServiceRequest {
+  id            String   @id @default(uuid())
+  name          String
+  email         String
+  company       String?
+  phone         String?
+  serviceId     String
+  service       Service  @relation(fields: [serviceId], references: [id])
+  budget        String?
+  timeline      String?
+  description   String
+  status        String   @default("pending")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model ContactMessage {
+  id        String   @id @default(uuid())
+  name      String
+  email     String
+  subject   String
+  message   String
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+model Testimonial {
+  id        String   @id @default(uuid())
+  name      String
+  role      String
+  company   String
+  content   String
+  rating    Int      @default(5)
+  imageUrl  String?
+  featured  Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
