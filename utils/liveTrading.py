@@ -226,6 +226,83 @@ def get_position_size(exchange, symbol, entry_price, sl_price):
         return None, f"Position sizing error: {e}"
 
 
+def _normalize_pos_side(side: str) -> str:
+    s = (side or "").strip().lower()
+    if s in ("buy", "long"):
+        return "long"
+    if s in ("sell", "short"):
+        return "short"
+    return s
+
+
+def _cancel_open_orders(exchange, symbol):
+    """Cancel leftover TP/SL after a flatten so they cannot fire on the reverse."""
+    try:
+        orders = exchange.fetch_open_orders(symbol)
+    except Exception as e:
+        log_event(f"Could not list open orders for {symbol} after flatten: {e}")
+        return
+    for order in orders or []:
+        oid = order.get("id")
+        if not oid:
+            continue
+        try:
+            exchange.cancel_order(oid, symbol)
+            log_event(f"Cancelled leftover order {oid} for {symbol}")
+        except Exception as e:
+            log_event(f"Cancel leftover order {oid} for {symbol} failed: {e}")
+
+
+def flatten_opposite_position(exchange, symbol, new_side: str):
+    """
+    If an open position exists on the opposite side of new_side, close it.
+
+    Returns:
+      ('none', None) — no open position
+      ('same', msg) — already in this direction; caller should skip opening
+      ('flattened', note) — opposite position closed; caller may open reverse
+      ('error', msg) — failed to flatten
+    """
+    open_positions = get_open_positions(exchange)
+    pos = next((p for p in open_positions if p.get("symbol") == symbol), None)
+    if not pos:
+        return "none", None
+
+    existing = _normalize_pos_side(pos.get("side"))
+    wanted = _normalize_pos_side(new_side)
+    if existing == wanted:
+        return "same", f"Already in {existing} position for {symbol}"
+
+    if not getattr(config, "LIVE_TRADING_REVERSE_ON_FLIP", True):
+        return "same", (
+            f"Already in {existing} for {symbol}; reverse-on-flip disabled. "
+            "Close manually or enable LIVE_TRADING_REVERSE_ON_FLIP."
+        )
+
+    log_event(
+        f"🔄 Reverse signal for {symbol}: flattening {existing} before opening {wanted}"
+    )
+    closed = close_position(symbol, reason="reverse_signal")
+    _cancel_open_orders(exchange, symbol)
+    if not closed.get("success"):
+        return "error", closed.get("error") or f"Failed to flatten {symbol} before reverse"
+
+    pnl = closed.get("pnl")
+    note = f"Flattened {existing} {symbol}"
+    if pnl is not None:
+        note += f" (PnL {float(pnl):+.2f} USDT)"
+    try:
+        from utils.telegramUtils import send_telegram
+        send_telegram(
+            f"🔄 Reverse signal: closed {existing.upper()} {symbol} "
+            f"before opening {wanted.upper()}.\n{note}",
+            bypass_rate_limit=True,
+        )
+    except Exception:
+        pass
+    return "flattened", note
+
+
 def get_open_positions(exchange):
     """Return list of open positions on Phemex."""
     try:
@@ -249,20 +326,39 @@ def execute_trade(symbol, side, entry_price, tp_price, sl_price, strategy_type="
     try:
         exchange = get_authenticated_exchange()
 
-        # Run all capital guards
+        # Invalidation first: opposite open position must flatten even if we cannot reverse.
+        flip_state, flip_note = flatten_opposite_position(exchange, symbol, side)
+        if flip_state == "same":
+            return {"success": False, "error": flip_note}
+        if flip_state == "error":
+            return {"success": False, "error": flip_note}
+
+        # Run all capital guards before opening the (possibly reversed) trade
         allowed, reason = check_capital_guards(exchange)
         if not allowed:
             log_event(f"Trade blocked for {symbol}: {reason}")
-            return {'success': False, 'error': reason}
+            if flip_state == "flattened":
+                return {
+                    "success": True,
+                    "order_id": None,
+                    "flattened_only": True,
+                    "error": f"{flip_note}. Did not reverse: {reason}",
+                }
+            return {"success": False, "error": reason}
 
-        # Position limits
         open_positions = get_open_positions(exchange)
         if len(open_positions) >= config.LIVE_TRADING_MAX_POSITIONS:
-            return {'success': False, 'error': f'Max positions reached ({config.LIVE_TRADING_MAX_POSITIONS})'}
-
-        symbol_positions = [p for p in open_positions if p.get('symbol') == symbol]
-        if symbol_positions:
-            return {'success': False, 'error': f'Already in position for {symbol}'}
+            if flip_state == "flattened":
+                return {
+                    "success": True,
+                    "order_id": None,
+                    "flattened_only": True,
+                    "error": (
+                        f"{flip_note}. Did not reverse: max positions "
+                        f"({config.LIVE_TRADING_MAX_POSITIONS}) still reached."
+                    ),
+                }
+            return {"success": False, "error": f"Max positions reached ({config.LIVE_TRADING_MAX_POSITIONS})"}
 
         # Set leverage
         try:
@@ -516,6 +612,7 @@ def close_position(symbol, reason="manual"):
             log_event(f"Loss recorded for {symbol}: {pnl:.2f} USDT — cooldown active")
 
         untrack_position(symbol)
+        _cancel_open_orders(exchange, symbol)
         log_event(f"Position closed for {symbol} (reason: {reason}): {order.get('id')} PnL: {pnl:+.2f}")
         return {'success': True, 'order_id': order.get('id'), 'pnl': pnl}
 

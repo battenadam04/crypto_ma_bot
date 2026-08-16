@@ -183,3 +183,45 @@ class TestAlertsCommand:
         response, _ = handle_telegram_command("/alerts off")
         assert "DISABLED" in response
         assert config.TRADE_OUTCOME_ALERTS_ENABLED is False
+
+
+class TestFlattenOppositePosition:
+    def setup_method(self):
+        _tracked_positions.clear()
+        config.LIVE_TRADING_ENABLED = True
+        config.LIVE_TRADING_REVERSE_ON_FLIP = True
+
+    def teardown_method(self):
+        _tracked_positions.clear()
+        config.LIVE_TRADING_ENABLED = False
+        config.LIVE_TRADING_REVERSE_ON_FLIP = True
+
+    @patch("utils.liveTrading.get_open_positions")
+    def test_no_position_is_none(self, mock_positions):
+        from utils.liveTrading import flatten_opposite_position
+        mock_positions.return_value = []
+        state, note = flatten_opposite_position(MagicMock(), "ADA/USDT:USDT", "sell")
+        assert state == "none"
+        assert note is None
+
+    @patch("utils.liveTrading.get_open_positions")
+    def test_same_side_skips(self, mock_positions):
+        from utils.liveTrading import flatten_opposite_position
+        mock_positions.return_value = [{"symbol": "ADA/USDT:USDT", "side": "long", "contracts": 2}]
+        state, note = flatten_opposite_position(MagicMock(), "ADA/USDT:USDT", "buy")
+        assert state == "same"
+        assert "Already in" in note
+
+    @patch("utils.liveTrading.close_position")
+    @patch("utils.liveTrading.get_open_positions")
+    def test_opposite_flattens(self, mock_positions, mock_close):
+        from utils.liveTrading import flatten_opposite_position
+        exchange = MagicMock()
+        exchange.fetch_open_orders.return_value = []
+        mock_positions.return_value = [{"symbol": "ADA/USDT:USDT", "side": "long", "contracts": 2}]
+        mock_close.return_value = {"success": True, "pnl": -1.5, "order_id": "x"}
+        state, note = flatten_opposite_position(exchange, "ADA/USDT:USDT", "sell")
+        assert state == "flattened"
+        mock_close.assert_called_once()
+        assert "reverse_signal" in str(mock_close.call_args)
+        assert "Flattened" in note

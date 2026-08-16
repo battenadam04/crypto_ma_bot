@@ -51,11 +51,59 @@ class TestResolveSignal:
 
     def test_long_open(self):
         exchange = MagicMock()
+        exchange.fetch_ohlcv.return_value = []
         exchange.fetch_ticker.return_value = {'last': 102.0}
         signal = {'symbol': 'BTC/USDT', 'direction': 'long', 'entry': 100.0, 'tp': 105.0, 'sl': 95.0}
         result, pnl = _resolve_signal(signal, exchange)
         assert result == 'open'
         assert pnl > 0
+
+    def test_long_win_from_wick_not_last_price(self):
+        """TP was touched then price retraced — last price would wrongly say open."""
+        from datetime import datetime, timezone, timedelta
+        exchange = MagicMock()
+        ts = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+        # OHLCV: [ts, open, high, low, close, vol]
+        exchange.fetch_ohlcv.return_value = [
+            [0, 100.0, 106.0, 99.5, 101.0, 1],  # high tags TP 105
+        ]
+        exchange.fetch_ticker.return_value = {'last': 101.0}
+        signal = {
+            'symbol': 'BTC/USDT', 'direction': 'long', 'entry': 100.0,
+            'tp': 105.0, 'sl': 95.0, 'timestamp': ts,
+        }
+        result, pnl = _resolve_signal(signal, exchange)
+        assert result == 'win'
+        assert pnl > 0
+
+    def test_long_loss_from_wick(self):
+        from datetime import datetime, timezone, timedelta
+        exchange = MagicMock()
+        ts = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+        exchange.fetch_ohlcv.return_value = [
+            [0, 100.0, 101.0, 94.0, 100.5, 1],
+        ]
+        signal = {
+            'symbol': 'BTC/USDT', 'direction': 'long', 'entry': 100.0,
+            'tp': 105.0, 'sl': 95.0, 'timestamp': ts,
+        }
+        result, pnl = _resolve_signal(signal, exchange)
+        assert result == 'loss'
+        assert pnl < 0
+
+    def test_expired_when_lookahead_passed_without_touch(self):
+        from datetime import datetime, timezone, timedelta
+        exchange = MagicMock()
+        ts = (datetime.now(timezone.utc) - timedelta(hours=20)).isoformat()
+        exchange.fetch_ohlcv.return_value = [
+            [0, 100.0, 101.0, 99.0, 100.4, 1],
+        ]
+        signal = {
+            'symbol': 'BTC/USDT', 'direction': 'long', 'entry': 100.0,
+            'tp': 105.0, 'sl': 95.0, 'timestamp': ts,
+        }
+        result, pnl = _resolve_signal(signal, exchange)
+        assert result == 'expired'
 
     def test_short_win(self):
         exchange = MagicMock()

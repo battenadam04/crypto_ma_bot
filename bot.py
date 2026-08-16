@@ -251,7 +251,10 @@ def handle_signal(symbol, direction, df, strategy_type="trend", signal_source="S
                 from utils.liveTrading import execute_trade
                 result = execute_trade(symbol, side, filled_entry, tp_price, sl_price, strategy_type)
                 if result and result.get('success'):
-                    live_status = f"\n🟢 LIVE ORDER PLACED: {result.get('order_id', 'ok')}"
+                    if result.get('flattened_only'):
+                        live_status = f"\n🔄 Flattened opposite position (did not reverse): {result.get('error', 'ok')}"
+                    else:
+                        live_status = f"\n🟢 LIVE ORDER PLACED: {result.get('order_id', 'ok')}"
                 else:
                     live_status = f"\n🔴 Live order failed: {result.get('error', 'unknown')}"
             except Exception as e:

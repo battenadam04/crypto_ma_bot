@@ -47,6 +47,9 @@ LIVE_TRADING_PLATFORM = "phemex"
 LIVE_TRADING_LEVERAGE = 5
 LIVE_TRADING_RISK_PCT = 1.0  # % of balance to risk per trade
 LIVE_TRADING_MAX_POSITIONS = 3
+# If a new signal is the opposite side of an open position, flatten then reverse
+# (better than only moving SL — the original thesis is invalidated).
+LIVE_TRADING_REVERSE_ON_FLIP = True
 LIVE_TRADING_LAST_SET_AT_UTC = None
 LIVE_TRADING_LAST_SET_BY = None
 
