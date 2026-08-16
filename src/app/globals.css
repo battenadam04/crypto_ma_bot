@@ -60,16 +60,11 @@
 
   --background: var(--surface-0);
   --foreground: var(--surface-900);
-  --muted: var(--surface-500);
+  --muted: var(--surface-600);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: var(--surface-950);
-    --foreground: var(--surface-50);
-    --muted: var(--surface-400);
-  }
-}
+/* Light theme only — section surfaces and type are designed for bright backgrounds.
+   Auto dark mode left body dark while headings stayed near-black (unreadable). */
 
 @theme inline {
   --color-background: var(--background);

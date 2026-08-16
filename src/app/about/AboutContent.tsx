@@ -109,7 +109,7 @@ export default function AboutContent() {
         </div>
       </section>
 
-      <section className="py-20">
+      <section className="py-20 bg-surface-0">
         <div className="mx-auto max-w-7xl px-6">
           <SectionHeading
             eyebrow="My Values"
