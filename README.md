@@ -96,6 +96,27 @@ The design uses a bright, vibrant color system defined as CSS custom properties 
 
 All colors are available as Tailwind utilities (e.g., `text-brand-600`, `bg-accent-50`).
 
+## Contact form email
+
+Contact and service-request forms email **adambatten@live.co.uk** via [Resend](https://resend.com).
+
+1. Create a free Resend account **using** `adambatten@live.co.uk` (required so the default `onboarding@resend.dev` sender can deliver to that inbox).
+2. Create an API key in Resend.
+3. Set environment variables locally (`.env`) and in **Vercel → Settings → Environment Variables**:
+
+```env
+RESEND_API_KEY=re_xxxxxxxx
+CONTACT_TO_EMAIL=adambatten@live.co.uk
+```
+
+Optional: after you verify your own domain in Resend, set:
+
+```env
+CONTACT_FROM_EMAIL="Adam Batten <hello@yourdomain.com>"
+```
+
+Without `RESEND_API_KEY`, submissions still save to the local SQLite DB (useful for tests/dev). On Vercel, set the API key so you actually receive the emails.
+
 ## Testing
 
 ```bash

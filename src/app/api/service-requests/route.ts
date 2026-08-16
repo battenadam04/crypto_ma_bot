@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import {
+  isEmailConfigured,
+  sendServiceRequestNotification,
+} from "@/lib/email";
 import { serviceRequestSchema } from "@/lib/validations";
 
 export async function POST(request: NextRequest) {
@@ -25,14 +29,56 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const serviceRequest = await prisma.serviceRequest.create({
-      data: parsed.data,
-    });
+    let emailId: string | null = null;
+    let dbId: string | null = null;
+
+    if (isEmailConfigured()) {
+      try {
+        const sent = await sendServiceRequestNotification({
+          name: parsed.data.name,
+          email: parsed.data.email,
+          company: parsed.data.company,
+          serviceTitle: service.title,
+          budget: parsed.data.budget,
+          timeline: parsed.data.timeline,
+          description: parsed.data.description,
+        });
+        emailId = sent.id;
+      } catch (err) {
+        console.error("Service request email failed:", err);
+        return NextResponse.json(
+          {
+            error:
+              "Could not send your request right now. Please try again shortly.",
+          },
+          { status: 502 },
+        );
+      }
+    }
+
+    try {
+      const serviceRequest = await prisma.serviceRequest.create({
+        data: parsed.data,
+      });
+      dbId = serviceRequest.id;
+    } catch (err) {
+      console.error("Service request DB save failed:", err);
+      if (!emailId) {
+        return NextResponse.json(
+          {
+            error:
+              "Could not save your request. Email delivery is not configured yet.",
+          },
+          { status: 500 },
+        );
+      }
+    }
 
     return NextResponse.json(
       {
         success: true,
-        id: serviceRequest.id,
+        id: dbId ?? emailId,
+        emailed: Boolean(emailId),
         estimate: {
           priceFrom: service.priceFrom,
           priceTo: service.priceTo,
