@@ -6,6 +6,7 @@ import { useState, useCallback, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { NAV_LINKS } from "@/lib/constants";
 import Button from "@/components/ui/Button";
+import { CurrencyToggle } from "@/components/providers/CurrencyProvider";
 
 export default function Header() {
   const pathname = usePathname();
@@ -61,6 +62,7 @@ export default function Header() {
         </div>
 
         <div className="hidden md:flex items-center gap-3">
+          <CurrencyToggle />
           <Link href="/services#request">
             <Button size="sm" variant="accent">
               Get a Quote
@@ -98,6 +100,9 @@ export default function Header() {
             className="md:hidden border-t border-surface-200 bg-surface-0"
           >
             <div className="px-6 py-4 space-y-2">
+              <div className="pb-2">
+                <CurrencyToggle />
+              </div>
               {NAV_LINKS.map((link) => (
                 <Link
                   key={link.href}

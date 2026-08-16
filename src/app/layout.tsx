@@ -4,6 +4,7 @@ import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 import Header from "@/components/layout/Header";
 import Footer from "@/components/layout/Footer";
+import { CurrencyProvider } from "@/components/providers/CurrencyProvider";
 import { SITE_CONFIG } from "@/lib/constants";
 
 const geistSans = Geist({
@@ -75,12 +76,14 @@ export default function RootLayout({
         >
           Skip to main content
         </a>
-        <Header />
-        <main id="main-content" className="min-h-screen" tabIndex={-1}>
-          {children}
-        </main>
-        <Footer />
-        <Analytics />
+        <CurrencyProvider>
+          <Header />
+          <main id="main-content" className="min-h-screen" tabIndex={-1}>
+            {children}
+          </main>
+          <Footer />
+          <Analytics />
+        </CurrencyProvider>
       </body>
     </html>
   );

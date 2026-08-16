@@ -7,6 +7,10 @@ import SectionHeading from "@/components/ui/SectionHeading";
 import ServiceIcon from "@/components/ui/ServiceIcon";
 import ServiceRequestForm from "@/components/forms/ServiceRequestForm";
 import { FIRST_TIME_OFFER } from "@/lib/constants";
+import {
+  CurrencyToggle,
+  useCurrency,
+} from "@/components/providers/CurrencyProvider";
 
 interface Service {
   id: string;
@@ -39,6 +43,8 @@ const item = {
 };
 
 export default function ServicesContent({ services }: ServicesContentProps) {
+  const { format } = useCurrency();
+
   return (
     <>
       <section className="bg-gradient-to-b from-brand-50 to-surface-0 py-20">
@@ -57,6 +63,9 @@ export default function ServicesContent({ services }: ServicesContentProps) {
             Every project includes a detailed proposal with pricing and timeline
             estimates.
           </p>
+          <div className="mt-6 flex justify-center">
+            <CurrencyToggle />
+          </div>
         </div>
       </section>
 
@@ -119,10 +128,10 @@ export default function ServicesContent({ services }: ServicesContentProps) {
                       <div>
                         <span className="text-sm text-surface-400">From</span>
                         <div className="text-2xl font-bold text-brand-600">
-                          ${service.priceFrom.toLocaleString()}
+                          {format(service.priceFrom)}
                         </div>
                         <span className="text-xs text-surface-400">
-                          up to ${service.priceTo.toLocaleString()}
+                          up to {format(service.priceTo)}
                         </span>
                       </div>
                       <div className="text-right">
@@ -145,7 +154,7 @@ export default function ServicesContent({ services }: ServicesContentProps) {
           <SectionHeading
             eyebrow="Get Started"
             title="Request a Service"
-            description="Fill out the form below and we'll get back to you within 24 hours with a detailed proposal and quote."
+            description="Fill out the form below and I'll get back to you within 24 hours with a detailed proposal and quote."
           />
 
           <motion.div

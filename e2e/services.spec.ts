@@ -9,8 +9,19 @@ test.describe("Services Page", () => {
     await expect(page.getByRole("heading", { name: "Landing Page & Marketing Site" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "API Development & Integration" })).toBeVisible();
 
-    await expect(page.getByText("$5,000").first()).toBeVisible();
-    await expect(page.getByText("$8,000").first()).toBeVisible();
+    await expect(page.getByText("£5,000").first()).toBeVisible();
+    await expect(page.getByText("£8,000").first()).toBeVisible();
+  });
+
+  test("toggles pricing between GBP and USD", async ({ page }) => {
+    await page.goto("/services");
+    await expect(page.getByText("£5,000").first()).toBeVisible();
+
+    await page.getByRole("button", { name: "$ USD" }).first().click();
+    await expect(page.getByText("$6,350").first()).toBeVisible();
+
+    await page.getByRole("button", { name: "£ GBP" }).first().click();
+    await expect(page.getByText("£5,000").first()).toBeVisible();
   });
 
   test("displays estimated delivery times", async ({ page }) => {

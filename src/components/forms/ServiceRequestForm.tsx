@@ -8,11 +8,12 @@ import {
   serviceRequestSchema,
   type ServiceRequestData,
 } from "@/lib/validations";
-import { BUDGET_OPTIONS, TIMELINE_OPTIONS } from "@/lib/constants";
+import { TIMELINE_OPTIONS } from "@/lib/constants";
 import Input from "@/components/ui/Input";
 import Textarea from "@/components/ui/Textarea";
 import Select from "@/components/ui/Select";
 import Button from "@/components/ui/Button";
+import { useCurrency } from "@/components/providers/CurrencyProvider";
 
 interface ServiceOption {
   id: string;
@@ -39,6 +40,7 @@ export default function ServiceRequestForm({
     null,
   );
   const statusRef = useRef<HTMLDivElement>(null);
+  const { format, budgetOptions } = useCurrency();
 
   const {
     register,
@@ -189,8 +191,8 @@ export default function ServiceRequestForm({
                     Estimated Price Range
                   </p>
                   <p className="text-xl font-bold text-brand-600">
-                    ${selectedService.priceFrom.toLocaleString()} — $
-                    {selectedService.priceTo.toLocaleString()}
+                    {format(selectedService.priceFrom)} —{" "}
+                    {format(selectedService.priceTo)}
                   </p>
                 </div>
                 <div className="text-right">
@@ -211,7 +213,7 @@ export default function ServiceRequestForm({
             id="request-budget"
             label="Budget Range"
             placeholder="Select budget range"
-            options={[...BUDGET_OPTIONS]}
+            options={budgetOptions}
             {...register("budget")}
           />
           <Select

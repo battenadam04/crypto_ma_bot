@@ -6,6 +6,7 @@ import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
 import SectionHeading from "@/components/ui/SectionHeading";
 import ServiceIcon from "@/components/ui/ServiceIcon";
+import { useCurrency } from "@/components/providers/CurrencyProvider";
 
 interface Service {
   id: string;
@@ -36,6 +37,8 @@ const item = {
 };
 
 export default function ServicesOverview({ services }: ServicesOverviewProps) {
+  const { format } = useCurrency();
+
   return (
     <section className="py-24 bg-gradient-to-b from-surface-50 to-surface-0">
       <div className="mx-auto max-w-7xl px-6">
@@ -72,7 +75,7 @@ export default function ServicesOverview({ services }: ServicesOverviewProps) {
                 <div className="mt-4 flex items-baseline gap-1">
                   <span className="text-sm text-surface-400">From</span>
                   <span className="text-2xl font-bold text-brand-600">
-                    ${service.priceFrom.toLocaleString()}
+                    {format(service.priceFrom)}
                   </span>
                 </div>
                 <div className="mt-1 text-xs text-surface-400">
