@@ -47,9 +47,9 @@ export const TIMELINE_OPTIONS = [
 ] as const;
 
 export const SOCIAL_LINKS = {
+  linkedin: "https://www.linkedin.com/in/adam-batten",
+  facebook: "https://www.facebook.com",
   github: "https://github.com/battenadam04",
-  linkedin: "https://linkedin.com",
-  twitter: "https://twitter.com",
 } as const;
 
 export const FIRST_TIME_OFFER = {
