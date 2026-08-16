@@ -46,7 +46,10 @@ test.describe("Navigation", () => {
   test("footer displays company info", async ({ page }) => {
     await page.goto("/");
     const footer = page.locator("footer");
-    await expect(footer.getByText("hello@adambatten.dev")).toBeVisible();
+    await expect(footer.getByText("Based in Northern Ireland")).toBeVisible();
+    await expect(
+      footer.getByRole("link", { name: /Send a message/ }),
+    ).toBeVisible();
     await expect(footer.getByText(/All rights reserved/)).toBeVisible();
   });
 });

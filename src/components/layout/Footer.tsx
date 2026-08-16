@@ -79,11 +79,52 @@ export default function Footer() {
             <h3 className="text-sm font-semibold uppercase tracking-wider text-surface-900">
               Contact
             </h3>
-            <ul className="mt-4 space-y-3 text-sm text-surface-500">
-              <li>hello@adambatten.dev</li>
-              <li>+1 (555) 123-4567</li>
-              <li>Mon–Fri, 9am–6pm EST</li>
-            </ul>
+            <div className="mt-4 space-y-4">
+              <a
+                href="https://www.openstreetmap.org/?mlat=54.6&mlon=-6.7#map=8/54.6/-6.7"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block overflow-hidden rounded-xl border border-surface-200 bg-surface-0 shadow-sm transition hover:border-brand-200 hover:shadow-md"
+                aria-label="View Northern Ireland on OpenStreetMap"
+              >
+                <iframe
+                  title="Northern Ireland map"
+                  src="https://www.openstreetmap.org/export/embed.html?bbox=-8.3%2C53.9%2C-5.3%2C55.4&amp;layer=mapnik&amp;marker=54.6%2C-6.7"
+                  className="h-28 w-full pointer-events-none border-0"
+                  loading="lazy"
+                  tabIndex={-1}
+                  aria-hidden="true"
+                />
+                <div className="flex items-center gap-2 px-3 py-2 text-sm text-surface-600">
+                  <svg
+                    className="h-4 w-4 shrink-0 text-brand-600"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={1.5}
+                    aria-hidden="true"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z"
+                    />
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z"
+                    />
+                  </svg>
+                  <span>Based in Northern Ireland</span>
+                </div>
+              </a>
+              <Link
+                href="/contact"
+                className="inline-flex text-sm font-medium text-brand-600 hover:text-brand-700 transition-colors"
+              >
+                Send a message →
+              </Link>
+            </div>
           </div>
         </div>
 
