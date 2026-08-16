@@ -1,7 +1,11 @@
 import Database from "better-sqlite3";
 import { randomUUID } from "crypto";
+import path from "path";
 
-const db = new Database("prisma/dev.db");
+const dbFile =
+  process.env.DATABASE_URL?.replace(/^file:/, "") ||
+  path.join("prisma", "dev.db");
+const db = new Database(dbFile);
 
 function upsertProject(project) {
   const existing = db

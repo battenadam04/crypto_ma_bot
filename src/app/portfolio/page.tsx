@@ -8,6 +8,8 @@ export const metadata: Metadata = {
     "Explore our portfolio of web applications, e-commerce solutions, and digital experiences. See the projects that have helped businesses grow.",
 };
 
+export const dynamic = "force-dynamic";
+
 export default async function PortfolioPage() {
   const projects = await prisma.project.findMany({
     orderBy: { order: "asc" },

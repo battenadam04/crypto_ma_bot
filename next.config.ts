@@ -3,8 +3,13 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   poweredByHeader: false,
   compress: true,
+  serverExternalPackages: ["better-sqlite3", "@prisma/adapter-better-sqlite3"],
   images: {
     formats: ["image/avif", "image/webp"],
+  },
+  outputFileTracingIncludes: {
+    "/*": ["./prisma/dev.db", "./prisma/schema.prisma"],
+    "/api/**": ["./prisma/dev.db", "./prisma/schema.prisma"],
   },
   headers: async () => [
     {

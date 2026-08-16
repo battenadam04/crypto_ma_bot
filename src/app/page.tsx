@@ -6,6 +6,9 @@ import WhyChooseUs from "@/components/sections/WhyChooseUs";
 import Testimonials from "@/components/sections/Testimonials";
 import CTASection from "@/components/sections/CTASection";
 
+// Avoid build-time DB access failures on hosts where the DB is prepared in `npm run build`
+export const dynamic = "force-dynamic";
+
 export default async function HomePage() {
   const [projects, services, testimonials] = await Promise.all([
     prisma.project.findMany({
