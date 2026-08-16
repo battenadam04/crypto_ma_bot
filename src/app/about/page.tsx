@@ -4,7 +4,7 @@ import AboutContent from "./AboutContent";
 export const metadata: Metadata = {
   title: "About",
   description:
-    "Learn about DevCraft Studio — our mission, values, process, and the team behind exceptional web development.",
+    "Learn about Adam Batten — my mission, values, process, and approach to exceptional web development.",
 };
 
 export default function AboutPage() {

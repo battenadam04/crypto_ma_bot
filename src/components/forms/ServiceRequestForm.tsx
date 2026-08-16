@@ -226,7 +226,7 @@ export default function ServiceRequestForm({
         <Textarea
           id="request-description"
           label="Project Description *"
-          placeholder="Tell us about your project requirements, goals, and any specific features you need..."
+          placeholder="Tell me about your project requirements, goals, and any specific features you need..."
           rows={6}
           error={errors.description?.message}
           {...register("description")}
@@ -259,7 +259,7 @@ export default function ServiceRequestForm({
               className="rounded-xl bg-success-50 p-4 text-success-600 text-sm font-medium"
               role="status"
             >
-              Your service request has been submitted! We&apos;ll review it and
+              Your service request has been submitted! I&apos;ll review it and
               get back to you with a detailed quote within 24 hours.
             </motion.div>
           )}

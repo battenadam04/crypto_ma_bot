@@ -5,7 +5,7 @@ import ServicesContent from "./ServicesContent";
 export const metadata: Metadata = {
   title: "Services",
   description:
-    "Explore our web development services including custom web applications, e-commerce solutions, API development, UI/UX design, and performance optimization. Get a free quote today.",
+    "Explore my web development services including custom web applications, e-commerce solutions, API development, UI/UX design, and performance optimization. Get a free quote today.",
 };
 
 export const dynamic = "force-dynamic";

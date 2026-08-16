@@ -4,7 +4,7 @@ import ContactContent from "./ContactContent";
 export const metadata: Metadata = {
   title: "Contact",
   description:
-    "Get in touch with DevCraft Studio. Send us a message, request a quote, or schedule a free consultation.",
+    "Get in touch with Adam Batten. Send me a message, request a quote, or schedule a free consultation.",
 };
 
 export default function ContactPage() {

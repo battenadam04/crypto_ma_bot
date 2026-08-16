@@ -9,7 +9,7 @@ import {
 
 describe("SITE_CONFIG", () => {
   it("has required properties", () => {
-    expect(SITE_CONFIG.name).toBe("DevCraft Studio");
+    expect(SITE_CONFIG.name).toBe("Adam Batten");
     expect(SITE_CONFIG.title).toBeDefined();
     expect(SITE_CONFIG.description).toBeDefined();
     expect(SITE_CONFIG.keywords).toBeInstanceOf(Array);

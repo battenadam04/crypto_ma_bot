@@ -88,7 +88,7 @@ export default function ContactForm() {
       <Input
         id="contact-subject"
         label="Subject"
-        placeholder="How can we help?"
+        placeholder="How can I help?"
         error={errors.subject?.message}
         {...register("subject")}
       />
@@ -96,7 +96,7 @@ export default function ContactForm() {
       <Textarea
         id="contact-message"
         label="Message"
-        placeholder="Tell us about your project..."
+        placeholder="Tell me about your project..."
         rows={5}
         error={errors.message?.message}
         {...register("message")}
@@ -128,7 +128,7 @@ export default function ContactForm() {
               className="rounded-xl bg-success-50 p-4 text-success-600 text-sm font-medium"
               role="status"
             >
-              Thank you! Your message has been sent. We&apos;ll get back to you
+              Thank you! Your message has been sent. I&apos;ll get back to you
               within 24 hours.
             </motion.div>
           )}

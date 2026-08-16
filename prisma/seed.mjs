@@ -123,9 +123,9 @@ const services = [
 
 const testimonials = [
   { name: "Sarah Chen", role: "CTO", company: "TechFlow Inc.", content: "Exceptional work on our e-commerce platform. The attention to detail and performance optimization exceeded our expectations. Our conversion rate improved by 40%.", rating: 5, featured: true },
-  { name: "Marcus Johnson", role: "Founder", company: "GreenLeaf Solutions", content: "The team delivered our SaaS dashboard ahead of schedule. Their expertise in real-time data visualization transformed how we present analytics to our clients.", rating: 5, featured: true },
-  { name: "Emily Rodriguez", role: "Product Manager", company: "HealthBridge", content: "Building a HIPAA-compliant platform was complex, but the solution was elegant and secure. Our patients love the seamless booking experience.", rating: 5, featured: true },
-  { name: "David Park", role: "CEO", company: "Urban Eats", content: "Our restaurant management system has streamlined operations across all locations. The real-time order tracking alone saved us countless hours.", rating: 4, featured: false },
+  { name: "Marcus Johnson", role: "Founder", company: "GreenLeaf Solutions", content: "Adam delivered our SaaS dashboard ahead of schedule. His expertise in real-time data visualization transformed how we present analytics to our clients.", rating: 5, featured: true },
+  { name: "Emily Rodriguez", role: "Product Manager", company: "HealthBridge", content: "Building a HIPAA-compliant platform was complex, but Adam's solution was elegant and secure. Our patients love the seamless booking experience.", rating: 5, featured: true },
+  { name: "David Park", role: "CEO", company: "Urban Eats", content: "Our restaurant management system has streamlined operations across all locations. The real-time order tracking alone saved us countless hours — thanks Adam.", rating: 4, featured: false },
 ];
 
 console.log("Seeding database...");

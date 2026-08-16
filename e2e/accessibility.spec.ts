@@ -143,7 +143,7 @@ test.describe("Accessibility", () => {
 
   test("images and decorative elements are hidden from AT", async ({ page }) => {
     await page.goto("/");
-    const headerLogo = page.locator('nav a[aria-label="DevCraft Studio home"] div[aria-hidden="true"]');
+    const headerLogo = page.locator('nav a[aria-label="Adam Batten home"] div[aria-hidden="true"]');
     await expect(headerLogo).toBeAttached();
   });
 

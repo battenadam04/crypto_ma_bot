@@ -3,7 +3,7 @@ import { test, expect } from "@playwright/test";
 test.describe("Homepage", () => {
   test("loads and displays hero section", async ({ page }) => {
     await page.goto("/");
-    await expect(page).toHaveTitle(/DevCraft Studio/);
+    await expect(page).toHaveTitle(/Adam Batten/);
 
     const hero = page.locator("h1");
     await expect(hero).toContainText("Digital Experiences");
@@ -33,13 +33,13 @@ test.describe("Homepage", () => {
 
   test("displays services overview section", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByText("Our Services")).toBeVisible();
+    await expect(page.getByText("My Services")).toBeVisible();
     await expect(page.getByText("Custom Web Application")).toBeVisible();
   });
 
   test("displays testimonials section", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByText("What Our Clients Say")).toBeVisible();
+    await expect(page.getByText("What My Clients Say")).toBeVisible();
     await expect(page.getByText("Sarah Chen")).toBeVisible();
   });
 

@@ -1,6 +1,6 @@
-# DevCraft Studio — Business Portfolio & Services
+# Adam Batten — Portfolio & Services
 
-A modern, high-performance business portfolio website built with Next.js 16, TypeScript, and Tailwind CSS. Features a services showcase with pricing estimates, a service request form, project portfolio with filtering, and comprehensive SEO optimization.
+A modern, high-performance personal portfolio website built with Next.js 16, TypeScript, and Tailwind CSS. Features a services showcase with pricing estimates, a service request form, project portfolio with filtering, and comprehensive SEO optimization.
 
 ## Tech Stack
 

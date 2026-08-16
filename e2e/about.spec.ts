@@ -4,14 +4,14 @@ test.describe("About Page", () => {
   test("displays company introduction", async ({ page }) => {
     await page.goto("/about");
     await expect(page.getByRole("heading", { level: 1 })).toContainText(
-      "DevCraft Studio",
+      "Adam Batten",
     );
-    await expect(page.getByText(/passionate team/)).toBeVisible();
+    await expect(page.getByText(/developer and designer/)).toBeVisible();
   });
 
   test("displays company values", async ({ page }) => {
     await page.goto("/about");
-    await expect(page.getByText("What Drives Us")).toBeVisible();
+    await expect(page.getByText("What Drives Me")).toBeVisible();
     await expect(page.getByText("Quality First")).toBeVisible();
     await expect(page.getByText("Transparent Communication")).toBeVisible();
     await expect(page.getByText("Innovation Driven")).toBeVisible();
@@ -20,7 +20,7 @@ test.describe("About Page", () => {
 
   test("displays process steps", async ({ page }) => {
     await page.goto("/about");
-    await expect(page.getByText("How We Work")).toBeVisible();
+    await expect(page.getByText("How I Work")).toBeVisible();
     await expect(page.getByText("Discovery")).toBeVisible();
     await expect(page.getByText("Design").first()).toBeVisible();
     await expect(page.getByText("Development")).toBeVisible();
@@ -29,7 +29,7 @@ test.describe("About Page", () => {
 
   test("displays tech stack", async ({ page }) => {
     await page.goto("/about");
-    await expect(page.getByText("Technologies We Use")).toBeVisible();
+    await expect(page.getByText("Technologies I Use")).toBeVisible();
     await expect(page.getByText("React").first()).toBeVisible();
     await expect(page.getByText("Next.js").first()).toBeVisible();
     await expect(page.getByText("TypeScript").first()).toBeVisible();
@@ -41,7 +41,7 @@ test.describe("About Page", () => {
       page.getByRole("link", { name: /Free Quote/ }),
     ).toBeVisible();
     await expect(
-      page.getByRole("link", { name: /Contact Us/ }),
+      page.getByRole("link", { name: /Contact Me/ }),
     ).toBeVisible();
   });
 

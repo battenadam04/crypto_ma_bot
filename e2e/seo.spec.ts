@@ -3,13 +3,13 @@ import { test, expect } from "@playwright/test";
 test.describe("SEO", () => {
   test("homepage has correct meta tags", async ({ page }) => {
     await page.goto("/");
-    await expect(page).toHaveTitle(/DevCraft Studio/);
+    await expect(page).toHaveTitle(/Adam Batten/);
     
     const metaDescription = page.locator('meta[name="description"]');
     await expect(metaDescription).toHaveAttribute("content", /.+/);
 
     const ogTitle = page.locator('meta[property="og:title"]');
-    await expect(ogTitle).toHaveAttribute("content", /DevCraft/);
+    await expect(ogTitle).toHaveAttribute("content", /Adam Batten/);
 
     const ogDescription = page.locator('meta[property="og:description"]');
     await expect(ogDescription).toHaveAttribute("content", /.+/);

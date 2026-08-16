@@ -22,7 +22,7 @@ const reasons = [
     ),
     title: "Security First",
     description:
-      "We implement industry-best security practices, from input validation to encryption, keeping your data safe.",
+      "I implement industry-best security practices, from input validation to encryption, keeping your data safe.",
   },
   {
     icon: (
@@ -52,7 +52,7 @@ const reasons = [
     ),
     title: "On-Time Delivery",
     description:
-      "We respect deadlines. Clear milestones, regular updates, and transparent communication throughout.",
+      "I respect deadlines. Clear milestones, regular updates, and transparent communication throughout.",
   },
   {
     icon: (
@@ -62,7 +62,7 @@ const reasons = [
     ),
     title: "Modern Tech Stack",
     description:
-      "We use the latest, battle-tested technologies: Next.js, React, TypeScript, and more.",
+      "I use the latest, battle-tested technologies: Next.js, React, TypeScript, and more.",
   },
 ];
 
@@ -84,9 +84,9 @@ export default function WhyChooseUs() {
     <section className="py-24 bg-gradient-to-b from-surface-0 to-surface-50">
       <div className="mx-auto max-w-7xl px-6">
         <SectionHeading
-          eyebrow="Why Us"
+          eyebrow="Why Me"
           title="Built Different, Built Better"
-          description="We combine technical excellence with creative design to deliver results that exceed expectations."
+          description="I combine technical excellence with creative design to deliver results that exceed expectations."
         />
 
         <motion.div

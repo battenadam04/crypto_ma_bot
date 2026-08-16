@@ -4,7 +4,7 @@ test.describe("Navigation", () => {
   test("header is visible with logo", async ({ page }) => {
     await page.goto("/");
     const nav = page.getByRole("navigation");
-    await expect(nav.getByRole("link", { name: /DevCraft/ })).toBeVisible();
+    await expect(nav.getByRole("link", { name: /Adam Batten/ })).toBeVisible();
   });
 
   test("navigates to Portfolio page", async ({ page }) => {
@@ -25,7 +25,7 @@ test.describe("Navigation", () => {
     await page.goto("/");
     await page.getByRole("link", { name: "About" }).first().click();
     await expect(page).toHaveURL("/about");
-    await expect(page.getByRole("heading", { level: 1 })).toContainText("DevCraft Studio");
+    await expect(page.getByRole("heading", { level: 1 })).toContainText("Adam Batten");
   });
 
   test("navigates to Contact page", async ({ page }) => {
@@ -46,7 +46,7 @@ test.describe("Navigation", () => {
   test("footer displays company info", async ({ page }) => {
     await page.goto("/");
     const footer = page.locator("footer");
-    await expect(footer.getByText("hello@devcraft.studio")).toBeVisible();
+    await expect(footer.getByText("hello@adambatten.dev")).toBeVisible();
     await expect(footer.getByText(/All rights reserved/)).toBeVisible();
   });
 });

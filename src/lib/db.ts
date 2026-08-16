@@ -8,13 +8,13 @@ const globalForPrisma = globalThis as unknown as {
 };
 
 function resolveDbPath() {
-  const fromEnv = process.env.DATABASE_URL?.replace(/^file:/, "");
-  if (fromEnv) {
-    return path.isAbsolute(fromEnv)
-      ? fromEnv
-      : path.join(process.cwd(), fromEnv);
-  }
-  return path.join(process.cwd(), "prisma", "dev.db");
+  // Keep path statically scoped under prisma/ for Next.js file tracing
+  const fileName =
+    process.env.DATABASE_URL?.replace(/^file:(\.\/)?/, "") || "prisma/dev.db";
+  const relative = fileName.startsWith("prisma/")
+    ? fileName
+    : path.posix.join("prisma", path.posix.basename(fileName));
+  return path.join(/*turbopackIgnore: true*/ process.cwd(), relative);
 }
 
 function createPrismaClient() {

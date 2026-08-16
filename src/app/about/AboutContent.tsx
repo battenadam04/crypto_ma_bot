@@ -9,7 +9,7 @@ const values = [
   {
     title: "Quality First",
     description:
-      "We never cut corners. Every line of code is written with care, tested thoroughly, and optimized for performance.",
+      "I never cut corners. Every line of code is written with care, tested thoroughly, and optimized for performance.",
     icon: "✦",
   },
   {
@@ -21,13 +21,13 @@ const values = [
   {
     title: "Innovation Driven",
     description:
-      "We stay ahead of the curve with modern technologies and best practices to deliver cutting-edge solutions.",
+      "I stay ahead of the curve with modern technologies and best practices to deliver cutting-edge solutions.",
     icon: "🚀",
   },
   {
     title: "Client Success",
     description:
-      "Your success is our success. We measure our work by the impact it has on your business growth.",
+      "Your success is my success. I measure my work by the impact it has on your business growth.",
     icon: "📈",
   },
 ];
@@ -37,19 +37,19 @@ const process = [
     step: "01",
     title: "Discovery",
     description:
-      "We dive deep into your business goals, target audience, and project requirements to create a comprehensive plan.",
+      "I dive deep into your business goals, target audience, and project requirements to create a comprehensive plan.",
   },
   {
     step: "02",
     title: "Design",
     description:
-      "Our designers create wireframes and prototypes that bring your vision to life with pixel-perfect precision.",
+      "I create wireframes and prototypes that bring your vision to life with pixel-perfect precision.",
   },
   {
     step: "03",
     title: "Development",
     description:
-      "We build your project using modern technologies, following best practices for performance and scalability.",
+      "I build your project using modern technologies, following best practices for performance and scalability.",
   },
   {
     step: "04",
@@ -96,14 +96,14 @@ export default function AboutContent() {
             <h1 className="text-4xl font-bold tracking-tight text-surface-900 sm:text-5xl">
               About{" "}
               <span className="bg-gradient-to-r from-brand-600 to-accent-500 bg-clip-text text-transparent">
-                DevCraft Studio
+                Adam Batten
               </span>
             </h1>
             <p className="mt-6 text-lg text-surface-500 leading-relaxed">
-              We&apos;re a passionate team of developers, designers, and
-              strategists who believe that great software can transform
-              businesses. With over 5 years of experience and 50+ projects
-              delivered, we bring expertise and dedication to every project.
+              I&apos;m a developer and designer who believes that great software
+              can transform businesses. With over 5 years of experience and 50+
+              projects delivered, I bring expertise and dedication to every
+              project.
             </p>
           </div>
         </div>
@@ -112,9 +112,9 @@ export default function AboutContent() {
       <section className="py-20">
         <div className="mx-auto max-w-7xl px-6">
           <SectionHeading
-            eyebrow="Our Values"
-            title="What Drives Us"
-            description="The principles that guide every decision we make and every line of code we write."
+            eyebrow="My Values"
+            title="What Drives Me"
+            description="The principles that guide every decision I make and every line of code I write."
           />
 
           <motion.div
@@ -146,8 +146,8 @@ export default function AboutContent() {
       <section className="py-20 bg-surface-50">
         <div className="mx-auto max-w-7xl px-6">
           <SectionHeading
-            eyebrow="Our Process"
-            title="How We Work"
+            eyebrow="My Process"
+            title="How I Work"
             description="A proven 4-step process that ensures every project is delivered on time, on budget, and beyond expectations."
           />
 
@@ -188,8 +188,8 @@ export default function AboutContent() {
         <div className="mx-auto max-w-7xl px-6">
           <SectionHeading
             eyebrow="Tech Stack"
-            title="Technologies We Use"
-            description="We use modern, battle-tested technologies to build robust and scalable solutions."
+            title="Technologies I Use"
+            description="I use modern, battle-tested technologies to build robust and scalable solutions."
           />
 
           <motion.div
@@ -229,7 +229,7 @@ export default function AboutContent() {
             </Link>
             <Link href="/contact">
               <Button size="lg" variant="outline">
-                Contact Us
+                Contact Me
               </Button>
             </Link>
           </div>

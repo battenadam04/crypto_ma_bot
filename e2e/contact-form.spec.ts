@@ -50,8 +50,8 @@ test.describe("Contact Form", () => {
   test("displays contact info cards", async ({ page }) => {
     await page.goto("/contact");
     const main = page.getByRole("main");
-    await expect(main.getByText("hello@devcraft.studio")).toBeVisible();
+    await expect(main.getByText("hello@adambatten.dev")).toBeVisible();
     await expect(main.getByText("+1 (555) 123-4567")).toBeVisible();
-    await expect(main.getByText("Remote-first team")).toBeVisible();
+    await expect(main.getByText("Remote-first")).toBeVisible();
   });
 });

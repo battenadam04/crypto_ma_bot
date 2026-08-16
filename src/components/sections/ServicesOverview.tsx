@@ -40,9 +40,9 @@ export default function ServicesOverview({ services }: ServicesOverviewProps) {
     <section className="py-24 bg-gradient-to-b from-surface-50 to-surface-0">
       <div className="mx-auto max-w-7xl px-6">
         <SectionHeading
-          eyebrow="What We Offer"
-          title="Our Services"
-          description="From concept to launch, we provide end-to-end web development services tailored to your business needs."
+          eyebrow="What I Offer"
+          title="My Services"
+          description="From concept to launch, I provide end-to-end web development services tailored to your business needs."
         />
 
         <motion.div

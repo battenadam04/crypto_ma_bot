@@ -39,9 +39,9 @@ export default function FeaturedProjects({ projects }: FeaturedProjectsProps) {
     <section className="py-24 bg-surface-0">
       <div className="mx-auto max-w-7xl px-6">
         <SectionHeading
-          eyebrow="Our Work"
+          eyebrow="My Work"
           title="Featured Projects"
-          description="Take a look at some of our recent work that has helped businesses grow and succeed online."
+          description="Take a look at some of my recent work that has helped businesses grow and succeed online."
         />
 
         <motion.div

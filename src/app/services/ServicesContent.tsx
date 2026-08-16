@@ -47,13 +47,13 @@ export default function ServicesContent({ services }: ServicesContentProps) {
             {FIRST_TIME_OFFER.discount}% off first project — {FIRST_TIME_OFFER.code}
           </Badge>
           <h1 className="text-4xl font-bold tracking-tight text-surface-900 sm:text-5xl">
-            Our{" "}
+            My{" "}
             <span className="bg-gradient-to-r from-brand-600 to-accent-500 bg-clip-text text-transparent">
               Services
             </span>
           </h1>
           <p className="mt-4 text-lg text-surface-500 max-w-2xl mx-auto">
-            From concept to launch, we deliver end-to-end web solutions.
+            From concept to launch, I deliver end-to-end web solutions.
             Every project includes a detailed proposal with pricing and timeline
             estimates.
           </p>

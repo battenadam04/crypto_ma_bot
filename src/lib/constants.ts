@@ -1,12 +1,13 @@
 export const SITE_CONFIG = {
-  name: "DevCraft Studio",
-  title: "DevCraft Studio — Web Development & Design",
+  name: "Adam Batten",
+  title: "Adam Batten — Web Development & Design",
   description:
-    "We build high-performance web applications, e-commerce solutions, and digital experiences that drive business growth. Get a free consultation today.",
+    "I build high-performance web applications, e-commerce solutions, and digital experiences that drive business growth. Get a free consultation today.",
   url: process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000",
   ogImage: "/images/og-image.jpg",
-  creator: "DevCraft Studio",
+  creator: "Adam Batten",
   keywords: [
+    "Adam Batten",
     "web development",
     "web design",
     "full-stack development",
@@ -46,14 +47,14 @@ export const TIMELINE_OPTIONS = [
 ] as const;
 
 export const SOCIAL_LINKS = {
-  github: "https://github.com",
+  github: "https://github.com/battenadam04",
   linkedin: "https://linkedin.com",
   twitter: "https://twitter.com",
 } as const;
 
 export const FIRST_TIME_OFFER = {
   title: "First Project Discount",
-  description: "20% off your first project with us",
+  description: "20% off your first project with me",
   code: "WELCOME20",
   discount: 20,
 } as const;

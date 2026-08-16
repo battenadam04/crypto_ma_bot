@@ -78,7 +78,7 @@ export default function Hero() {
             </motion.div>
 
             <h1 className="text-4xl font-extrabold tracking-tight text-surface-900 sm:text-5xl lg:text-6xl xl:text-7xl">
-              We Build{" "}
+              I Build{" "}
               <span className="bg-gradient-to-r from-brand-600 via-accent-500 to-pop-500 bg-clip-text text-transparent animate-gradient">
                 Digital Experiences
               </span>{" "}
@@ -86,7 +86,7 @@ export default function Hero() {
             </h1>
 
             <p className="mt-6 text-lg text-surface-500 leading-relaxed max-w-lg sm:text-xl">
-              From stunning websites to powerful web applications — we transform
+              From stunning websites to powerful web applications — I transform
               your vision into reality with cutting-edge technology and
               pixel-perfect design.
             </p>
@@ -102,7 +102,7 @@ export default function Hero() {
               </Link>
               <Link href="/portfolio">
                 <Button size="lg" variant="outline">
-                  View Our Work
+                  View My Work
                 </Button>
               </Link>
             </div>
@@ -141,7 +141,7 @@ export default function Hero() {
                   <div className="h-3 w-3 rounded-full bg-success-500" />
                 </div>
                 <pre className="text-sm text-surface-300 font-mono leading-relaxed overflow-hidden">
-                  <code>{`const project = await DevCraft
+                  <code>{`const project = await AdamBatten
   .create({
     design: "pixel-perfect",
     performance: "blazing-fast",
@@ -149,7 +149,7 @@ export default function Hero() {
     animations: "smooth",
   });
 
-// Your vision, our expertise
+// Your vision, my expertise
 await project.launch(); 🚀`}</code>
                 </pre>
               </div>

@@ -25,12 +25,12 @@ export default function Header() {
   return (
     <header className="sticky top-0 z-50 border-b border-surface-200/60 bg-surface-0/80 backdrop-blur-xl">
       <nav aria-label="Main navigation" className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
-        <Link href="/" className="flex items-center gap-2 group" aria-label="DevCraft Studio home">
+        <Link href="/" className="flex items-center gap-2 group" aria-label="Adam Batten home">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-brand-500 to-accent-500 text-white font-bold text-lg shadow-lg shadow-brand-500/25 group-hover:shadow-brand-500/40 transition-shadow" aria-hidden="true">
-            D
+            AB
           </div>
           <span className="text-xl font-bold text-surface-900">
-            Dev<span className="text-brand-600">Craft</span>
+            Adam <span className="text-brand-600">Batten</span>
           </span>
         </Link>
 

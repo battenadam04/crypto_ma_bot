@@ -7,16 +7,16 @@ export default function Footer() {
       <div className="mx-auto max-w-7xl px-6 py-16">
         <div className="grid gap-12 md:grid-cols-4">
           <div className="md:col-span-2">
-            <Link href="/" className="flex items-center gap-2" aria-label="DevCraft Studio home">
+            <Link href="/" className="flex items-center gap-2" aria-label="Adam Batten home">
               <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-brand-500 to-accent-500 text-white font-bold text-lg" aria-hidden="true">
-                D
+                AB
               </div>
               <span className="text-xl font-bold text-surface-900">
-                Dev<span className="text-brand-600">Craft</span>
+                Adam <span className="text-brand-600">Batten</span>
               </span>
             </Link>
             <p className="mt-4 max-w-sm text-surface-500">
-              We craft high-performance web applications and digital experiences
+              I craft high-performance web applications and digital experiences
               that drive business growth. Let&apos;s build something amazing
               together.
             </p>
@@ -80,7 +80,7 @@ export default function Footer() {
               Contact
             </h3>
             <ul className="mt-4 space-y-3 text-sm text-surface-500">
-              <li>hello@devcraft.studio</li>
+              <li>hello@adambatten.dev</li>
               <li>+1 (555) 123-4567</li>
               <li>Mon–Fri, 9am–6pm EST</li>
             </ul>
@@ -88,7 +88,7 @@ export default function Footer() {
         </div>
 
         <div className="mt-12 border-t border-surface-200 pt-8 text-center text-sm text-surface-400">
-          <p>&copy; {new Date().getFullYear()} DevCraft Studio. All rights reserved.</p>
+          <p>&copy; {new Date().getFullYear()} Adam Batten. All rights reserved.</p>
         </div>
       </div>
     </footer>

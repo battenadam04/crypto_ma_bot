@@ -36,8 +36,8 @@ export default function Testimonials({ testimonials }: TestimonialsProps) {
       <div className="mx-auto max-w-7xl px-6">
         <SectionHeading
           eyebrow="Testimonials"
-          title="What Our Clients Say"
-          description="Don't just take our word for it — hear from the businesses we've helped succeed."
+          title="What My Clients Say"
+          description="Don't just take my word for it — hear from the businesses I've helped succeed."
         />
 
         <motion.div
