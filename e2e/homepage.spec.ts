@@ -34,7 +34,7 @@ test.describe("Homepage", () => {
   test("displays services overview section", async ({ page }) => {
     await page.goto("/");
     await expect(page.getByText("My Services")).toBeVisible();
-    await expect(page.getByText("Custom Web Application")).toBeVisible();
+    await expect(page.getByText("SEO Landing Page")).toBeVisible();
   });
 
   test("displays testimonials section", async ({ page }) => {

@@ -31,24 +31,24 @@ export function formatMoney(amountGbp: number, currency: Currency): string {
 export function getBudgetOptions(currency: Currency) {
   return [
     {
-      value: "under-5k",
-      label: `Under ${formatMoney(5000, currency)}`,
+      value: "under-1k",
+      label: `Under ${formatMoney(1000, currency)}`,
+    },
+    {
+      value: "1k-2.5k",
+      label: `${formatMoney(1000, currency)} — ${formatMoney(2500, currency)}`,
+    },
+    {
+      value: "2.5k-5k",
+      label: `${formatMoney(2500, currency)} — ${formatMoney(5000, currency)}`,
     },
     {
       value: "5k-10k",
       label: `${formatMoney(5000, currency)} — ${formatMoney(10000, currency)}`,
     },
     {
-      value: "10k-25k",
-      label: `${formatMoney(10000, currency)} — ${formatMoney(25000, currency)}`,
-    },
-    {
-      value: "25k-50k",
-      label: `${formatMoney(25000, currency)} — ${formatMoney(50000, currency)}`,
-    },
-    {
-      value: "50k-plus",
-      label: `${formatMoney(50000, currency)}+`,
+      value: "10k-plus",
+      label: `${formatMoney(10000, currency)}+`,
     },
   ];
 }

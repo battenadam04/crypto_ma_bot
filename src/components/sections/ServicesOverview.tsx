@@ -45,7 +45,7 @@ export default function ServicesOverview({ services }: ServicesOverviewProps) {
         <SectionHeading
           eyebrow="What I Offer"
           title="My Services"
-          description="From concept to launch, I provide end-to-end web development services tailored to your business needs."
+          description="Solo-built projects with clear scopes and realistic pricing — from landing pages and site fixes to shops and custom apps."
         />
 
         <motion.div

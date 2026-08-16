@@ -59,9 +59,9 @@ export default function ServicesContent({ services }: ServicesContentProps) {
             </span>
           </h1>
           <p className="mt-4 text-lg text-surface-500 max-w-2xl mx-auto">
-            From concept to launch, I deliver end-to-end web solutions.
-            Every project includes a detailed proposal with pricing and timeline
-            estimates.
+            Realistic solo pricing for landing pages, site fixes, business
+            sites, shops, and custom apps. Every quote includes a clear scope,
+            timeline, and what is (and isn&apos;t) included.
           </p>
           <div className="mt-6 flex justify-center">
             <CurrencyToggle />

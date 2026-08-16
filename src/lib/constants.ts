@@ -30,11 +30,11 @@ export const NAV_LINKS = [
 ] as const;
 
 export const BUDGET_OPTIONS = [
-  { value: "under-5k", label: "Under £5,000" },
+  { value: "under-1k", label: "Under £1,000" },
+  { value: "1k-2.5k", label: "£1,000 — £2,500" },
+  { value: "2.5k-5k", label: "£2,500 — £5,000" },
   { value: "5k-10k", label: "£5,000 — £10,000" },
-  { value: "10k-25k", label: "£10,000 — £25,000" },
-  { value: "25k-50k", label: "£25,000 — £50,000" },
-  { value: "50k-plus", label: "£50,000+" },
+  { value: "10k-plus", label: "£10,000+" },
 ] as const;
 
 export const TIMELINE_OPTIONS = [

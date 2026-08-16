@@ -112,13 +112,92 @@ const projects = [
   { title: "Restaurant Management System", slug: "restaurant-management", description: "End-to-end restaurant solution with POS, online ordering, table reservations, and kitchen display.", imageUrl: "/images/projects/restaurant.jpg", tags: "Next.js,TypeScript,PostgreSQL,Socket.io", featured: false, order: 6 },
 ];
 
+// Solo-freelancer GBP ranges — scoped for one developer, not an agency team.
 const services = [
-  { title: "Custom Web Application", slug: "custom-web-app", description: "Full-stack web applications tailored to your business needs. From concept to deployment with ongoing support.", features: "Custom UI/UX Design,Responsive Development,API Integration,Database Architecture,Authentication & Security,Deployment & DevOps", priceFrom: 5000, priceTo: 25000, estimatedDays: 30, icon: "code", popular: true, order: 1 },
-  { title: "E-Commerce Solution", slug: "ecommerce-solution", description: "Complete online store setup with payment processing, inventory management, and admin dashboard.", features: "Product Catalog,Shopping Cart & Checkout,Payment Gateway Integration,Order Management,Inventory Tracking,Customer Accounts", priceFrom: 8000, priceTo: 35000, estimatedDays: 45, icon: "shopping-cart", popular: true, order: 2 },
-  { title: "Landing Page & Marketing Site", slug: "landing-page", description: "High-converting landing pages and marketing websites optimized for SEO and performance.", features: "Conversion-Optimized Design,SEO Optimization,Analytics Integration,A/B Testing Ready,CMS Integration,Performance Optimization", priceFrom: 2000, priceTo: 8000, estimatedDays: 14, icon: "layout", popular: false, order: 3 },
-  { title: "API Development & Integration", slug: "api-development", description: "RESTful or GraphQL APIs, third-party integrations, and microservice architecture.", features: "RESTful API Design,GraphQL Implementation,Third-Party Integrations,Authentication & Authorization,Rate Limiting & Caching,Documentation", priceFrom: 3000, priceTo: 15000, estimatedDays: 21, icon: "server", popular: false, order: 4 },
-  { title: "UI/UX Design & Prototyping", slug: "ui-ux-design", description: "User-centered design with wireframes, prototypes, and design systems for digital products.", features: "User Research,Wireframing,Interactive Prototypes,Design System,Usability Testing,Responsive Design", priceFrom: 3000, priceTo: 12000, estimatedDays: 21, icon: "palette", popular: false, order: 5 },
-  { title: "Performance & SEO Optimization", slug: "performance-seo", description: "Speed up your website, improve search rankings, and boost organic traffic.", features: "Core Web Vitals Optimization,Technical SEO Audit,Content Strategy,Schema Markup,Site Speed Optimization,Analytics Setup", priceFrom: 1500, priceTo: 6000, estimatedDays: 10, icon: "zap", popular: false, order: 6 },
+  {
+    title: "SEO Landing Page",
+    slug: "seo-landing-page",
+    description:
+      "A single high-converting landing page built for search and leads — ideal for a product launch, local service, or campaign. Designed, built, and handed over by me end to end.",
+    features:
+      "Mobile-first responsive layout,Clear hero + CTA sections,On-page SEO (titles, meta, headings, schema),Contact or lead-capture form,Analytics & conversion tracking,Fast load / Core Web Vitals focus,Basic copy structure & section wireframe,Deployed live with handover notes",
+    priceFrom: 650,
+    priceTo: 1800,
+    estimatedDays: 8,
+    icon: "layout",
+    popular: true,
+    order: 1,
+  },
+  {
+    title: "Website Fixes & Improvements",
+    slug: "website-fixes",
+    description:
+      "Already have a site that is broken, slow, or awkward on mobile? I diagnose and fix real issues — bugs, forms, layout, content updates, and small feature tweaks — without a full rebuild.",
+    features:
+      "Bug & broken-link fixes,Form and email delivery repairs,Mobile / responsive layout fixes,Content & image updates,Plugin / dependency conflict fixes,Small feature additions,Speed quick-wins,Clear report of what changed",
+    priceFrom: 200,
+    priceTo: 900,
+    estimatedDays: 5,
+    icon: "wrench",
+    popular: true,
+    order: 2,
+  },
+  {
+    title: "Business Website",
+    slug: "business-website",
+    description:
+      "A polished multi-page site for your business (typically Home, About, Services, Contact). Clean design, solid SEO foundations, and easy for you to keep updated.",
+    features:
+      "4–8 custom pages,Mobile-responsive design,Contact form with email notifications,On-page SEO foundations,Google Analytics / Search Console setup,Basic blog or news section (optional),Hosting & domain handover,1 revision round included",
+    priceFrom: 1200,
+    priceTo: 3500,
+    estimatedDays: 14,
+    icon: "palette",
+    popular: false,
+    order: 3,
+  },
+  {
+    title: "Online Store / E-Commerce",
+    slug: "ecommerce-store",
+    description:
+      "A practical online shop for a solo build: product catalogue, cart, secure checkout, and order emails. Scoped for real catalogues — not an enterprise marketplace.",
+    features:
+      "Product catalogue & categories,Shopping cart & checkout,Stripe (or similar) payments,Order confirmation emails,Basic inventory / stock flags,Customer accounts (optional),Mobile-friendly storefront,Admin guidance for adding products",
+    priceFrom: 2000,
+    priceTo: 6500,
+    estimatedDays: 25,
+    icon: "shopping-cart",
+    popular: false,
+    order: 4,
+  },
+  {
+    title: "Custom Web Application",
+    slug: "custom-web-app",
+    description:
+      "A focused web app or internal tool built solo — dashboards, booking flows, client portals, or workflow software. Priced and planned for what one developer can ship well.",
+    features:
+      "Scoped discovery & build plan,Custom UI for your workflows,Secure login / roles as needed,Database & API backend,Integrations (email, payments, CRMs),Responsive web app,Staging + production deploy,Handover & short support window",
+    priceFrom: 3000,
+    priceTo: 10000,
+    estimatedDays: 30,
+    icon: "code",
+    popular: false,
+    order: 5,
+  },
+  {
+    title: "Speed & SEO Tune-up",
+    slug: "speed-seo-tuneup",
+    description:
+      "Audit and improve an existing site: faster pages, cleaner technical SEO, and fixes that help you rank and convert better — without rebuilding from scratch.",
+    features:
+      "Technical SEO audit,Core Web Vitals / speed fixes,Meta titles, descriptions & headings,Sitemap & robots cleanup,Schema markup where useful,Image & asset optimisation,Analytics / Search Console check,Prioritised fix list + implementation",
+    priceFrom: 350,
+    priceTo: 1200,
+    estimatedDays: 6,
+    icon: "zap",
+    popular: false,
+    order: 6,
+  },
 ];
 
 const testimonials = [
@@ -131,6 +210,18 @@ const testimonials = [
 console.log("Seeding database...");
 projects.forEach(upsertProject);
 services.forEach(upsertService);
+
+// Drop retired catalogue entries (and any requests tied to them)
+const keepSlugs = services.map((s) => s.slug);
+const placeholders = keepSlugs.map(() => "?").join(", ");
+const obsolete = db
+  .prepare(`SELECT id FROM Service WHERE slug NOT IN (${placeholders})`)
+  .all(...keepSlugs);
+for (const row of obsolete) {
+  db.prepare("DELETE FROM ServiceRequest WHERE serviceId = ?").run(row.id);
+  db.prepare("DELETE FROM Service WHERE id = ?").run(row.id);
+}
+
 testimonials.forEach(insertTestimonial);
 console.log("Seeding complete.");
 db.close();

@@ -66,7 +66,7 @@ describe("serviceRequestSchema", () => {
       company: "Acme Corp",
       phone: "+1234567890",
       serviceId: "some-uuid-here",
-      budget: "10k-25k",
+      budget: "2.5k-5k",
       timeline: "1-month",
       description: "We need a custom web application for managing our inventory and orders.",
     };

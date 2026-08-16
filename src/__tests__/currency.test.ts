@@ -23,8 +23,15 @@ describe("currency", () => {
     expect(formatMoney(5000, "USD")).toMatch(/\$6,350/);
   });
 
-  it("builds budget options for the active currency", () => {
+  it("builds solo-friendly budget bands", () => {
     const gbp = getBudgetOptions("GBP");
+    expect(gbp.map((o) => o.value)).toEqual([
+      "under-1k",
+      "1k-2.5k",
+      "2.5k-5k",
+      "5k-10k",
+      "10k-plus",
+    ]);
     expect(gbp[0].label).toContain("£");
     const usd = getBudgetOptions("USD");
     expect(usd[0].label).toContain("$");
