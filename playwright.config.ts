@@ -23,5 +23,9 @@ export default defineConfig({
     url: "http://localhost:3000",
     reuseExistingServer: !process.env.CI,
     timeout: 180000,
+    env: {
+      ...process.env,
+      PORTAL_DEV_OTP: "1",
+    },
   },
 });

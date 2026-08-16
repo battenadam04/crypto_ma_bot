@@ -137,3 +137,44 @@ export async function sendServiceRequestNotification(input: {
 
   return { id: result?.id ?? "sent" };
 }
+
+export async function sendPortalOtpEmail(input: {
+  to: string;
+  code: string;
+}): Promise<{ id: string }> {
+  const resend = getResend();
+  if (!resend) {
+    throw new Error("Email is not configured (missing RESEND_API_KEY)");
+  }
+
+  const subject = "Your portal PIN — Adam Batten";
+  const text = [
+    `Your one-time portal PIN is: ${input.code}`,
+    ``,
+    `It expires in 10 minutes.`,
+    `If you did not request this, you can ignore this email.`,
+  ].join("\n");
+
+  const html = `
+    <div style="font-family: system-ui, sans-serif; line-height: 1.5; color: #0f172a;">
+      <h2 style="margin: 0 0 12px;">Your portal PIN</h2>
+      <p style="margin: 0 0 16px;">Use this code to open your project portal. It expires in <strong>10 minutes</strong>.</p>
+      <p style="margin: 0 0 16px; font-size: 32px; font-weight: 700; letter-spacing: 0.2em;">${escapeHtml(input.code)}</p>
+      <p style="margin: 0; color: #64748b; font-size: 14px;">If you did not request this, you can ignore this email.</p>
+    </div>
+  `;
+
+  const { data: result, error } = await resend.emails.send({
+    from: FROM_EMAIL,
+    to: [input.to],
+    subject,
+    text,
+    html,
+  });
+
+  if (error) {
+    throw new Error(error.message || "Failed to send portal PIN email");
+  }
+
+  return { id: result?.id ?? "sent" };
+}

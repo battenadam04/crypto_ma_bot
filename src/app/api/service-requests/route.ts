@@ -39,8 +39,8 @@ export async function POST(request: NextRequest) {
           email: parsed.data.email,
           company: parsed.data.company,
           serviceTitle: service.title,
-          budget: parsed.data.budget,
-          timeline: parsed.data.timeline,
+          budget: parsed.data.budget || "—",
+          timeline: parsed.data.timeline || "—",
           description: parsed.data.description,
         });
         emailId = sent.id;

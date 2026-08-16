@@ -223,5 +223,54 @@ for (const row of obsolete) {
 }
 
 testimonials.forEach(insertTestimonial);
+
+// Demo client portal (OTP login uses this email in local/dev)
+const demoEmail = "client@example.com";
+const existingPortal = db
+  .prepare("SELECT id FROM ClientPortal WHERE clientEmail = ?")
+  .get(demoEmail);
+
+if (!existingPortal) {
+  const portalId = randomUUID();
+  db.prepare(
+    `INSERT INTO ClientPortal (id, title, clientName, clientEmail, status, summary, createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+  ).run(
+    portalId,
+    "Demo — SEO Landing Page",
+    "Alex Client",
+    demoEmail,
+    "active",
+    "Welcome! This is a sample portal so you can try chat and progress tracking.",
+  );
+
+  const milestones = [
+    ["Kick-off & requirements", "Align on goals and scope", "done", 0],
+    ["Design / structure", "Layout and content plan", "done", 1],
+    ["Build in progress", "Implementation", "in_progress", 2],
+    ["Review & revisions", "Your feedback round", "pending", 3],
+    ["Launch & handover", "Go live and hand over", "pending", 4],
+  ];
+
+  const insertMilestone = db.prepare(
+    `INSERT INTO PortalMilestone (id, portalId, title, description, status, "order", createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+  );
+  for (const [title, description, status, order] of milestones) {
+    insertMilestone.run(randomUUID(), portalId, title, description, status, order);
+  }
+
+  db.prepare(
+    `INSERT INTO PortalMessage (id, portalId, senderRole, senderName, body, createdAt)
+     VALUES (?, ?, ?, ?, ?, datetime('now'))`,
+  ).run(
+    randomUUID(),
+    portalId,
+    "admin",
+    "Adam Batten",
+    "Hi Alex — portal is ready. Drop questions here anytime and watch the milestones update as we go.",
+  );
+}
+
 console.log("Seeding complete.");
 db.close();

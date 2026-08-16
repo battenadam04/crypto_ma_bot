@@ -117,6 +117,15 @@ CONTACT_FROM_EMAIL="Adam Batten <hello@yourdomain.com>"
 
 Without `RESEND_API_KEY`, submissions still save to the local SQLite DB (useful for tests/dev). On Vercel, set the API key so you actually receive the emails.
 
+## Client portal (OTP)
+
+After work begins, create a **portal** for the client (signed in as admin). Clients open `/portal`, enter their email, and receive a **6-digit PIN** (no passwords). “Forgot PIN” simply emails a new code.
+
+- **Client:** chat + live progress milestones (read-only tracking)
+- **Admin** (`ADMIN_EMAIL` / `adambatten@live.co.uk`): same screen, plus controls to update milestones, project status, and summary; create portals from `/portal/home`
+
+Locally without Resend, the PIN is returned as `devCode` in the API response and printed in the server log. Seed includes a demo client: `client@example.com`.
+
 ## Testing
 
 ```bash

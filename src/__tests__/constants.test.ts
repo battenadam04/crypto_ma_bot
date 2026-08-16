@@ -19,13 +19,14 @@ describe("SITE_CONFIG", () => {
 
 describe("NAV_LINKS", () => {
   it("contains expected navigation items", () => {
-    expect(NAV_LINKS.length).toBe(5);
+    expect(NAV_LINKS.length).toBe(6);
     const labels = NAV_LINKS.map((l) => l.label);
     expect(labels).toContain("Home");
     expect(labels).toContain("Portfolio");
     expect(labels).toContain("Services");
     expect(labels).toContain("About");
     expect(labels).toContain("Contact");
+    expect(labels).toContain("Portal");
   });
 
   it("all links have href starting with /", () => {

@@ -27,6 +27,7 @@ export const NAV_LINKS = [
   { href: "/services", label: "Services" },
   { href: "/about", label: "About" },
   { href: "/contact", label: "Contact" },
+  { href: "/portal", label: "Portal" },
 ] as const;
 
 export const BUDGET_OPTIONS = [

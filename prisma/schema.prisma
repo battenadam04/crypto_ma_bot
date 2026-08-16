@@ -77,3 +77,67 @@ model Testimonial {
   featured  Boolean  @default(false)
   createdAt DateTime @default(now())
 }
+
+/// Active client engagement — OTP login grants access to chat + progress.
+model ClientPortal {
+  id          String   @id @default(uuid())
+  title       String
+  clientName  String
+  clientEmail String
+  status      String   @default("active") // active | paused | completed
+  summary     String   @default("")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  milestones  PortalMilestone[]
+  messages    PortalMessage[]
+
+  @@index([clientEmail])
+}
+
+model PortalMilestone {
+  id          String   @id @default(uuid())
+  portalId    String
+  portal      ClientPortal @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  title       String
+  description String   @default("")
+  status      String   @default("pending") // pending | in_progress | done
+  order       Int      @default(0)
+  updatedAt   DateTime @updatedAt
+  createdAt   DateTime @default(now())
+
+  @@index([portalId])
+}
+
+model PortalMessage {
+  id         String   @id @default(uuid())
+  portalId   String
+  portal     ClientPortal @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  senderRole String   // client | admin
+  senderName String
+  body       String
+  createdAt  DateTime @default(now())
+
+  @@index([portalId])
+}
+
+model PortalOtp {
+  id        String   @id @default(uuid())
+  email     String
+  codeHash  String
+  attempts  Int      @default(0)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([email])
+}
+
+model PortalSession {
+  id        String   @id @default(uuid())
+  tokenHash String   @unique
+  email     String
+  isAdmin   Boolean  @default(false)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([email])
+}
