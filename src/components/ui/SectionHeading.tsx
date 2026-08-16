@@ -32,7 +32,7 @@ export default function SectionHeading({
         {title}
       </h2>
       {description && (
-        <p className="mt-4 text-lg text-surface-500 max-w-2xl mx-auto">
+        <p className="mt-4 text-lg text-surface-600 max-w-2xl mx-auto">
           {description}
         </p>
       )}

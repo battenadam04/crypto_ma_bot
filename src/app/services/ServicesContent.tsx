@@ -69,7 +69,7 @@ export default function ServicesContent({ services }: ServicesContentProps) {
         </div>
       </section>
 
-      <section className="py-16">
+      <section className="py-16 bg-surface-0">
         <div className="mx-auto max-w-7xl px-6">
           <motion.div
             variants={container}

@@ -58,7 +58,7 @@ export default function ContactContent() {
         </div>
       </section>
 
-      <section className="py-16">
+      <section className="py-16 bg-surface-0">
         <div className="mx-auto max-w-7xl px-6">
           <div className="grid gap-8 md:grid-cols-3 mb-16">
             {contactInfo.map((info, i) => (

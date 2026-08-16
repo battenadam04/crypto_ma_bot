@@ -36,7 +36,7 @@ export default function PortfolioGrid({ projects, tags }: PortfolioGridProps) {
         );
 
   return (
-    <section className="py-16">
+    <section className="py-16 bg-surface-0">
       <div className="mx-auto max-w-7xl px-6">
         <div className="mb-10 flex flex-wrap gap-2 justify-center">
           <button
