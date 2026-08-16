@@ -102,7 +102,7 @@ export default function WhyChooseUs() {
               variants={item}
               className="group flex gap-4 rounded-2xl p-6 transition-colors hover:bg-surface-0 hover:shadow-lg hover:shadow-brand-500/5"
             >
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-600 group-hover:bg-brand-100 transition-colors">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-brand-100 text-brand-700 group-hover:bg-brand-100 transition-colors">
                 {reason.icon}
               </div>
               <div>

@@ -70,7 +70,7 @@ export default function ContactContent() {
                 transition={{ delay: i * 0.1, duration: 0.4 }}
               >
                 <Card className="text-center h-full">
-                  <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-brand-50 text-brand-600">
+                  <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-brand-100 text-brand-700">
                     {info.icon}
                   </div>
                   <h3 className="font-semibold text-surface-900">
