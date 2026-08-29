@@ -140,6 +140,32 @@ def _fetch_binance_margin_symbols(exchange_obj, quote='USDT'):
     return allowed
 
 
+def _phemex_swap_quote_volumes():
+    """24h quote turnover (USDT) for Phemex swaps via public REST (bulk tickers omit volume in ccxt)."""
+    import json
+    import urllib.error
+    import urllib.request
+
+    url = "https://api.phemex.com/md/v3/ticker/24hr/all"
+    try:
+        with urllib.request.urlopen(url, timeout=30) as resp:
+            payload = json.loads(resp.read())
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as e:
+        log_event(f"_phemex_swap_quote_volumes failed: {e}")
+        return {}
+
+    out = {}
+    for row in payload.get("result") or []:
+        sym = row.get("symbol")
+        if not sym:
+            continue
+        try:
+            out[str(sym)] = float(row.get("turnoverRv") or 0)
+        except (TypeError, ValueError):
+            out[str(sym)] = 0.0
+    return out
+
+
 def get_top_phemex_usdt_swaps(
     exchange,
     top_n=20,
@@ -166,11 +192,12 @@ def get_top_phemex_usdt_swaps(
         )
         use_cap = False
     exchange.load_markets()
+    bulk_volumes = _phemex_swap_quote_volumes()
     try:
         tickers = exchange.fetch_tickers()
     except Exception as e:
         log_event(f"get_top_phemex_usdt_swaps: fetch_tickers failed: {e}")
-        return []
+        tickers = {}
 
     rows = []
     for symbol, m in (exchange.markets or {}).items():
@@ -185,6 +212,9 @@ def get_top_phemex_usdt_swaps(
             continue
         t = tickers.get(symbol) or {}
         qv = t.get('quoteVolume')
+        if qv is None:
+            market_id = m.get('id') or (m.get('info') or {}).get('symbol')
+            qv = bulk_volumes.get(str(market_id)) if market_id else None
         if qv is None:
             continue
         try:

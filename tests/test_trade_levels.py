@@ -40,6 +40,28 @@ class TestCalculateTradeLevels:
         assert levels['take_profit'] > levels['entry']
         assert levels['stop_loss'] < levels['entry']
 
+    def test_range_structure_sl_beyond_support(self):
+        df = pd.DataFrame({
+            'close': [100.0], 'high': [101.0], 'low': [99.0],
+            'support': [98.0], 'resistance': [108.0],
+            'ATR': [1.0],
+        })
+        levels = calculate_trade_levels(100.0, 'buy', df, 0, 'range')
+        assert levels['stop_loss'] < 98.0
+        assert levels['take_profit'] > 100.0
+        assert levels['take_profit'] <= 108.0
+
+    def test_range_structure_sl_beyond_resistance_for_short(self):
+        df = pd.DataFrame({
+            'close': [107.0], 'high': [108.0], 'low': [106.0],
+            'support': [98.0], 'resistance': [108.0],
+            'ATR': [1.0],
+        })
+        levels = calculate_trade_levels(107.0, 'sell', df, 0, 'range')
+        assert levels['stop_loss'] > 108.0
+        assert levels['take_profit'] < 107.0
+        assert levels['take_profit'] >= 98.0
+
     def test_scalp_strategy_levels(self, atr_df):
         levels = calculate_trade_levels(105.0, 'sell', atr_df, len(atr_df) - 1, 'scalp')
         assert levels['take_profit'] < levels['entry']

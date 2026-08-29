@@ -77,6 +77,88 @@ def add_atr_column(df, period=7):
     df.drop(columns=['H-L', 'H-PC', 'L-PC', 'TR'], inplace=True)
     return df
 
+
+def _price_precision(price: float) -> int:
+    if price < 0.01:
+        return 8
+    if price < 1:
+        return 6
+    if price < 100:
+        return 4
+    return 2
+
+
+def _range_sl_buffer(reference_price: float, atr: float) -> float:
+    """Distance beyond support/resistance for range invalidation stops."""
+    import config as app_config
+    pct = float(getattr(app_config, "RANGE_SL_BUFFER_PCT", 0.003))
+    atr_mult = float(getattr(app_config, "RANGE_SL_ATR_MULT", 0.5))
+    return max(reference_price * pct, atr * atr_mult)
+
+
+def _calculate_range_structure_levels(price, direction, df, start_idx):
+    """
+    Industry-style range exits: SL beyond the range edge, TP toward mid or opposite edge.
+    Returns level dict or None if S/R unavailable / geometry invalid (caller falls back to ATR).
+    """
+    import config as app_config
+
+    row = df.iloc[start_idx]
+    support = row.get("support")
+    resistance = row.get("resistance")
+    if support is None or resistance is None or pd.isna(support) or pd.isna(resistance):
+        return None
+
+    support = float(support)
+    resistance = float(resistance)
+    if support <= 0 or resistance <= 0 or support >= resistance:
+        return None
+
+    atr = df["ATR"].iloc[start_idx]
+    if pd.isna(atr) or atr <= 0:
+        atr = price * 0.003
+
+    touch_inset = float(getattr(app_config, "RANGE_TOUCH_BUFFER", 0.015))
+    tp_target = str(getattr(app_config, "RANGE_TP_TARGET", "opposite")).strip().lower()
+    precision = _price_precision(price)
+    entry = round(float(price), precision)
+
+    if direction == "buy":
+        sl_buf = _range_sl_buffer(support, atr)
+        raw_sl = support - sl_buf
+        if tp_target == "mid":
+            raw_tp = (support + resistance) / 2.0
+        else:
+            raw_tp = resistance * (1.0 - touch_inset)
+        if raw_sl >= entry or raw_tp <= entry:
+            return None
+    else:
+        sl_buf = _range_sl_buffer(resistance, atr)
+        raw_sl = resistance + sl_buf
+        if tp_target == "mid":
+            raw_tp = (support + resistance) / 2.0
+        else:
+            raw_tp = support * (1.0 + touch_inset)
+        if raw_sl <= entry or raw_tp >= entry:
+            return None
+
+    tp = round(raw_tp, precision)
+    sl = round(raw_sl, precision)
+    tp_distance = abs(tp - entry)
+    sl_distance = abs(entry - sl)
+    if sl_distance <= 0 or tp_distance <= 0:
+        return None
+
+    return {
+        "entry": entry,
+        "take_profit": tp,
+        "stop_loss": sl,
+        "tp_distance": tp_distance,
+        "sl_distance": sl_distance,
+        "rr_ratio": tp_distance / sl_distance,
+    }
+
+
 def calculate_trade_levels(price, direction, df, start_idx, strategy_type="trend"):
     if price is None or not isinstance(price, (int, float)):
         raise ValueError(f"Invalid price passed to calculate_trade_levels: {price}")
@@ -96,21 +178,25 @@ def calculate_trade_levels(price, direction, df, start_idx, strategy_type="trend
         atr = price * 0.003  # fallback ATR (0.3% of price)
         print(f"⚠️ Using fallback ATR at index {start_idx}: {atr:.10f}")
 
-    config = strategy_settings.get(strategy_type, strategy_settings["trend"])
+    if strategy_type == "range":
+        struct = _calculate_range_structure_levels(price, direction, df, start_idx)
+        if struct is not None:
+            import config as _cfg
+            if (not _cfg.IS_BACKTESTING) or _cfg.BACKTEST_VERBOSE:
+                print(f"🎯 RANGE trade (S/R structure):")
+                print(f"• Entry: {struct['entry']}")
+                print(f"• TP: {struct['take_profit']}")
+                print(f"• SL: {struct['stop_loss']} (beyond range edge)")
+                print(f"• R:R {struct['rr_ratio']:.2f}")
+            return struct
 
-    # Calculate distances
-    sl_distance = max(atr * config["atr_sl"], price * config["min_sl_pct"])
-    tp_distance = max(atr * config["atr_tp"], price * config["min_tp_pct"])
+    strat_cfg = strategy_settings.get(strategy_type, strategy_settings["trend"])
 
-    # Precision logic
-    if price < 0.01:
-        precision = 8
-    elif price < 1:
-        precision = 6
-    elif price < 100:
-        precision = 4
-    else:
-        precision = 2
+    # ATR-based distances (trend / breakout / range fallback)
+    sl_distance = max(atr * strat_cfg["atr_sl"], price * strat_cfg["min_sl_pct"])
+    tp_distance = max(atr * strat_cfg["atr_tp"], price * strat_cfg["min_tp_pct"])
+
+    precision = _price_precision(price)
 
     # Compute levels (before rounding)
     if direction == 'buy':

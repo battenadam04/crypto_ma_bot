@@ -105,6 +105,10 @@ RANGE_ADX_THRESHOLD = 25.0
 RANGE_MAX_PCT = 0.055
 SR_LOOKBACK_BARS = 80  # ~20h on 15m
 RANGE_TOUCH_BUFFER = 0.015
+# Range SL: placed beyond support/resistance (industry-style invalidation), not entry±ATR.
+RANGE_SL_BUFFER_PCT = 0.003       # min % beyond S/R level
+RANGE_SL_ATR_MULT = 0.5         # also allow at least this × ATR beyond S/R
+RANGE_TP_TARGET = "opposite"    # "opposite" = other range edge | "mid" = range midpoint
 # Continuations must tag closer to MA10 (reduces chop entries on loose pullbacks).
 CONTINUATION_PULLBACK_PCT = 0.003
 
