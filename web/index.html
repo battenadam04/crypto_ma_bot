@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Fathom — Curated crypto setups</title>
+  <meta name="description" content="Selective crypto trade setups with entry, take-profit, and stop levels — delivered on Telegram. Not financial advice." />
+  <meta name="theme-color" content="#f3f6f2" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Manrope:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <!-- Edit this before deploy -->
+  <script>
+    window.FATHOM = {
+      // Paste your Whop (or Lemon Squeezy) checkout URL here:
+      checkoutUrl: "https://whop.com/checkout/YOUR_PRODUCT",
+      // Optional: public Telegram teaser channel
+      freeChannelUrl: ""
+    };
+  </script>
+
+  <div class="atmosphere" aria-hidden="true">
+    <div class="grid-fade"></div>
+    <svg class="chart-plane" viewBox="0 0 1200 700" preserveAspectRatio="xMidYMid slice">
+      <defs>
+        <linearGradient id="candleGlow" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#3d7a5f" stop-opacity="0.45" />
+          <stop offset="100%" stop-color="#3d7a5f" stop-opacity="0" />
+        </linearGradient>
+        <linearGradient id="lineGrad" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stop-color="#9a7b1a" stop-opacity="0" />
+          <stop offset="40%" stop-color="#9a7b1a" stop-opacity="0.85" />
+          <stop offset="100%" stop-color="#3d7a5f" stop-opacity="0.5" />
+        </linearGradient>
+      </defs>
+      <path class="ma-line" d="M40 480 C180 460, 260 520, 360 400 S520 280, 640 320 S820 420, 940 260 S1080 180, 1160 210" fill="none" stroke="url(#lineGrad)" stroke-width="2.5" />
+      <g class="candles" fill="url(#candleGlow)">
+        <rect x="120" y="390" width="14" height="90" rx="2" />
+        <rect x="200" y="360" width="14" height="110" rx="2" />
+        <rect x="280" y="410" width="14" height="70" rx="2" />
+        <rect x="440" y="300" width="14" height="130" rx="2" />
+        <rect x="520" y="250" width="14" height="150" rx="2" />
+        <rect x="700" y="340" width="14" height="95" rx="2" />
+        <rect x="860" y="220" width="14" height="160" rx="2" />
+        <rect x="980" y="200" width="14" height="120" rx="2" />
+      </g>
+    </svg>
+  </div>
+
+  <header class="top">
+    <a class="brand" href="/">Fathom</a>
+    <nav>
+      <a href="#how">How it works</a>
+      <a class="nav-cta" data-checkout href="#">Get access</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <p class="brand-mark">Fathom</p>
+      <h1>Curated crypto setups.<br />Clear risk. No spam.</h1>
+      <p class="lede">
+        Filtered multi-pair alerts with indicative entry, take-profit, and stop —
+        delivered to Telegram as they form.
+      </p>
+      <div class="cta-row">
+        <a class="btn primary" data-checkout href="#">Get Pro access</a>
+        <a class="btn ghost" data-free href="#how">See how it works</a>
+      </div>
+    </section>
+
+    <section class="band" id="how">
+      <h2>Built for selectivity</h2>
+      <p class="band-copy">
+        Most signal feeds flood your phone. Fathom ranks setups, cools hot pairs,
+        and pauses around major US data releases so temporary dumps don’t invent bad trades.
+      </p>
+      <ul class="points">
+        <li>
+          <strong>Backtested pair filter</strong>
+          <span>Only pairs that clear a win-rate screen stay on the watchlist.</span>
+        </li>
+        <li>
+          <strong>Structure-aware levels</strong>
+          <span>Trend and range logic with indicative TP/SL — you execute on your own account.</span>
+        </li>
+        <li>
+          <strong>Macro pause</strong>
+          <span>Auto-quiet around high-impact US prints (CPI, NFP, FOMC).</span>
+        </li>
+      </ul>
+    </section>
+
+    <section class="offer">
+      <h2>Pro channel</h2>
+      <p class="price"><span>£39</span> / month</p>
+      <p class="offer-copy">
+        Real-time Telegram access. Founding price while the public track record builds —
+        raise later, not discount forever.
+      </p>
+      <a class="btn primary" data-checkout href="#">Join on Whop</a>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <p>
+      Not financial advice. Past results and backtests do not guarantee future performance.
+      You are solely responsible for your own trading decisions and risk.
+    </p>
+    <p class="fine">© <span id="year"></span> Fathom Signals</p>
+  </footer>
+
+  <script src="./main.js"></script>
+</body>
+</html>
