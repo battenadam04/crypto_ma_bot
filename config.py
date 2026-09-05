@@ -91,6 +91,19 @@ NIGHT_QUIET_SLEEP_SEC = 60
 NIGHT_QUIET_ARMED_DEFAULT = True
 NIGHT_QUIET_ARMED = False
 
+# US high-impact macro pause (CPI / NFP / FOMC / GDP). Telegram /macro on|off.
+# Pauses scanning before + after official release so temporary crypto dumps don't poison signals.
+MACRO_PAUSE_ENABLED = True
+MACRO_PAUSE_ARMED_DEFAULT = True
+MACRO_PAUSE_ARMED = False
+MACRO_PAUSE_BEFORE_MIN = 30       # pause starts this many minutes before release
+MACRO_PAUSE_AFTER_MIN = 120       # resume this many minutes after release
+MACRO_PAUSE_SLEEP_SEC = 60
+MACRO_PAUSE_NOTIFY = True         # Telegram when pause starts / ends
+MACRO_CALENDAR_URL = "https://xoomar.com/api/markets/calendar?importance=high"
+MACRO_CALENDAR_CACHE_SEC = 6 * 3600
+MACRO_CALENDAR_TIMEOUT_SEC = 15
+
 MAIN_LOOP_INTERVAL_SEC = 300
 
 # Signal volume controls
@@ -179,7 +192,7 @@ def set_live_trading_enabled(enabled: bool, by: str = "unknown") -> bool:
 
 
 def _load_runtime_config():
-    global TIMEFRAME, NIGHT_QUIET_ARMED
+    global TIMEFRAME, NIGHT_QUIET_ARMED, MACRO_PAUSE_ARMED
     try:
         if not os.path.isfile(_RUNTIME_CONFIG_FILE):
             return
@@ -191,6 +204,9 @@ def _load_runtime_config():
         armed = data.get("NIGHT_QUIET_ARMED")
         if NIGHT_QUIET_ENABLED and isinstance(armed, bool):
             NIGHT_QUIET_ARMED = armed
+        macro_armed = data.get("MACRO_PAUSE_ARMED")
+        if MACRO_PAUSE_ENABLED and isinstance(macro_armed, bool):
+            MACRO_PAUSE_ARMED = macro_armed
     except Exception:
         return
 
@@ -207,12 +223,15 @@ def _persist_runtime_config():
     data["TIMEFRAME"] = TIMEFRAME
     if NIGHT_QUIET_ENABLED:
         data["NIGHT_QUIET_ARMED"] = NIGHT_QUIET_ARMED
+    if MACRO_PAUSE_ENABLED:
+        data["MACRO_PAUSE_ARMED"] = MACRO_PAUSE_ARMED
     with open(tmp, "w") as f:
         json.dump(data, f)
     os.replace(tmp, _RUNTIME_CONFIG_FILE)
 
 
 NIGHT_QUIET_ARMED = NIGHT_QUIET_ENABLED and NIGHT_QUIET_ARMED_DEFAULT
+MACRO_PAUSE_ARMED = MACRO_PAUSE_ENABLED and MACRO_PAUSE_ARMED_DEFAULT
 _load_runtime_config()
 
 
@@ -252,6 +271,17 @@ def set_night_quiet_armed(armed: bool) -> bool:
         NIGHT_QUIET_ARMED = bool(armed)
         _persist_runtime_config()
     return NIGHT_QUIET_ARMED
+
+
+def set_macro_pause_armed(armed: bool) -> bool:
+    """Persist whether US macro-release pause is armed (Telegram /macro on|off)."""
+    global MACRO_PAUSE_ARMED
+    if not MACRO_PAUSE_ENABLED:
+        raise ValueError("Macro pause is disabled in config.py (MACRO_PAUSE_ENABLED=False).")
+    with _runtime_lock:
+        MACRO_PAUSE_ARMED = bool(armed)
+        _persist_runtime_config()
+    return MACRO_PAUSE_ARMED
 
 
 def set_timeframe(new_timeframe: str) -> str:

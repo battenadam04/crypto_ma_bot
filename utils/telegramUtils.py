@@ -383,6 +383,24 @@ def _cmd_status():
             f"Night pause: <b>{nq}</b> ({config.NIGHT_QUIET_START_HOUR}:00–{config.NIGHT_QUIET_END_HOUR}:00 "
             f"{config.NIGHT_QUIET_TZ}, in window now: {inside})"
         )
+    if config.MACRO_PAUSE_ENABLED:
+        from utils.macroCalendar import active_macro_pause, next_upcoming_event
+        mq = "armed" if config.MACRO_PAUSE_ARMED else "disarmed"
+        pause = active_macro_pause() if config.MACRO_PAUSE_ARMED else None
+        if pause:
+            left = max(1, int(pause["remaining_sec"] // 60))
+            lines.append(
+                f"Macro pause: <b>{mq}</b> — active on <b>{pause['name']}</b>, resume in ~{left}m"
+            )
+        else:
+            nxt = next_upcoming_event()
+            if nxt:
+                when = nxt["scheduled_at"].strftime("%Y-%m-%d %H:%M UTC")
+                lines.append(
+                    f"Macro pause: <b>{mq}</b> — next: {nxt['name']} at <code>{when}</code>"
+                )
+            else:
+                lines.append(f"Macro pause: <b>{mq}</b> — no upcoming high-impact US releases cached")
     lines.append("\n<i>/backtest for full pair breakdown. Toggle: /on /off. Live: /live</i>")
     return "\n".join(lines)
 
@@ -485,6 +503,11 @@ def _cmd_config():
             f"Night quiet: {config.NIGHT_QUIET_START_HOUR}:00–{config.NIGHT_QUIET_END_HOUR}:00 {config.NIGHT_QUIET_TZ}, "
             f"armed={config.NIGHT_QUIET_ARMED}, sleep={config.NIGHT_QUIET_SLEEP_SEC}s"
         )
+    if config.MACRO_PAUSE_ENABLED:
+        lines.append(
+            f"Macro pause: armed={config.MACRO_PAUSE_ARMED}, "
+            f"−{config.MACRO_PAUSE_BEFORE_MIN}m/+{config.MACRO_PAUSE_AFTER_MIN}m around US high-impact releases"
+        )
     return "\n".join(lines)
 
 
@@ -554,6 +577,73 @@ def _cmd_night(args=None):
     return "Use <code>/night</code>, <code>/night on</code>, or <code>/night off</code>"
 
 
+def _cmd_macro(args=None):
+    args = args or []
+    if not config.MACRO_PAUSE_ENABLED:
+        return (
+            "Macro pause is disabled in <code>config.py</code> "
+            "(<code>MACRO_PAUSE_ENABLED=False</code>)."
+        )
+
+    from utils.macroCalendar import active_macro_pause, next_upcoming_event, get_macro_events
+
+    if not args:
+        armed = "ON" if config.MACRO_PAUSE_ARMED else "OFF"
+        lines = [
+            "<b>US macro pause</b>",
+            f"Armed: <b>{armed}</b>",
+            f"Window: <code>−{config.MACRO_PAUSE_BEFORE_MIN}m</code> before release → "
+            f"<code>+{config.MACRO_PAUSE_AFTER_MIN}m</code> after",
+            "Covers high-impact US releases (CPI, NFP, FOMC, GDP).",
+        ]
+        pause = active_macro_pause() if config.MACRO_PAUSE_ARMED else None
+        if pause:
+            left = max(1, int(pause["remaining_sec"] // 60))
+            resume = pause["resume_at"].strftime("%Y-%m-%d %H:%M UTC")
+            lines.append("")
+            lines.append(f"<b>Paused now</b> for <b>{pause['name']}</b>")
+            lines.append(f"Resume at <code>{resume}</code> (~{left}m left)")
+        else:
+            nxt = next_upcoming_event()
+            if nxt:
+                when = nxt["scheduled_at"].strftime("%Y-%m-%d %H:%M UTC")
+                lines.append("")
+                lines.append(f"Next: <b>{nxt['name']}</b> at <code>{when}</code>")
+            else:
+                # Force a refresh so status isn't empty after a cold start.
+                get_macro_events(force_refresh=True)
+                nxt = next_upcoming_event()
+                if nxt:
+                    when = nxt["scheduled_at"].strftime("%Y-%m-%d %H:%M UTC")
+                    lines.append("")
+                    lines.append(f"Next: <b>{nxt['name']}</b> at <code>{when}</code>")
+                else:
+                    lines.append("")
+                    lines.append("No upcoming high-impact US releases found.")
+        lines.append("")
+        lines.append("<code>/macro on</code> — arm pause around US data releases")
+        lines.append("<code>/macro off</code> — disarm (scan through data prints)")
+        return "\n".join(lines)
+
+    sub = (args[0] or "").strip().lower()
+    if sub in ("on", "arm", "true", "1", "yes"):
+        try:
+            config.set_macro_pause_armed(True)
+        except Exception as e:
+            return f"Error: {e}"
+        return (
+            "Macro pause <b>armed</b>. Scanning will pause around high-impact US data releases "
+            f"(−{config.MACRO_PAUSE_BEFORE_MIN}m / +{config.MACRO_PAUSE_AFTER_MIN}m)."
+        )
+    if sub in ("off", "disarm", "false", "0", "no"):
+        try:
+            config.set_macro_pause_armed(False)
+        except Exception as e:
+            return f"Error: {e}"
+        return "Macro pause <b>disarmed</b>. Bot will scan through US data releases."
+    return "Use <code>/macro</code>, <code>/macro on</code>, or <code>/macro off</code>"
+
+
 HELP_TEXT = (
     "<b>📖 Available Commands</b>\n\n"
     "<b>Signals</b>\n"
@@ -565,6 +655,7 @@ HELP_TEXT = (
     "/signals — Today's signals with outcomes\n"
     "/timeframe — Get/set timeframe (ex: /timeframe 15m)\n"
     "/night — Overnight scan pause\n"
+    "/macro — US data-release pause (CPI/NFP/FOMC)\n"
     "/config — Current configuration\n\n"
     "<b>Live Trading (Admin)</b>\n"
     "/live — View/toggle live trading on Phemex\n"
@@ -606,6 +697,7 @@ HTML_COMMANDS = {
     "/timeframe", "timeframe", "/tf", "tf",
     "/config", "config", "/help", "help",
     "/night", "night",
+    "/macro", "macro",
     "/live", "live", "/positions", "positions", "/close", "close",
     "/guards", "guards",
 }
@@ -624,6 +716,9 @@ def handle_telegram_command(text):
 
     if cmd in {"/night", "night"}:
         return _cmd_night(args), "HTML"
+
+    if cmd in {"/macro", "macro"}:
+        return _cmd_macro(args), "HTML"
 
     if cmd in {"/live", "live"}:
         return _cmd_live(args), "HTML"

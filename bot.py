@@ -33,6 +33,7 @@ from utils.signalTracker import record_signal, send_eod_report
 BACKTEST_STATE_FILE = "last_backtest.json"  # relative to project root (bot dir)
 
 _last_night_quiet_log_ts = 0.0
+_last_macro_pause_log_ts = 0.0
 # (symbol, direction) -> unix timestamp of last alert — prevents spam on sticky setups
 _recent_signals = {}
 
@@ -620,6 +621,26 @@ if __name__ == '__main__':
         if not config.TRADING_ENABLED:
             log_event("🚫 Signal scanning disabled. Sleeping 60 seconds...")
             time.sleep(60)
+            continue
+
+        # US high-impact data pause (CPI / NFP / FOMC / GDP) — notify even overnight
+        try:
+            from utils.macroCalendar import notify_macro_pause_transitions
+            macro_pause = notify_macro_pause_transitions(send_telegram)
+        except Exception as e:
+            log_event(f"Macro pause check failed: {e}")
+            macro_pause = None
+
+        if macro_pause:
+            now_ts = time.time()
+            if now_ts - _last_macro_pause_log_ts >= 600:
+                _last_macro_pause_log_ts = now_ts
+                mins_left = max(1, int(macro_pause["remaining_sec"] // 60))
+                log_event(
+                    f"Macro pause ({macro_pause['name']}) — skipping scan. "
+                    f"Resume in ~{mins_left}m. Use /macro off to disarm."
+                )
+            time.sleep(config.MACRO_PAUSE_SLEEP_SEC)
             continue
 
         if config.should_skip_cycle_for_night_quiet():
