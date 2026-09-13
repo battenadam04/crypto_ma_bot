@@ -601,6 +601,14 @@ if __name__ == '__main__':
         f"🤖 Bot starting (signals-only). Instance={config.BOT_INSTANCE_ID} Host={config.BOT_HOSTNAME} "
         f"PID={config.BOT_PID} Started={config.BOT_STARTED_AT_UTC}"
     )
+    admin_ids = config.telegram_admin_id_set()
+    if admin_ids:
+        log_event(f"🔒 Admin lock ON — {len(admin_ids)} admin id(s); signals → TELEGRAM_CHAT_ID channel")
+    else:
+        log_event(
+            "⚠️ TELEGRAM_ADMIN_IDS unset — any user who can DM the bot may change settings. "
+            "Set admin ids before Whop launch."
+        )
     executor = ThreadPoolExecutor(max_workers=1)
     executor.submit(poll_telegram)
 

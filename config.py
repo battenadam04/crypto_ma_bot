@@ -13,6 +13,39 @@ load_dotenv(os.path.join(_PROJECT_ROOT, ".env"))
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+# Comma-separated Telegram user IDs allowed to change bot settings (/on, /timeframe, etc.).
+# Empty = solo mode (anyone who can message the bot may run admin commands).
+# For Whop/channel launch: set your user id(s) so paying members cannot change shared settings.
+TELEGRAM_ADMIN_IDS = os.getenv("TELEGRAM_ADMIN_IDS", "")
+
+
+def telegram_admin_id_set():
+    """Parsed admin user ids from TELEGRAM_ADMIN_IDS."""
+    ids = set()
+    for part in str(TELEGRAM_ADMIN_IDS or "").replace(";", ",").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            ids.add(int(part))
+        except ValueError:
+            continue
+    return ids
+
+
+def is_telegram_admin(user_id) -> bool:
+    """
+    True if user may run admin commands.
+    When TELEGRAM_ADMIN_IDS is unset/empty, all users are treated as admin (solo / legacy).
+    """
+    admins = telegram_admin_id_set()
+    if not admins:
+        return True
+    try:
+        return int(user_id) in admins
+    except (TypeError, ValueError):
+        return False
+
 
 # Phemex API credentials for live trading (optional; signals work without these).
 PHEMEX_API_KEY = os.getenv("PHEMEX_API_KEY", "")

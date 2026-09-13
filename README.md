@@ -128,15 +128,24 @@ Telegram-only strengths:
 
 Telegram-only ceilings:
 
-- **Single-tenant today:** one `TELEGRAM_CHAT_ID` — every paying customer needs their own deployment *or* you build multi-subscriber routing
+- **Channel product (current):** one `TELEGRAM_CHAT_ID` Pro channel + `TELEGRAM_ADMIN_IDS` so only you change settings; Whop invites members to the channel
 - Platform risk (bots banned, API limits, no ownership of the relationship graph)
 - Harder upsell of dashboards, history search, API webhooks, TradingView webhooks
 - Perceived as “hobby grade” vs a branded web app with charts and track record pages
 - Worse for B2B / funds who need SSO, audit logs, SLA
 
+### Whop / Pro channel setup
+
+1. Create a **private Telegram channel** (Pro feed)
+2. Add your bot as **admin** with permission to post messages
+3. Set `TELEGRAM_CHAT_ID` to the channel id (forward a channel post to `@userinfobot`)
+4. Set `TELEGRAM_ADMIN_IDS` to your numeric user id(s) (from `@userinfobot`)
+5. Whop delivers the channel **invite link** to paying / trial members
+6. You DM the bot for `/on`, `/timeframe`, etc. — members only read the channel
+
 **Practical monetization path:**
 
-1. **Now:** Private Telegram channel or shared bot chat — monthly subscription (signal hygiene is the product)
+1. **Now:** Private Telegram channel + Whop invites — monthly subscription (signal hygiene is the product)
 2. **Next:** Multi-chat fan-out + Discord webhook (still thin client, higher ARPU tiers)
 3. **Later:** Web track-record page + webhook API so power users pipe into TradingView / their own bots — this is where valuation usually jumps
 

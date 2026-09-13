@@ -62,6 +62,45 @@ class TestHandleTelegramCommand:
         assert "/guards" in response
         assert mode == 'HTML'
 
+    def test_member_cannot_change_timeframe(self, monkeypatch):
+        monkeypatch.setattr(config, "TELEGRAM_ADMIN_IDS", "111")
+        response, mode = handle_telegram_command("/timeframe 5m", user_id=999)
+        assert "admin-only" in response.lower()
+        assert mode == "HTML"
+
+    def test_admin_can_change_timeframe(self, monkeypatch):
+        monkeypatch.setattr(config, "TELEGRAM_ADMIN_IDS", "111")
+
+        def _fake_set(tf):
+            config.TIMEFRAME = tf
+            return tf
+
+        monkeypatch.setattr(config, "set_timeframe", _fake_set)
+        response, mode = handle_telegram_command("/timeframe 5m", user_id=111)
+        assert "5m" in response
+        assert config.TIMEFRAME == "5m"
+        assert mode == "HTML"
+
+    def test_member_help_is_limited(self, monkeypatch):
+        monkeypatch.setattr(config, "TELEGRAM_ADMIN_IDS", "111")
+        response, mode = handle_telegram_command("/help", user_id=999)
+        assert "Pro channel" in response
+        assert "/live" not in response
+        assert mode == "HTML"
+
+    def test_member_can_read_status(self, monkeypatch):
+        monkeypatch.setattr(config, "TELEGRAM_ADMIN_IDS", "111")
+        config.TRADING_ENABLED = True
+        response, mode = handle_telegram_command("/status", user_id=999)
+        assert "ON" in response
+        assert mode == "HTML"
+
+    def test_empty_admin_ids_allows_all(self, monkeypatch):
+        monkeypatch.setattr(config, "TELEGRAM_ADMIN_IDS", "")
+        response, _ = handle_telegram_command("/on", user_id=42)
+        assert "ON" in response or "already" in response.lower()
+
+
     def test_night_disabled_without_env(self, monkeypatch):
         monkeypatch.setattr(config, "NIGHT_QUIET_ENABLED", False)
         response, mode = handle_telegram_command("/night")

@@ -56,15 +56,24 @@ def get_updates():
         return []
 
 
-def send_telegram(text, image_path=None, parse_mode=None, bypass_rate_limit: bool = False):
-    """Send a message (and optional image) to Telegram."""
+def send_telegram(text, image_path=None, parse_mode=None, bypass_rate_limit: bool = False, chat_id=None):
+    """Send a message (and optional image) to Telegram.
+
+    chat_id defaults to TELEGRAM_CHAT_ID (Pro channel / signal destination).
+    Pass chat_id for command replies so DMs don't leak into the public channel.
+    """
     if (not bypass_rate_limit) and _rate_limited():
         log_event("⚠️ Telegram rate limit hit, message suppressed")
         return
 
+    target = chat_id if chat_id is not None else config.TELEGRAM_CHAT_ID
+    if not target:
+        log_event("❌ TELEGRAM_CHAT_ID is not set — cannot send")
+        return
+
     try:
         url = f"https://api.telegram.org/bot{config.TELEGRAM_TOKEN}/sendMessage"
-        payload = {'chat_id': config.TELEGRAM_CHAT_ID, 'text': text}
+        payload = {'chat_id': target, 'text': text}
         if parse_mode:
             payload['parse_mode'] = parse_mode
         r = requests.post(url, data=payload, timeout=20)
@@ -76,7 +85,7 @@ def send_telegram(text, image_path=None, parse_mode=None, bypass_rate_limit: boo
                 r2 = requests.post(
                     url,
                     files={'photo': img},
-                    data={'chat_id': config.TELEGRAM_CHAT_ID},
+                    data={'chat_id': target},
                     timeout=45,
                 )
                 r2.raise_for_status()
@@ -85,6 +94,20 @@ def send_telegram(text, image_path=None, parse_mode=None, bypass_rate_limit: boo
 
 
 TELEGRAM_POLL_IDLE_SECONDS = 90
+
+# Commands that change shared bot state — admin only when TELEGRAM_ADMIN_IDS is set.
+ADMIN_COMMANDS = {
+    "/on", "on", "/off", "off",
+    "/timeframe", "timeframe", "/tf", "tf",
+    "/night", "night",
+    "/macro", "macro",
+    "/config", "config",
+    "/live", "live",
+    "/close", "close",
+    "/alerts", "alerts",
+    "/positions", "positions",
+    "/guards", "guards",
+}
 
 
 def poll_telegram():
@@ -101,21 +124,34 @@ def poll_telegram():
 
                 message = update.get("message") or update.get("edited_message") or {}
                 text = message.get("text")
+                from_user = message.get("from") or {}
+                chat = message.get("chat") or {}
 
                 callback = update.get("callback_query") or {}
                 if not text and callback:
                     text = callback.get("data") or (callback.get("message") or {}).get("text")
+                    from_user = callback.get("from") or from_user
+                    chat = (callback.get("message") or {}).get("chat") or chat
 
                 if text:
-                    log_event(f"Telegram message: {text}")
-                    response, parse_mode = handle_telegram_command(text)
-                    send_telegram(response, parse_mode=parse_mode, bypass_rate_limit=True)
+                    user_id = from_user.get("id")
+                    reply_chat_id = chat.get("id")
+                    log_event(f"Telegram message from {user_id}: {text}")
+                    response, parse_mode = handle_telegram_command(text, user_id=user_id)
+                    # Always reply in the chat where the command was sent (usually admin DM).
+                    send_telegram(
+                        response,
+                        parse_mode=parse_mode,
+                        bypass_rate_limit=True,
+                        chat_id=reply_chat_id if reply_chat_id is not None else None,
+                    )
                 else:
                     log_event(f"Telegram update had no text. Keys={list(update.keys())}")
             except Exception as e:
                 log_event(f"⚠️ Telegram poll loop error: {e}")
 
             time.sleep(0.2)
+
 
 
 LEGAL_DISCLAIMER = (
@@ -401,6 +437,11 @@ def _cmd_status():
                 )
             else:
                 lines.append(f"Macro pause: <b>{mq}</b> — no upcoming high-impact US releases cached")
+    admins = config.telegram_admin_id_set()
+    if admins:
+        lines.append(f"Admin lock: <b>ON</b> ({len(admins)} id(s)) — Pro channel mode")
+    else:
+        lines.append("Admin lock: <b>OFF</b> (solo — set TELEGRAM_ADMIN_IDS for Whop launch)")
     lines.append("\n<i>/backtest for full pair breakdown. Toggle: /on /off. Live: /live</i>")
     return "\n".join(lines)
 
@@ -645,7 +686,7 @@ def _cmd_macro(args=None):
 
 
 HELP_TEXT = (
-    "<b>📖 Available Commands</b>\n\n"
+    "<b>📖 Admin commands</b>\n\n"
     "<b>Signals</b>\n"
     "/on — Start signal scanning\n"
     "/off — Pause signal scanning\n"
@@ -657,13 +698,29 @@ HELP_TEXT = (
     "/night — Overnight scan pause\n"
     "/macro — US data-release pause (CPI/NFP/FOMC)\n"
     "/config — Current configuration\n\n"
-    "<b>Live Trading (Admin)</b>\n"
+    "<b>Live Trading</b>\n"
     "/live — View/toggle live trading on Phemex\n"
     "/positions — Open positions & account balance\n"
     "/guards — Capital protection status & limits\n"
     "/close — Close a position (ex: /close ADA)\n"
     "/alerts — Toggle trade outcome notifications (TP/SL hit)\n\n"
     "/help — This message\n\n"
+    "<i>Signals are broadcast to the Pro channel (TELEGRAM_CHAT_ID). "
+    "Subscribers join via invite — they do not control settings.</i>\n\n"
+    f"{LEGAL_DISCLAIMER}"
+)
+
+MEMBER_HELP_TEXT = (
+    "<b>Fathom Pro</b>\n\n"
+    "Trade setups are posted in the <b>private Pro channel</b> you joined via invite.\n"
+    "Bot settings (timeframe, scanning, pauses) are controlled by the operator only — "
+    "this keeps the feed consistent for everyone.\n\n"
+    "Read-only commands you can use in DM:\n"
+    "/status — scanning state & last backtest summary\n"
+    "/pairs — active pairs\n"
+    "/backtest — last backtest digest\n"
+    "/signals — today's signal outcomes\n"
+    "/help — this message\n\n"
     f"{LEGAL_DISCLAIMER}"
 )
 
@@ -699,17 +756,45 @@ HTML_COMMANDS = {
     "/night", "night",
     "/macro", "macro",
     "/live", "live", "/positions", "positions", "/close", "close",
-    "/guards", "guards",
+    "/guards", "guards", "/alerts", "alerts",
+}
+
+_PUBLIC_READ_COMMANDS = {
+    "/help", "help",
+    "/status", "status",
+    "/pairs", "pairs",
+    "/backtest", "backtest",
+    "/signals", "signals",
 }
 
 
-def handle_telegram_command(text):
-    """Return (response_text, parse_mode) tuple."""
+def _admin_denied_message():
+    return (
+        "🔒 That command is <b>admin-only</b>.\n"
+        "Fathom uses one shared feed for all Pro members — "
+        "settings like timeframe are not per-user.\n\n"
+        f"{MEMBER_HELP_TEXT}"
+    )
+
+
+def handle_telegram_command(text, user_id=None):
+    """Return (response_text, parse_mode) tuple.
+
+    When TELEGRAM_ADMIN_IDS is set, only those users may run admin commands.
+    """
     raw = (text or "").strip()
     parts = raw.split()
     cmd = parts[0].lower() if parts else ""
     args = parts[1:] if len(parts) > 1 else []
-    log_event(f"Telegram command received: {raw}")
+    log_event(f"Telegram command received: {raw} (user={user_id})")
+
+    is_admin = config.is_telegram_admin(user_id)
+
+    if cmd in {"/help", "help"}:
+        return (HELP_TEXT if is_admin else MEMBER_HELP_TEXT), "HTML"
+
+    if cmd in ADMIN_COMMANDS and not is_admin:
+        return _admin_denied_message(), "HTML"
 
     if cmd in {"/timeframe", "timeframe", "/tf", "tf"}:
         return _cmd_timeframe(args), "HTML"
@@ -735,4 +820,6 @@ def handle_telegram_command(text):
         parse_mode = 'HTML' if cmd in HTML_COMMANDS else None
         return response, parse_mode
 
-    return HELP_TEXT, 'HTML'
+    # Unknown command: members get member help; admins get full help
+    return (HELP_TEXT if is_admin else MEMBER_HELP_TEXT), "HTML"
+
