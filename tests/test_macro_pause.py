@@ -105,6 +105,65 @@ class TestMacroPauseWindow:
             assert "Macro pause ended" in sent[1]
 
 
+class TestMacroMorningWarn:
+    def setup_method(self):
+        mc.reset_pause_notify_state()
+        config.MACRO_PAUSE_ENABLED = True
+        config.MACRO_PAUSE_ARMED = True
+        config.MACRO_PAUSE_NOTIFY = True
+        config.MACRO_MORNING_WARN_ENABLED = True
+        config.MACRO_MORNING_WARN_HOUR = 8
+        config.MACRO_MORNING_WARN_TZ = "America/New_York"
+        config.MACRO_PAUSE_BEFORE_MIN = 30
+        config.MACRO_PAUSE_AFTER_MIN = 120
+
+    def test_morning_warn_once_after_us_morning(self):
+        # CPI typically 8:30 AM ET = 12:30 UTC in September (EDT, UTC-4)
+        release = datetime(2026, 9, 11, 12, 30, tzinfo=timezone.utc)
+        # 8:05 AM ET = 12:05 UTC
+        morning = datetime(2026, 9, 11, 12, 5, tzinfo=timezone.utc)
+        sent = []
+
+        def fake_send(text, parse_mode=None, bypass_rate_limit=False):
+            sent.append(text)
+
+        with patch.object(mc, "get_macro_events", return_value=[_event("CPI", release)]):
+            out = mc.notify_macro_morning_warnings(fake_send, morning)
+            assert len(out) == 1
+            assert len(sent) == 1
+            assert "Macro heads-up" in sent[0]
+            assert "CPI" in sent[0]
+            # Second call same morning — no duplicate
+            assert mc.notify_macro_morning_warnings(fake_send, morning) == []
+            assert len(sent) == 1
+
+    def test_no_warn_before_us_morning_hour(self):
+        release = datetime(2026, 9, 11, 12, 30, tzinfo=timezone.utc)
+        # 7:00 AM ET = 11:00 UTC
+        early = datetime(2026, 9, 11, 11, 0, tzinfo=timezone.utc)
+        sent = []
+
+        def fake_send(text, parse_mode=None, bypass_rate_limit=False):
+            sent.append(text)
+
+        with patch.object(mc, "get_macro_events", return_value=[_event("CPI", release)]):
+            assert mc.notify_macro_morning_warnings(fake_send, early) == []
+            assert sent == []
+
+    def test_no_warn_when_disarmed(self):
+        config.MACRO_PAUSE_ARMED = False
+        release = datetime(2026, 9, 11, 12, 30, tzinfo=timezone.utc)
+        morning = datetime(2026, 9, 11, 12, 5, tzinfo=timezone.utc)
+        sent = []
+
+        def fake_send(text, parse_mode=None, bypass_rate_limit=False):
+            sent.append(text)
+
+        with patch.object(mc, "get_macro_events", return_value=[_event("CPI", release)]):
+            assert mc.notify_macro_morning_warnings(fake_send, morning) == []
+            assert sent == []
+
+
 class TestMacroTelegramCommand:
     def setup_method(self):
         config.MACRO_PAUSE_ENABLED = True

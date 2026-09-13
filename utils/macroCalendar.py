@@ -13,6 +13,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
+from zoneinfo import ZoneInfo
 
 import config
 from utils.utils import log_event
@@ -25,6 +26,8 @@ _cache: dict[str, Any] = {
 # Last event key we notified as "paused" (so we don't spam).
 _active_pause_key: Optional[str] = None
 _was_paused: bool = False
+# Event keys that already got a US-morning heads-up this process lifetime.
+_morning_warned_keys: set[str] = set()
 
 
 def _parse_iso(ts: str) -> Optional[datetime]:
@@ -207,6 +210,110 @@ def format_resume_telegram(pause_name: str = "US macro release") -> str:
     )
 
 
+def _us_tz():
+    name = str(getattr(config, "MACRO_MORNING_WARN_TZ", "America/New_York") or "America/New_York")
+    try:
+        return ZoneInfo(name)
+    except Exception:
+        return ZoneInfo("America/New_York")
+
+
+def format_morning_warn_telegram(event: dict) -> str:
+    """Channel heads-up for US audience on a data-release morning."""
+    tz = _us_tz()
+    release = event["scheduled_at"]
+    start, end = _pause_window(event)
+    release_et = release.astimezone(tz)
+    start_et = start.astimezone(tz)
+    end_et = end.astimezone(tz)
+    period = event.get("period") or ""
+    period_bit = f" ({period})" if period else ""
+    tz_label = str(getattr(config, "MACRO_MORNING_WARN_TZ", "America/New_York")).split("/")[-1].replace("_", " ")
+
+    return (
+        f"⚠️ <b>Macro heads-up</b> (US morning)\n"
+        f"Event: <b>{event['name']}</b>{period_bit}\n"
+        f"Release: <b>{release_et.strftime('%I:%M %p').lstrip('0')} {tz_label}</b> "
+        f"(<code>{release.strftime('%H:%M UTC')}</code>)\n"
+        f"Signals pause: <b>{start_et.strftime('%I:%M %p').lstrip('0')}</b> → "
+        f"<b>{end_et.strftime('%I:%M %p').lstrip('0')} {tz_label}</b>\n\n"
+        f"<i>Quiet by design — we skip noisy US data windows so temporary dumps "
+        f"don't invent bad setups.</i>"
+    )
+
+
+def todays_upcoming_macro_events(now: Optional[datetime] = None) -> list[dict]:
+    """High-impact events still ahead today in the US morning-warn timezone."""
+    if not getattr(config, "MACRO_PAUSE_ENABLED", False):
+        return []
+    if not getattr(config, "MACRO_PAUSE_ARMED", False):
+        return []
+
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    else:
+        now = now.astimezone(timezone.utc)
+
+    tz = _us_tz()
+    now_local = now.astimezone(tz)
+    today = now_local.date()
+    upcoming = []
+    for event in get_macro_events():
+        release = event["scheduled_at"]
+        if release.astimezone(tz).date() != today:
+            continue
+        # Still relevant: not yet past the end of the pause window
+        _, end = _pause_window(event)
+        if end <= now:
+            continue
+        upcoming.append(event)
+    return upcoming
+
+
+def notify_macro_morning_warnings(send_fn, now: Optional[datetime] = None) -> list[dict]:
+    """
+    Once per event: send a US-morning heads-up on release day after MACRO_MORNING_WARN_HOUR.
+    Posts to the default signal channel via send_fn (no chat_id).
+    """
+    global _morning_warned_keys
+
+    if not getattr(config, "MACRO_MORNING_WARN_ENABLED", True):
+        return []
+    if not getattr(config, "MACRO_PAUSE_NOTIFY", True):
+        return []
+    if not getattr(config, "MACRO_PAUSE_ENABLED", False):
+        return []
+    if not getattr(config, "MACRO_PAUSE_ARMED", False):
+        return []
+
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    else:
+        now = now.astimezone(timezone.utc)
+
+    tz = _us_tz()
+    now_local = now.astimezone(tz)
+    warn_hour = int(getattr(config, "MACRO_MORNING_WARN_HOUR", 8))
+    if now_local.hour < warn_hour:
+        return []
+
+    sent = []
+    for event in todays_upcoming_macro_events(now):
+        key = _event_key(event)
+        if key in _morning_warned_keys:
+            continue
+        try:
+            send_fn(format_morning_warn_telegram(event), parse_mode="HTML", bypass_rate_limit=True)
+            _morning_warned_keys.add(key)
+            sent.append(event)
+            log_event(f"Macro morning heads-up sent: {event['name']}")
+        except Exception as e:
+            log_event(f"Macro morning warn failed: {e}")
+    return sent
+
+
 def next_upcoming_event(now: Optional[datetime] = None) -> Optional[dict]:
     now = now or datetime.now(timezone.utc)
     if now.tzinfo is None:
@@ -259,9 +366,10 @@ def notify_macro_pause_transitions(send_fn, now: Optional[datetime] = None) -> O
 
 def reset_pause_notify_state():
     """Test helper."""
-    global _active_pause_key, _was_paused
+    global _active_pause_key, _was_paused, _morning_warned_keys
     _active_pause_key = None
     _was_paused = False
+    _morning_warned_keys = set()
     with _lock:
         _cache["fetched_at"] = 0.0
         _cache["events"] = []

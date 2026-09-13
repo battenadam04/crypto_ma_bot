@@ -133,6 +133,10 @@ MACRO_PAUSE_BEFORE_MIN = 30       # pause starts this many minutes before releas
 MACRO_PAUSE_AFTER_MIN = 120       # resume this many minutes after release
 MACRO_PAUSE_SLEEP_SEC = 60
 MACRO_PAUSE_NOTIFY = True         # Telegram when pause starts / ends
+# US-morning heads-up on release days (America/New_York), sent once per event.
+MACRO_MORNING_WARN_ENABLED = True
+MACRO_MORNING_WARN_HOUR = 8       # send at/after this local US hour
+MACRO_MORNING_WARN_TZ = "America/New_York"
 MACRO_CALENDAR_URL = "https://xoomar.com/api/markets/calendar?importance=high"
 MACRO_CALENDAR_CACHE_SEC = 6 * 3600
 MACRO_CALENDAR_TIMEOUT_SEC = 15

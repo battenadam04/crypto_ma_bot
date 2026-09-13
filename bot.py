@@ -633,7 +633,11 @@ if __name__ == '__main__':
 
         # US high-impact data pause (CPI / NFP / FOMC / GDP) — notify even overnight
         try:
-            from utils.macroCalendar import notify_macro_pause_transitions
+            from utils.macroCalendar import (
+                notify_macro_morning_warnings,
+                notify_macro_pause_transitions,
+            )
+            notify_macro_morning_warnings(send_telegram)
             macro_pause = notify_macro_pause_transitions(send_telegram)
         except Exception as e:
             log_event(f"Macro pause check failed: {e}")

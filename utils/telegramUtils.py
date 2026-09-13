@@ -674,6 +674,8 @@ def _cmd_macro(args=None):
             f"Armed: <b>{armed}</b>",
             f"Window: <code>−{config.MACRO_PAUSE_BEFORE_MIN}m</code> before release → "
             f"<code>+{config.MACRO_PAUSE_AFTER_MIN}m</code> after",
+            f"Morning heads-up: <b>{'ON' if config.MACRO_MORNING_WARN_ENABLED else 'OFF'}</b> "
+            f"at {config.MACRO_MORNING_WARN_HOUR}:00 {config.MACRO_MORNING_WARN_TZ}",
             "Covers high-impact US releases (CPI, NFP, FOMC, GDP).",
         ]
         pause = active_macro_pause() if config.MACRO_PAUSE_ARMED else None
