@@ -101,6 +101,24 @@ class TestHandleTelegramCommand:
         assert "ON" in response or "already" in response.lower()
 
 
+class TestPrivateCommandChat:
+    def test_private_dm_allowed(self, monkeypatch):
+        from utils.telegramUtils import is_private_command_chat
+        monkeypatch.setattr(config, "TELEGRAM_CHAT_ID", "-100999")
+        assert is_private_command_chat({"id": 12345, "type": "private"}) is True
+
+    def test_pro_channel_ignored(self, monkeypatch):
+        from utils.telegramUtils import is_private_command_chat
+        monkeypatch.setattr(config, "TELEGRAM_CHAT_ID", "-100999")
+        assert is_private_command_chat({"id": -100999, "type": "channel"}) is False
+        assert is_private_command_chat({"id": "-100999", "type": "supergroup"}) is False
+
+    def test_group_ignored(self, monkeypatch):
+        from utils.telegramUtils import is_private_command_chat
+        monkeypatch.setattr(config, "TELEGRAM_CHAT_ID", "-100999")
+        assert is_private_command_chat({"id": -50, "type": "group"}) is False
+
+
     def test_night_disabled_without_env(self, monkeypatch):
         monkeypatch.setattr(config, "NIGHT_QUIET_ENABLED", False)
         response, mode = handle_telegram_command("/night")

@@ -110,6 +110,39 @@ ADMIN_COMMANDS = {
 }
 
 
+def _normalize_chat_id(chat_id):
+    if chat_id is None or chat_id == "":
+        return None
+    try:
+        return int(chat_id)
+    except (TypeError, ValueError):
+        return str(chat_id)
+
+
+def is_private_command_chat(chat) -> bool:
+    """
+    True only for 1:1 DMs with the bot.
+
+    Commands from the Pro channel (TELEGRAM_CHAT_ID) or any group/supergroup/channel
+    are ignored so replies never leak into the shared feed.
+    """
+    chat = chat or {}
+    chat_type = str(chat.get("type") or "").lower()
+    if chat_type and chat_type != "private":
+        return False
+
+    chat_id = _normalize_chat_id(chat.get("id"))
+    signal_chat = _normalize_chat_id(config.TELEGRAM_CHAT_ID)
+    if chat_id is not None and signal_chat is not None and chat_id == signal_chat:
+        return False
+
+    # Prefer an explicit private type; if missing, still allow when not the signal chat
+    # (some truncated updates omit type).
+    if chat_type == "private":
+        return True
+    return chat_type == "" and chat_id is not None
+
+
 def poll_telegram():
     global last_update_id
     while True:
@@ -136,14 +169,19 @@ def poll_telegram():
                 if text:
                     user_id = from_user.get("id")
                     reply_chat_id = chat.get("id")
-                    log_event(f"Telegram message from {user_id}: {text}")
+                    if not is_private_command_chat(chat):
+                        log_event(
+                            f"Ignoring command outside DM (chat_type={chat.get('type')}, "
+                            f"chat_id={reply_chat_id}): {text}"
+                        )
+                        continue
+                    log_event(f"Telegram DM from {user_id}: {text}")
                     response, parse_mode = handle_telegram_command(text, user_id=user_id)
-                    # Always reply in the chat where the command was sent (usually admin DM).
                     send_telegram(
                         response,
                         parse_mode=parse_mode,
                         bypass_rate_limit=True,
-                        chat_id=reply_chat_id if reply_chat_id is not None else None,
+                        chat_id=reply_chat_id,
                     )
                 else:
                     log_event(f"Telegram update had no text. Keys={list(update.keys())}")
@@ -151,6 +189,7 @@ def poll_telegram():
                 log_event(f"⚠️ Telegram poll loop error: {e}")
 
             time.sleep(0.2)
+
 
 
 
@@ -715,7 +754,7 @@ MEMBER_HELP_TEXT = (
     "Trade setups are posted in the <b>private Pro channel</b> you joined via invite.\n"
     "Bot settings (timeframe, scanning, pauses) are controlled by the operator only — "
     "this keeps the feed consistent for everyone.\n\n"
-    "Read-only commands you can use in DM:\n"
+    "Message this bot in a <b>private DM</b> (not in the channel) for read-only commands:\n"
     "/status — scanning state & last backtest summary\n"
     "/pairs — active pairs\n"
     "/backtest — last backtest digest\n"
