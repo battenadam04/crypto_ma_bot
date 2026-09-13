@@ -283,10 +283,30 @@ main,
   font-size: clamp(2.2rem, 4vw, 3rem);
   font-weight: 600;
   letter-spacing: -0.02em;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.55rem 0.85rem;
 }
 
-.price span {
+.price > span:first-child {
   color: var(--sage);
+}
+
+.price-usd {
+  font-family: var(--font-body);
+  font-size: clamp(1rem, 2vw, 1.2rem);
+  font-weight: 500;
+  color: var(--mist);
+  letter-spacing: 0;
+}
+
+.price-period {
+  font-family: var(--font-body);
+  font-size: clamp(1rem, 2vw, 1.15rem);
+  font-weight: 500;
+  color: var(--mist);
+  letter-spacing: 0;
 }
 
 .foot {
