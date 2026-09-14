@@ -69,8 +69,17 @@ MIN_ADX_TREND = 18.0
 # Signals-only product (live trading lives on tag v1.0.0-live-trading).
 TRADING_SIGNALS_ONLY = True
 
-# Master scan/alert gate — toggled at runtime via Telegram /on /off (default OFF).
-TRADING_ENABLED = False
+# Master scan/alert gate — toggled at runtime via Telegram /on /off.
+# Default ON for the Pro channel feed; set TRADING_ENABLED=false in env to boot off.
+# /on and /off persist to runtime_config.json (survives restarts; lost on ephemeral redeploy unless disk attached).
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None or str(raw).strip() == "":
+        return default
+    return str(raw).strip().lower() in ("1", "true", "yes", "on")
+
+
+TRADING_ENABLED = _env_bool("TRADING_ENABLED", True)
 
 # ---------------------------------------------------------------------------
 # Live trading via Phemex (admin-controlled, independent of signal scanning)
@@ -207,11 +216,13 @@ IS_BACKTESTING = False
 
 
 def set_trading_enabled(enabled: bool, by: str = "unknown") -> bool:
-    """Set scanning enabled flag and record provenance for observability."""
+    """Set scanning enabled flag, persist it, and record provenance for observability."""
     global TRADING_ENABLED, TRADING_ENABLED_LAST_SET_AT_UTC, TRADING_ENABLED_LAST_SET_BY
-    TRADING_ENABLED = bool(enabled)
-    TRADING_ENABLED_LAST_SET_AT_UTC = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
-    TRADING_ENABLED_LAST_SET_BY = (by or "unknown").strip()[:120]
+    with _runtime_lock:
+        TRADING_ENABLED = bool(enabled)
+        TRADING_ENABLED_LAST_SET_AT_UTC = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+        TRADING_ENABLED_LAST_SET_BY = (by or "unknown").strip()[:120]
+        _persist_runtime_config()
     return TRADING_ENABLED
 
 
@@ -229,7 +240,7 @@ def set_live_trading_enabled(enabled: bool, by: str = "unknown") -> bool:
 
 
 def _load_runtime_config():
-    global TIMEFRAME, NIGHT_QUIET_ARMED, MACRO_PAUSE_ARMED
+    global TIMEFRAME, NIGHT_QUIET_ARMED, MACRO_PAUSE_ARMED, TRADING_ENABLED
     try:
         if not os.path.isfile(_RUNTIME_CONFIG_FILE):
             return
@@ -244,6 +255,9 @@ def _load_runtime_config():
         macro_armed = data.get("MACRO_PAUSE_ARMED")
         if MACRO_PAUSE_ENABLED and isinstance(macro_armed, bool):
             MACRO_PAUSE_ARMED = macro_armed
+        trading = data.get("TRADING_ENABLED")
+        if isinstance(trading, bool):
+            TRADING_ENABLED = trading
     except Exception:
         return
 
@@ -258,6 +272,7 @@ def _persist_runtime_config():
         except Exception:
             data = {}
     data["TIMEFRAME"] = TIMEFRAME
+    data["TRADING_ENABLED"] = bool(TRADING_ENABLED)
     if NIGHT_QUIET_ENABLED:
         data["NIGHT_QUIET_ARMED"] = NIGHT_QUIET_ARMED
     if MACRO_PAUSE_ENABLED:
