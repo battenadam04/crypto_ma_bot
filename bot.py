@@ -643,6 +643,13 @@ if __name__ == '__main__':
             log_event(f"Macro pause check failed: {e}")
             macro_pause = None
 
+        # Reassurance when filters hold (silence ≠ offline)
+        try:
+            from utils.channelHeartbeat import maybe_send_quiet_heartbeat
+            maybe_send_quiet_heartbeat(send_telegram)
+        except Exception as e:
+            log_event(f"Quiet heartbeat check failed: {e}")
+
         if macro_pause:
             now_ts = time.time()
             if now_ts - _last_macro_pause_log_ts >= 600:

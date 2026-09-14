@@ -152,6 +152,11 @@ MACRO_CALENDAR_TIMEOUT_SEC = 15
 
 MAIN_LOOP_INTERVAL_SEC = 300
 
+# Channel quiet-period heartbeat (Pro channel reassurance when filters hold)
+CHANNEL_HEARTBEAT_ENABLED = True
+CHANNEL_HEARTBEAT_AFTER_QUIET_HOURS = 8   # only after this long with no setups
+CHANNEL_HEARTBEAT_EVERY_HOURS = 8         # at most once per this interval while quiet
+
 # Signal volume controls
 SIGNAL_COOLDOWN_SEC = 1800
 MAX_SIGNALS_PER_CYCLE = 5

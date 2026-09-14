@@ -6,3 +6,6 @@ __pycache__/
 logs/
 charts/
 .env
+channel_activity.json
+runtime_config.json
+last_backtest_screen.json

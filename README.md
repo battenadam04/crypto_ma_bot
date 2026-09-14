@@ -30,7 +30,7 @@ python bot.py
 
 In Telegram: `/on` to start scanning, `/help` for the menu.
 
-Tune signal volume, timeframe defaults, night quiet, exchange, and weekly auto-backtest (`AUTO_BACKTEST_*`) in **`config.py`** (not `.env`). `/timeframe` and `/night` still override at runtime.
+Tune signal volume, timeframe defaults, night quiet, channel quiet heartbeats, exchange, and weekly auto-backtest (`AUTO_BACKTEST_*`) in **`config.py`** (not `.env`). `/timeframe` and `/night` still override at runtime.
 
 ---
 

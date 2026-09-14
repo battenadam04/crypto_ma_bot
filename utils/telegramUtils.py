@@ -442,6 +442,8 @@ def _cmd_status():
         f"Timeframe: <code>{config.TIMEFRAME}</code>",
         f"Multi-TF: {'ON (' + ','.join(config.MULTI_TF_EXTRA) + ')' if config.MULTI_TF_ENABLED else 'OFF'}",
         f"Alerts/cycle: {config.MAX_SIGNALS_PER_CYCLE} | Cooldown: {config.SIGNAL_COOLDOWN_SEC}s",
+        f"Quiet heartbeat: {'ON' if config.CHANNEL_HEARTBEAT_ENABLED else 'OFF'} "
+        f"(after {config.CHANNEL_HEARTBEAT_AFTER_QUIET_HOURS}h quiet, every {config.CHANNEL_HEARTBEAT_EVERY_HOURS}h)",
         "",
         "<b>📊 Edge (last backtest)</b>",
     ]

@@ -24,6 +24,11 @@ def record_signal(symbol, direction, strategy_type, entry_price, tp_price, sl_pr
         'timestamp': datetime.now(timezone.utc).isoformat(),
     })
     log_event(f"Signal recorded: {direction} {symbol} @ {entry_price}")
+    try:
+        from utils.channelHeartbeat import note_signal_sent
+        note_signal_sent()
+    except Exception as e:
+        log_event(f"Heartbeat signal stamp failed: {e}")
 
 
 def _parse_signal_ts(signal) -> datetime | None:
@@ -208,16 +213,38 @@ def build_eod_summary(exchange):
     return "\n".join(lines)
 
 
+def build_quiet_day_eod_message() -> str:
+    """Short EOD note when filters produced zero setups."""
+    day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    return "\n".join(
+        [
+            f"<b>📋 Daily Signal Report</b> ({day})",
+            "",
+            "Signals today: <b>0</b>",
+            "",
+            "A quiet day usually means the filters held — weak or high-risk setups "
+            "were skipped on purpose. That is the strategy working, not downtime.",
+            "",
+            "<i>No signal ≠ offline.</i>",
+        ]
+    )
+
+
 def send_eod_report():
     """Scheduled job: build the EOD summary and send to Telegram, then reset."""
     from utils.exchangeUtils import get_exchange
     from utils.telegramUtils import send_telegram
 
-    if not _daily_signals:
-        log_event("EOD report: no signals today, skipping.")
-        return
-
     try:
+        if not _daily_signals:
+            send_telegram(
+                build_quiet_day_eod_message(),
+                parse_mode="HTML",
+                bypass_rate_limit=True,
+            )
+            log_event("EOD quiet-day report sent to Telegram.")
+            return
+
         summary = build_eod_summary(get_exchange())
         if summary:
             # Don't let rate limiting suppress the daily report.
