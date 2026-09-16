@@ -113,6 +113,24 @@ def send_telegram(text, image_path=None, parse_mode=None, bypass_rate_limit: boo
         log_event(f"⚠️ Telegram error chat_id={target}: {type(e).__name__}: {e}")
 
 
+def send_telegram_admins(text, parse_mode=None, bypass_rate_limit: bool = True):
+    """Send operator-only alerts to each TELEGRAM_ADMIN_IDS DM (not the Pro channel).
+
+    Falls back to the signal channel only when no admin ids are configured (solo mode).
+    """
+    admin_ids = sorted(config.telegram_admin_id_set())
+    if not admin_ids:
+        send_telegram(text, parse_mode=parse_mode, bypass_rate_limit=bypass_rate_limit)
+        return
+    for admin_id in admin_ids:
+        send_telegram(
+            text,
+            parse_mode=parse_mode,
+            bypass_rate_limit=bypass_rate_limit,
+            chat_id=admin_id,
+        )
+
+
 TELEGRAM_POLL_IDLE_SECONDS = 90
 
 # Commands that change shared bot state — admin only when TELEGRAM_ADMIN_IDS is set.

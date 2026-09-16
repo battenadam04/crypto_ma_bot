@@ -89,7 +89,7 @@ class TestMonitorTradeOutcomes:
 
     @patch('utils.liveTrading.get_authenticated_exchange')
     @patch('utils.liveTrading.get_open_positions')
-    @patch('utils.telegramUtils.send_telegram')
+    @patch('utils.telegramUtils.send_telegram_admins')
     def test_outcome_alert_determines_tp(self, mock_tg, mock_positions, mock_exchange):
         exchange_mock = MagicMock()
         exchange_mock.fetch_ticker.return_value = {'last': 1.59}
@@ -107,7 +107,7 @@ class TestMonitorTradeOutcomes:
 
     @patch('utils.liveTrading.get_authenticated_exchange')
     @patch('utils.liveTrading.get_open_positions')
-    @patch('utils.telegramUtils.send_telegram')
+    @patch('utils.telegramUtils.send_telegram_admins')
     def test_outcome_alert_determines_sl(self, mock_tg, mock_positions, mock_exchange):
         exchange_mock = MagicMock()
         exchange_mock.fetch_ticker.return_value = {'last': 1.46}
@@ -124,7 +124,7 @@ class TestMonitorTradeOutcomes:
 
     @patch('utils.liveTrading.get_authenticated_exchange')
     @patch('utils.liveTrading.get_open_positions')
-    @patch('utils.telegramUtils.send_telegram')
+    @patch('utils.telegramUtils.send_telegram_admins')
     def test_outcome_alert_short_tp(self, mock_tg, mock_positions, mock_exchange):
         exchange_mock = MagicMock()
         exchange_mock.fetch_ticker.return_value = {'last': 1.41}
@@ -142,7 +142,7 @@ class TestMonitorTradeOutcomes:
 
     @patch('utils.liveTrading.get_authenticated_exchange')
     @patch('utils.liveTrading.get_open_positions')
-    @patch('utils.telegramUtils.send_telegram')
+    @patch('utils.telegramUtils.send_telegram_admins')
     def test_alerts_disabled_skips_telegram(self, mock_tg, mock_positions, mock_exchange):
         exchange_mock = MagicMock()
         mock_exchange.return_value = exchange_mock

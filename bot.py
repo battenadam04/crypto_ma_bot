@@ -117,7 +117,7 @@ def _run_auto_backtest():
                 ]
                 if portfolio_wr is not None:
                     lines.append(f"Portfolio win rate: <b>{portfolio_wr}%</b>")
-                lines.append("<i>/status or /backtest for details</i>")
+                lines.append("<i>Watchlist refreshed for upcoming setups.</i>")
                 send_telegram("\n".join(lines), parse_mode="HTML", bypass_rate_limit=True)
             except Exception as e:
                 log_event(f"Auto-backtest finish notify failed: {e}")
@@ -261,11 +261,12 @@ def handle_signal(symbol, direction, df, strategy_type="trend", signal_source="S
             except Exception as e:
                 live_status = f"\n🔴 Live execution error: {e}"
 
+        # Pro channel is read-only for members — keep operator/live details out of the feed.
         message = (
             f"{'📈 LONG' if direction == 'long' else '📉 SHORT'} SIGNAL for {symbol} ({timeframe})\n"
             f"Confirmed by {config.HTF_TIMEFRAME} {'up' if direction == 'long' else 'down'} {strategy_type}\n\n"
             f"🧭 Src: {signal_source}\n"
-            f"{'ℹ️ Signals only — no orders are placed.' if not config.LIVE_TRADING_ENABLED else '⚡ LIVE TRADING ACTIVE'}\n"
+            f"ℹ️ Signals only — no orders are placed for channel members.\n"
             f"💲 Reference price: {filled_entry}\n"
             f"🎯 TP (indicative): {tp}\n"
             f"🛑 SL (indicative): {sl}\n"
@@ -273,11 +274,21 @@ def handle_signal(symbol, direction, df, strategy_type="trend", signal_source="S
         if status != "success":
             message += f"⚙️ Status: {status}\n⚙️ Detail: {error}\n"
         message += limit_hint
-        message += live_status
 
         send_telegram(message)
         log_event(f"Signal: {message}")
         _mark_signal_sent(symbol, direction)
+
+        if live_status:
+            try:
+                from utils.telegramUtils import send_telegram_admins
+                send_telegram_admins(
+                    f"⚡ Live trading update for <b>{symbol}</b> ({timeframe})\n"
+                    f"{live_status.strip()}",
+                    parse_mode="HTML",
+                )
+            except Exception as e:
+                log_event(f"Admin live-status notify failed: {e}")
 
         if status == 'success':
             record_signal(symbol, direction, strategy_type, filled_entry, tp_price or tp, sl_price or sl)

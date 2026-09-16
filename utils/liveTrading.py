@@ -172,9 +172,9 @@ def check_capital_guards(exchange) -> tuple[bool, str | None]:
             msg = (
                 f"DAILY LOSS LIMIT HIT: {loss_pct:.1f}% drawdown "
                 f"(limit: {config.LIVE_TRADING_DAILY_LOSS_LIMIT_PCT}%). "
-                f"Live trading auto-disabled. Use /live on to re-enable."
+                f"Live trading auto-disabled."
             )
-            log_event(f"🚨 {msg}")
+            log_event(f"🚨 {msg} Re-enable with /live on in an admin DM.")
             return False, msg
 
     # 7. Maximum capital deployed
@@ -292,8 +292,8 @@ def flatten_opposite_position(exchange, symbol, new_side: str):
     if pnl is not None:
         note += f" (PnL {float(pnl):+.2f} USDT)"
     try:
-        from utils.telegramUtils import send_telegram
-        send_telegram(
+        from utils.telegramUtils import send_telegram_admins
+        send_telegram_admins(
             f"🔄 Reverse signal: closed {existing.upper()} {symbol} "
             f"before opening {wanted.upper()}.\n{note}",
             bypass_rate_limit=True,
@@ -395,8 +395,8 @@ def execute_trade(symbol, side, entry_price, tp_price, sl_price, strategy_type="
         if not sl_ok:
             log_event(f"🚨 CRITICAL: SL failed for {symbol} — emergency closing position")
             _emergency_close(exchange, symbol, side, contracts)
-            from utils.telegramUtils import send_telegram
-            send_telegram(
+            from utils.telegramUtils import send_telegram_admins
+            send_telegram_admins(
                 f"🚨 EMERGENCY CLOSE: {symbol}\n"
                 f"Stop-loss order could not be placed after retries.\n"
                 f"Position was closed at market to prevent unprotected exposure.",
@@ -553,8 +553,8 @@ def watchdog_check_positions():
                 _emergency_close(exchange, symbol, close_side, contracts)
 
                 try:
-                    from utils.telegramUtils import send_telegram
-                    send_telegram(
+                    from utils.telegramUtils import send_telegram_admins
+                    send_telegram_admins(
                         f"🚨 WATCHDOG EMERGENCY CLOSE: {symbol}\n"
                         f"Position had no stop-loss and SL placement failed.\n"
                         f"Emergency closed at market to prevent liquidation.",
@@ -564,8 +564,8 @@ def watchdog_check_positions():
                     pass
             else:
                 try:
-                    from utils.telegramUtils import send_telegram
-                    send_telegram(
+                    from utils.telegramUtils import send_telegram_admins
+                    send_telegram_admins(
                         f"⚠️ WATCHDOG: Placed emergency SL for {symbol} @ {emergency_sl:.6f}\n"
                         f"Position was found without stop-loss protection.",
                         bypass_rate_limit=True,
@@ -705,7 +705,7 @@ def monitor_trade_outcomes():
 
 def _send_outcome_alert(exchange, symbol: str, pos_info: dict):
     """Determine trade outcome and send Telegram notification."""
-    from utils.telegramUtils import send_telegram
+    from utils.telegramUtils import send_telegram_admins
 
     side = pos_info['side']
     entry = pos_info['entry']
@@ -774,6 +774,6 @@ def _send_outcome_alert(exchange, symbol: str, pos_info: dict):
     msg += f"<b>Duration:</b> {duration_str}\n"
 
     try:
-        send_telegram(msg, parse_mode="HTML", bypass_rate_limit=True)
+        send_telegram_admins(msg, parse_mode="HTML", bypass_rate_limit=True)
     except Exception as e:
         log_event(f"Failed to send outcome alert for {symbol}: {e}")
