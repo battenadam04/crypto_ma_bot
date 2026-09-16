@@ -30,6 +30,12 @@ class TestConfigDefaults:
         import config
         assert isinstance(config.TRADING_ENABLED, bool)
 
+    def test_normalize_telegram_chat_id_adds_missing_minus(self):
+        import config
+        assert config.normalize_telegram_chat_id("1004450702772") == "-1004450702772"
+        assert config.normalize_telegram_chat_id("-1004450702772") == "-1004450702772"
+        assert config.normalize_telegram_chat_id("7624657066") == "7624657066"
+
     def test_crypto_pairs_is_list(self):
         import config
         assert isinstance(config.CRYPTO_PAIRS, list)

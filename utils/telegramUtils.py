@@ -67,6 +67,7 @@ def send_telegram(text, image_path=None, parse_mode=None, bypass_rate_limit: boo
         return
 
     target = chat_id if chat_id is not None else config.TELEGRAM_CHAT_ID
+    target = config.normalize_telegram_chat_id(target)
     if not target:
         log_event("❌ TELEGRAM_CHAT_ID is not set — cannot send")
         return
@@ -77,7 +78,16 @@ def send_telegram(text, image_path=None, parse_mode=None, bypass_rate_limit: boo
         if parse_mode:
             payload['parse_mode'] = parse_mode
         r = requests.post(url, data=payload, timeout=20)
-        r.raise_for_status()
+        if not r.ok:
+            detail = ""
+            try:
+                detail = (r.json() or {}).get("description") or r.text[:200]
+            except Exception:
+                detail = (r.text or "")[:200]
+            log_event(
+                f"⚠️ Telegram send failed ({r.status_code}) chat_id={target}: {detail}"
+            )
+            return
 
         if image_path:
             url = f"https://api.telegram.org/bot{config.TELEGRAM_TOKEN}/sendPhoto"
@@ -88,9 +98,19 @@ def send_telegram(text, image_path=None, parse_mode=None, bypass_rate_limit: boo
                     data={'chat_id': target},
                     timeout=45,
                 )
-                r2.raise_for_status()
+                if not r2.ok:
+                    detail = ""
+                    try:
+                        detail = (r2.json() or {}).get("description") or r2.text[:200]
+                    except Exception:
+                        detail = (r2.text or "")[:200]
+                    log_event(
+                        f"⚠️ Telegram photo failed ({r2.status_code}) chat_id={target}: {detail}"
+                    )
+                    return
     except Exception as e:
-        log_event(f"⚠️ Telegram error: {e}")
+        # Never log the full URL — it embeds the bot token.
+        log_event(f"⚠️ Telegram error chat_id={target}: {type(e).__name__}: {e}")
 
 
 TELEGRAM_POLL_IDLE_SECONDS = 90

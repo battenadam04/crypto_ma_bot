@@ -609,6 +609,8 @@ if __name__ == '__main__':
             "⚠️ TELEGRAM_ADMIN_IDS unset — any user who can DM the bot may change settings. "
             "Set admin ids before Whop launch."
         )
+    chat_dest = config.TELEGRAM_CHAT_ID or "(unset)"
+    log_event(f"📣 Signal destination chat_id={chat_dest}")
     executor = ThreadPoolExecutor(max_workers=1)
     executor.submit(poll_telegram)
 

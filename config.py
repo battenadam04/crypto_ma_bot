@@ -12,7 +12,29 @@ _PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(_PROJECT_ROOT, ".env"))
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+
+
+def normalize_telegram_chat_id(raw):
+    """
+    Normalize Telegram chat ids from env / dashboard paste mistakes.
+
+    Channel/supergroup ids must look like -100xxxxxxxxxx.
+    People often paste 100xxxxxxxxxx (missing leading '-') from t.me/c/… links.
+    """
+    if raw is None:
+        return None
+    s = str(raw).strip().replace(" ", "")
+    if not s:
+        return None
+    # Allow chat_id=@channelusername style
+    if s.startswith("@") or s.startswith("-"):
+        return s
+    if s.isdigit() and s.startswith("100") and len(s) >= 12:
+        return f"-{s}"
+    return s
+
+
+TELEGRAM_CHAT_ID = normalize_telegram_chat_id(os.getenv("TELEGRAM_CHAT_ID"))
 # Comma-separated Telegram user IDs allowed to change bot settings (/on, /timeframe, etc.).
 # Empty = solo mode (anyone who can message the bot may run admin commands).
 # For Whop/channel launch: set your user id(s) so paying members cannot change shared settings.
