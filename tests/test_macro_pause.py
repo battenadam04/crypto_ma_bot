@@ -79,6 +79,8 @@ class TestMacroPauseWindow:
         assert "CPI" in msg
         assert "2026-09-11 14:30 UTC" in msg
         assert "60m" in msg or "1h" in msg
+        assert "/macro" not in msg
+        assert "no action needed" in msg.lower()
 
     def test_notify_sends_pause_then_resume_once(self):
         release = datetime(2026, 9, 11, 12, 30, tzinfo=timezone.utc)

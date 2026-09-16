@@ -659,7 +659,7 @@ if __name__ == '__main__':
                 mins_left = max(1, int(macro_pause["remaining_sec"] // 60))
                 log_event(
                     f"Macro pause ({macro_pause['name']}) — skipping scan. "
-                    f"Resume in ~{mins_left}m. Use /macro off to disarm."
+                    f"Resume in ~{mins_left}m."
                 )
             time.sleep(config.MACRO_PAUSE_SLEEP_SEC)
             continue

@@ -198,7 +198,7 @@ def format_pause_telegram(pause: dict) -> str:
         f"Resume at: <code>{resume}</code>\n"
         f"Time left: <b>~{remaining}</b>\n\n"
         f"<i>Signals paused so US data volatility doesn't create bad setups. "
-        f"Use /macro off to disarm.</i>"
+        f"This is automatic — no action needed from members.</i>"
     )
 
 
