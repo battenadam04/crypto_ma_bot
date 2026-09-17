@@ -26,11 +26,12 @@ class TestSignalFormat:
             limit_hint=format_limit_hint(0.577, 0.52, "long"),
         )
         assert "📈 <b>LONG</b> · <b>XRP/USDT</b> · 15-min chart" in msg
-        assert "1-hour uptrend" in msg
-        assert "Take-profit" in msg
-        assert "Stop-loss" in msg
-        assert "Reward/risk" in msg
-        assert "Optional limit entry" in msg
+        assert "🧭" in msg and "1-hour uptrend" in msg
+        assert "💲" in msg and "Entry" in msg
+        assert "🎯" in msg and "Take-profit" in msg
+        assert "🛑" in msg and "Stop-loss" in msg
+        assert "⚖️" in msg and "Reward/risk" in msg
+        assert "📝" in msg and "Optional limit entry" in msg
         assert "not to buy at market" in msg
         # Jargon / noise removed
         assert "1h up" not in msg

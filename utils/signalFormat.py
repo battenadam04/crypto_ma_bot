@@ -122,20 +122,20 @@ def format_signal_message(
 
     lines = [
         f"{emoji} <b>{side}</b> · <b>{pair}</b> · {display_timeframe(timeframe)}",
-        f"{setup} · {htf_bias_line(direction)}",
+        f"🧭 {setup} · {htf_bias_line(direction)}",
         "",
-        f"<b>Entry</b>        {fmt_price(entry)}",
-        f"<b>Take-profit</b>  {fmt_price(tp)}" + (f"  <i>({tp_pct})</i>" if tp_pct else ""),
-        f"<b>Stop-loss</b>    {fmt_price(sl)}" + (f"  <i>({sl_pct})</i>" if sl_pct else ""),
+        f"💲 <b>Entry</b>        {fmt_price(entry)}",
+        f"🎯 <b>Take-profit</b>  {fmt_price(tp)}" + (f"  <i>({tp_pct})</i>" if tp_pct else ""),
+        f"🛑 <b>Stop-loss</b>    {fmt_price(sl)}" + (f"  <i>({sl_pct})</i>" if sl_pct else ""),
     ]
     if rr:
-        lines.append(f"<b>Reward/risk</b>  {rr}×")
+        lines.append(f"⚖️ <b>Reward/risk</b>  {rr}×")
     if limit_hint:
         lines.append("")
         lines.append(limit_hint)
     if status != "success" and error:
         lines.append("")
-        lines.append(f"<i>Levels note: {error}</i>")
+        lines.append(f"⚙️ <i>Levels note: {error}</i>")
     return "\n".join(lines)
 
 
@@ -143,12 +143,12 @@ def format_limit_hint(limit_price, dist_pct: float, direction: str) -> str:
     """Optional passive entry — explained for beginners."""
     if direction == "long":
         return (
-            f"<b>Optional limit entry</b>  {fmt_price(limit_price)}  "
+            f"📝 <b>Optional limit entry</b>  {fmt_price(limit_price)}  "
             f"<i>(~{abs(dist_pct):.2f}% below)</i>\n"
             f"<i>Wait for this price if you prefer not to buy at market right now.</i>"
         )
     return (
-        f"<b>Optional limit entry</b>  {fmt_price(limit_price)}  "
+        f"📝 <b>Optional limit entry</b>  {fmt_price(limit_price)}  "
         f"<i>(~{abs(dist_pct):.2f}% above)</i>\n"
         f"<i>Wait for this price if you prefer not to sell at market right now.</i>"
     )
