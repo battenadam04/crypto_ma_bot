@@ -1,34 +1,105 @@
 """Track signals sent during the day and produce an EOD summary."""
 
+from __future__ import annotations
+
+import json
+import os
+import threading
+import uuid
 from datetime import datetime, timezone
 
 import config
 from utils.utils import log_event
 
 _daily_signals: list[dict] = []
+_open_signals: list[dict] = []
+_open_lock = threading.Lock()
+_OPEN_SIGNALS_FILE = os.path.join(os.path.dirname(__file__), "..", "open_signals.json")
+_open_loaded = False
 
 # Path-dependent EOD resolution uses this TF so TP/SL touches aren't missed.
 _RESOLVE_TIMEFRAME = "5m"
 _RESOLVE_OHLCV_LIMIT = 500
 
 
-def record_signal(symbol, direction, strategy_type, entry_price, tp_price, sl_price):
+def record_signal(symbol, direction, strategy_type, entry_price, tp_price, sl_price, timeframe=None):
     """Call this every time a signal is generated."""
-    _daily_signals.append({
-        'symbol': symbol,
-        'direction': direction,
-        'strategy_type': strategy_type,
-        'entry': entry_price,
-        'tp': tp_price,
-        'sl': sl_price,
-        'timestamp': datetime.now(timezone.utc).isoformat(),
-    })
+    sig = {
+        "id": uuid.uuid4().hex[:12],
+        "symbol": symbol,
+        "direction": direction,
+        "strategy_type": strategy_type,
+        "entry": entry_price,
+        "tp": tp_price,
+        "sl": sl_price,
+        "timeframe": timeframe or getattr(config, "TIMEFRAME", "15m"),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    _daily_signals.append(sig)
     log_event(f"Signal recorded: {direction} {symbol} @ {entry_price}")
     try:
         from utils.channelHeartbeat import note_signal_sent
         note_signal_sent()
     except Exception as e:
         log_event(f"Heartbeat signal stamp failed: {e}")
+    _add_open_signal(sig)
+
+
+def _load_open_signals() -> None:
+    global _open_loaded, _open_signals
+    if _open_loaded:
+        return
+    with _open_lock:
+        if _open_loaded:
+            return
+        try:
+            if os.path.isfile(_OPEN_SIGNALS_FILE):
+                with open(_OPEN_SIGNALS_FILE, "r") as f:
+                    data = json.load(f) or []
+                if isinstance(data, list):
+                    _open_signals = [s for s in data if isinstance(s, dict)]
+        except Exception as e:
+            log_event(f"Open signals load failed: {e}")
+            _open_signals = []
+        _open_loaded = True
+
+
+def _persist_open_signals() -> None:
+    tmp = _OPEN_SIGNALS_FILE + ".tmp"
+    try:
+        with open(tmp, "w") as f:
+            json.dump(_open_signals, f)
+        os.replace(tmp, _OPEN_SIGNALS_FILE)
+    except Exception as e:
+        log_event(f"Open signals save failed: {e}")
+
+
+def _add_open_signal(sig: dict) -> None:
+    _load_open_signals()
+    with _open_lock:
+        _open_signals.append(dict(sig))
+        # Bound memory / file size
+        if len(_open_signals) > 100:
+            _open_signals[:] = _open_signals[-100:]
+        _persist_open_signals()
+
+
+def get_open_signals() -> list[dict]:
+    _load_open_signals()
+    with _open_lock:
+        return [dict(s) for s in _open_signals]
+
+
+def reset_open_signals_for_tests() -> None:
+    global _open_loaded
+    with _open_lock:
+        _open_signals.clear()
+        _open_loaded = True
+        try:
+            if os.path.isfile(_OPEN_SIGNALS_FILE):
+                os.remove(_OPEN_SIGNALS_FILE)
+        except Exception:
+            pass
 
 
 def _parse_signal_ts(signal) -> datetime | None:
@@ -264,3 +335,70 @@ def reset_daily_signals():
 def get_daily_signals():
     """Return a copy of today's signals (for testing or Telegram commands)."""
     return list(_daily_signals)
+
+
+def format_and_maybe_send_outcome(signal: dict, result: str, pnl_pct: float, send_fn) -> bool:
+    """Send a channel outcome alert. Returns True if sent."""
+    if result not in ("win", "loss", "expired"):
+        return False
+    from utils.signalFormat import format_signal_outcome_message
+
+    msg = format_signal_outcome_message(signal, result, pnl_pct)
+    try:
+        send_fn(msg, parse_mode="HTML", bypass_rate_limit=True)
+    except TypeError:
+        send_fn(msg)
+    except Exception as e:
+        log_event(f"Signal outcome notify failed: {e}")
+        return False
+    return True
+
+
+def monitor_signal_outcomes(exchange=None, send_fn=None) -> list[dict]:
+    """
+    Resolve open posted signals and announce TP/SL/expiry on the Pro channel.
+    Returns list of {signal, result, pnl} that were closed this pass.
+    """
+    if not getattr(config, "SIGNAL_OUTCOME_ALERTS_ENABLED", True):
+        return []
+
+    _load_open_signals()
+    if exchange is None:
+        from utils.exchangeUtils import get_exchange
+        exchange = get_exchange()
+    if send_fn is None:
+        from utils.telegramUtils import send_telegram
+        send_fn = send_telegram
+
+    closed: list[dict] = []
+    remaining: list[dict] = []
+
+    with _open_lock:
+        snapshot = list(_open_signals)
+
+    for sig in snapshot:
+        try:
+            result, pnl = _resolve_signal(sig, exchange)
+        except Exception as e:
+            log_event(f"Signal outcome resolve failed for {sig.get('symbol')}: {e}")
+            remaining.append(sig)
+            continue
+
+        if result in ("win", "loss", "expired"):
+            if format_and_maybe_send_outcome(sig, result, pnl, send_fn):
+                log_event(
+                    f"Signal outcome posted: {result} {sig.get('symbol')} ({pnl:+.2f}%)"
+                )
+            closed.append({"signal": sig, "result": result, "pnl": pnl})
+        elif result == "unresolved":
+            # Keep trying next cycle
+            remaining.append(sig)
+        else:
+            # still open
+            remaining.append(sig)
+
+    with _open_lock:
+        _open_signals[:] = remaining
+        _persist_open_signals()
+
+    return closed

@@ -60,6 +60,7 @@ class TestHandleTelegramCommand:
         assert "/live" in response
         assert "/positions" in response
         assert "/guards" in response
+        assert "/guide" in response
         assert mode == 'HTML'
 
     def test_member_cannot_change_timeframe(self, monkeypatch):

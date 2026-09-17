@@ -133,6 +133,15 @@ def format_signal_message(
     if limit_hint:
         lines.append("")
         lines.append(limit_hint)
+    lines.append("")
+    lines.append(
+        f"🚫 <b>Invalidation</b>  setup is done if price trades through the stop "
+        f"({fmt_price(sl)})."
+    )
+    lines.append(
+        "🛡️ <i>Manage your own size — many traders risk about 0.5–1% of account per idea. "
+        "Not financial advice.</i>"
+    )
     if status != "success" and error:
         lines.append("")
         lines.append(f"⚙️ <i>Levels note: {error}</i>")
@@ -151,4 +160,69 @@ def format_limit_hint(limit_price, dist_pct: float, direction: str) -> str:
         f"📝 <b>Optional limit entry</b>  {fmt_price(limit_price)}  "
         f"<i>(~{abs(dist_pct):.2f}% above)</i>\n"
         f"<i>Wait for this price if you prefer not to sell at market right now.</i>"
+    )
+
+
+def format_signal_outcome_message(signal: dict, result: str, pnl_pct: float) -> str:
+    """Channel follow-up when a posted setup hits TP/SL or expires."""
+    pair = display_symbol(signal.get("symbol", ""))
+    direction = signal.get("direction", "")
+    is_long = direction in ("long", "buy")
+    side = "LONG" if is_long else "SHORT"
+    side_emoji = "📈" if is_long else "📉"
+    entry = fmt_price(signal.get("entry"))
+    tp = fmt_price(signal.get("tp"))
+    sl = fmt_price(signal.get("sl"))
+    pnl = f"{pnl_pct:+.2f}%"
+
+    if result == "win":
+        return "\n".join(
+            [
+                f"🎯 <b>Take-profit hit</b> · <b>{pair}</b>",
+                f"{side_emoji} {side} from {entry} → {tp}",
+                f"Result: <b>{pnl}</b>",
+            ]
+        )
+    if result == "loss":
+        return "\n".join(
+            [
+                f"🛑 <b>Stop-loss hit</b> · <b>{pair}</b>",
+                f"{side_emoji} {side} from {entry} → {sl}",
+                f"Result: <b>{pnl}</b>",
+            ]
+        )
+    if result == "expired":
+        return "\n".join(
+            [
+                f"⚪ <b>Setup expired</b> · <b>{pair}</b>",
+                f"{side_emoji} {side} from {entry}",
+                "Neither take-profit nor stop-loss was touched in time.",
+                f"Mark-to-market: <b>{pnl}</b>",
+            ]
+        )
+    return (
+        f"📊 <b>Setup update</b> · <b>{pair}</b>\n"
+        f"{side_emoji} {side} · {result} ({pnl})"
+    )
+
+
+def format_signal_guide() -> str:
+    """Pinned / how-to-read guide for the Pro channel."""
+    return "\n".join(
+        [
+            "📖 <b>How to read a Fathom signal</b>",
+            "",
+            "📈 / 📉 <b>LONG or SHORT</b> — suggested direction of the setup",
+            "💲 <b>Entry</b> — reference price for the idea",
+            "🎯 <b>Take-profit</b> — where the idea aims to bank a win",
+            "🛑 <b>Stop-loss</b> — where the idea is wrong; consider exiting",
+            "⚖️ <b>Reward/risk</b> — potential reward vs risk (higher is usually better)",
+            "📝 <b>Optional limit entry</b> — wait for a better price instead of market now",
+            "🚫 <b>Invalidation</b> — if price goes through the stop, the setup is done",
+            "",
+            "You may also see follow-ups when a take-profit, stop-loss, or expiry hits.",
+            "",
+            "🛡️ Manage your own size and risk. This is market commentary for education — "
+            "<b>not financial advice</b>.",
+        ]
     )

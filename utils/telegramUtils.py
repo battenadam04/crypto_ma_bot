@@ -145,6 +145,7 @@ ADMIN_COMMANDS = {
     "/alerts", "alerts",
     "/positions", "positions",
     "/guards", "guards",
+    "/guide", "guide",
 }
 
 
@@ -312,15 +313,17 @@ def _cmd_live(args=None):
 
 
 def _cmd_alerts(args=None):
-    """Toggle trade outcome alerts (Telegram notifications when TP/SL hit)."""
+    """Toggle outcome alerts (live trades + channel signal follow-ups)."""
     args = args or []
     if not args:
-        state = "ON ✅" if config.TRADE_OUTCOME_ALERTS_ENABLED else "OFF ❌"
+        live_state = "ON ✅" if config.TRADE_OUTCOME_ALERTS_ENABLED else "OFF ❌"
+        signal_state = (
+            "ON ✅" if getattr(config, "SIGNAL_OUTCOME_ALERTS_ENABLED", True) else "OFF ❌"
+        )
         return (
-            f"<b>🔔 Trade Outcome Alerts</b>\n"
-            f"Status: <b>{state}</b>\n\n"
-            f"When enabled, you'll receive a Telegram message\n"
-            f"every time a trade hits its TP or SL.\n\n"
+            f"<b>🔔 Outcome Alerts</b>\n"
+            f"Live trade alerts: <b>{live_state}</b>\n"
+            f"Channel signal follow-ups: <b>{signal_state}</b>\n\n"
             f"<code>/alerts on</code> — enable notifications\n"
             f"<code>/alerts off</code> — disable notifications"
         )
@@ -328,11 +331,28 @@ def _cmd_alerts(args=None):
     sub = (args[0] or "").strip().lower()
     if sub in ("on", "enable", "true", "1", "yes"):
         config.TRADE_OUTCOME_ALERTS_ENABLED = True
-        return "🔔 Trade outcome alerts <b>ENABLED</b>. You'll be notified when trades hit TP or SL."
+        config.SIGNAL_OUTCOME_ALERTS_ENABLED = True
+        return "🔔 Outcome alerts <b>ENABLED</b> (live + channel signal follow-ups)."
     if sub in ("off", "disable", "false", "0", "no"):
         config.TRADE_OUTCOME_ALERTS_ENABLED = False
-        return "🔕 Trade outcome alerts <b>DISABLED</b>. Trades will close silently."
+        config.SIGNAL_OUTCOME_ALERTS_ENABLED = False
+        return "🔕 Outcome alerts <b>DISABLED</b>."
     return "Use <code>/alerts</code>, <code>/alerts on</code>, or <code>/alerts off</code>"
+
+
+def _cmd_guide(args=None):
+    """Post the how-to-read guide to the Pro channel for pinning."""
+    from utils.signalFormat import format_signal_guide
+
+    guide = format_signal_guide()
+    try:
+        send_telegram(guide, parse_mode="HTML", bypass_rate_limit=True)
+    except Exception as e:
+        return f"Failed to post guide: {e}"
+    return (
+        "✅ How-to-read guide posted to the <b>Pro channel</b>.\n"
+        "In Telegram: open that message → ⋯ → <b>Pin</b> so new members see it first."
+    )
 
 
 def _cmd_positions():
@@ -784,7 +804,8 @@ HELP_TEXT = (
     "/positions — Open positions & account balance\n"
     "/guards — Capital protection status & limits\n"
     "/close — Close a position (ex: /close ADA)\n"
-    "/alerts — Toggle trade outcome notifications (TP/SL hit)\n\n"
+    "/alerts — Toggle outcome notifications (TP/SL / expiry)\n"
+    "/guide — Post how-to-read guide to the Pro channel (then pin it)\n\n"
     "/help — This message\n\n"
     "<i>Signals are broadcast to the Pro channel (TELEGRAM_CHAT_ID). "
     "Subscribers join via invite — they do not control settings.</i>\n\n"
@@ -794,6 +815,7 @@ HELP_TEXT = (
 MEMBER_HELP_TEXT = (
     "<b>Fathom Pro</b>\n\n"
     "Trade setups are posted in the <b>private Pro channel</b> you joined via invite.\n"
+    "Start with the pinned <b>How to read a Fathom signal</b> guide.\n"
     "Bot settings (timeframe, scanning, pauses) are controlled by the operator only — "
     "this keeps the feed consistent for everyone.\n\n"
     "Message this bot in a <b>private DM</b> (not in the channel) for read-only commands:\n"
@@ -838,6 +860,7 @@ HTML_COMMANDS = {
     "/macro", "macro",
     "/live", "live", "/positions", "positions", "/close", "close",
     "/guards", "guards", "/alerts", "alerts",
+    "/guide", "guide",
 }
 
 _PUBLIC_READ_COMMANDS = {
@@ -894,6 +917,9 @@ def handle_telegram_command(text, user_id=None):
 
     if cmd in {"/alerts", "alerts"}:
         return _cmd_alerts(args), "HTML"
+
+    if cmd in {"/guide", "guide"}:
+        return _cmd_guide(args), "HTML"
 
     handler = COMMAND_MAP.get(cmd)
     if handler:

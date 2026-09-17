@@ -27,7 +27,7 @@ from utils.utils import (
     check_breakout_signal,
 )
 from utils.exchangeUtils import get_exchange, build_indicative_levels
-from utils.signalTracker import record_signal, send_eod_report
+from utils.signalTracker import record_signal, send_eod_report, monitor_signal_outcomes
 from utils.signalFormat import format_limit_hint, format_signal_message
 
 
@@ -315,7 +315,15 @@ def handle_signal(symbol, direction, df, strategy_type="trend", signal_source="S
                 log_event(f"Admin live-status notify failed: {e}")
 
         if status == 'success':
-            record_signal(symbol, direction, strategy_type, filled_entry, tp_price or tp, sl_price or sl)
+            record_signal(
+                symbol,
+                direction,
+                strategy_type,
+                filled_entry,
+                tp_price or tp,
+                sl_price or sl,
+                timeframe=timeframe,
+            )
     except Exception as e:
         log_event(f"❌ Error in handle_signal for {symbol}: {e}")
 
@@ -625,6 +633,12 @@ if __name__ == '__main__':
             log_event("🚫 Signal scanning disabled. Sleeping 60 seconds...")
             time.sleep(60)
             continue
+
+        # Follow up posted setups even when scanning is paused for macro/night
+        try:
+            monitor_signal_outcomes()
+        except Exception as e:
+            log_event(f"Signal outcome monitor failed: {e}")
 
         # US high-impact data pause (CPI / NFP / FOMC / GDP) — notify even overnight
         try:

@@ -7,5 +7,6 @@ logs/
 charts/
 .env
 channel_activity.json
+open_signals.json
 runtime_config.json
 last_backtest_screen.json

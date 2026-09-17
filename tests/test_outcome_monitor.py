@@ -168,7 +168,7 @@ class TestAlertsCommand:
     def test_alerts_shows_status(self):
         from utils.telegramUtils import handle_telegram_command
         response, _ = handle_telegram_command("/alerts")
-        assert "Trade Outcome Alerts" in response
+        assert "Outcome Alerts" in response
         assert "ON" in response
 
     def test_alerts_on(self):

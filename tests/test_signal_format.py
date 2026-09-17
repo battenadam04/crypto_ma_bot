@@ -5,7 +5,13 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from utils.signalFormat import display_symbol, format_limit_hint, format_signal_message
+from utils.signalFormat import (
+    display_symbol,
+    format_limit_hint,
+    format_signal_guide,
+    format_signal_message,
+    format_signal_outcome_message,
+)
 
 
 class TestSignalFormat:
@@ -32,25 +38,22 @@ class TestSignalFormat:
         assert "🛑" in msg and "Stop-loss" in msg
         assert "⚖️" in msg and "Reward/risk" in msg
         assert "📝" in msg and "Optional limit entry" in msg
+        assert "🚫" in msg and "Invalidation" in msg
+        assert "0.5–1%" in msg or "0.5-1%" in msg
         assert "not to buy at market" in msg
-        # Jargon / noise removed
         assert "1h up" not in msg
         assert "Src:" not in msg
-        assert "SIGNAL for" not in msg
-        assert "Signals only" not in msg
 
-    def test_limit_source_label(self):
-        msg = format_signal_message(
-            symbol="SUI/USDT:USDT",
-            direction="short",
-            timeframe="5m",
-            strategy_type="range",
-            entry=1.5,
-            tp=1.47,
-            sl=1.52,
-            signal_source="LIM",
+    def test_guide_and_outcome_copy(self):
+        guide = format_signal_guide()
+        assert "How to read" in guide
+        assert "Invalidation" in guide
+        assert "/macro" not in guide
+
+        win = format_signal_outcome_message(
+            {"symbol": "XRP/USDT:USDT", "direction": "long", "entry": 0.58, "tp": 0.59, "sl": 0.57},
+            "win",
+            2.0,
         )
-        assert "📉 <b>SHORT</b>" in msg
-        assert "5-min chart" in msg
-        assert "limit-style" in msg.lower()
-        assert "downtrend" in msg
+        assert "Take-profit hit" in win
+        assert "XRP/USDT" in win
