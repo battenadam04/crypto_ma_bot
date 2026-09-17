@@ -28,7 +28,7 @@ from utils.utils import (
 )
 from utils.exchangeUtils import get_exchange, build_indicative_levels
 from utils.signalTracker import record_signal, send_eod_report
-from utils.signalFormat import format_limit_hint, format_signal_message, fmt_price
+from utils.signalFormat import format_limit_hint, format_signal_message
 
 
 BACKTEST_STATE_FILE = "last_backtest.json"  # relative to project root (bot dir)
