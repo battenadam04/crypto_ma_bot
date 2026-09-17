@@ -217,10 +217,6 @@ def _mark_signal_sent(symbol, direction) -> None:
         del _recent_signals[oldest_key]
 
 
-def _fmt_price(value):
-    return fmt_price(value)
-
-
 def build_limit_order_hint(df, direction, strategy_type):
     """One-line limit entry suggestion for manual traders."""
     if df is None or len(df) == 0:
