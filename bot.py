@@ -28,6 +28,7 @@ from utils.utils import (
 )
 from utils.exchangeUtils import get_exchange, build_indicative_levels
 from utils.signalTracker import record_signal, send_eod_report
+from utils.signalFormat import format_limit_hint, format_signal_message, fmt_price
 
 
 BACKTEST_STATE_FILE = "last_backtest.json"  # relative to project root (bot dir)
@@ -216,6 +217,32 @@ def _mark_signal_sent(symbol, direction) -> None:
         del _recent_signals[oldest_key]
 
 
+def _fmt_price(value):
+    return fmt_price(value)
+
+
+def build_limit_order_hint(df, direction, strategy_type):
+    """One-line limit entry suggestion for manual traders."""
+    if df is None or len(df) == 0:
+        return ""
+
+    last = df.iloc[-1]
+    close = float(last['close'])
+    support = float(last['support']) if pd.notna(last.get('support')) else close
+    resistance = float(last['resistance']) if pd.notna(last.get('resistance')) else close
+
+    if direction == 'long':
+        base_level = support if strategy_type == "range" else min(close, support * 1.003)
+        limit_price = base_level * (1 + LIMIT_ENTRY_OFFSET_PCT)
+        dist_pct = ((close - limit_price) / close) * 100
+        return format_limit_hint(limit_price, dist_pct, direction)
+
+    base_level = resistance if strategy_type == "range" else max(close, resistance * 0.997)
+    limit_price = base_level * (1 - LIMIT_ENTRY_OFFSET_PCT)
+    dist_pct = ((limit_price - close) / close) * 100
+    return format_limit_hint(limit_price, dist_pct, direction)
+
+
 def handle_signal(symbol, direction, df, strategy_type="trend", signal_source="SIG", timeframe=None):
     """Compose and send a signals-only Telegram alert with indicative TP/SL.
     If live trading is enabled, also execute the trade on Phemex."""
@@ -262,20 +289,21 @@ def handle_signal(symbol, direction, df, strategy_type="trend", signal_source="S
                 live_status = f"\n🔴 Live execution error: {e}"
 
         # Pro channel is read-only for members — keep operator/live details out of the feed.
-        message = (
-            f"{'📈 LONG' if direction == 'long' else '📉 SHORT'} SIGNAL for {symbol} ({timeframe})\n"
-            f"Confirmed by {config.HTF_TIMEFRAME} {'up' if direction == 'long' else 'down'} {strategy_type}\n\n"
-            f"🧭 Src: {signal_source}\n"
-            f"ℹ️ Signals only — no orders are placed for channel members.\n"
-            f"💲 Reference price: {filled_entry}\n"
-            f"🎯 TP (indicative): {tp}\n"
-            f"🛑 SL (indicative): {sl}\n"
+        message = format_signal_message(
+            symbol=symbol,
+            direction=direction,
+            timeframe=timeframe,
+            strategy_type=strategy_type,
+            entry=filled_entry,
+            tp=tp,
+            sl=sl,
+            signal_source=signal_source,
+            limit_hint=limit_hint,
+            status=status,
+            error=error if status != "success" else "",
         )
-        if status != "success":
-            message += f"⚙️ Status: {status}\n⚙️ Detail: {error}\n"
-        message += limit_hint
 
-        send_telegram(message)
+        send_telegram(message, parse_mode="HTML")
         log_event(f"Signal: {message}")
         _mark_signal_sent(symbol, direction)
 
@@ -294,48 +322,6 @@ def handle_signal(symbol, direction, df, strategy_type="trend", signal_source="S
             record_signal(symbol, direction, strategy_type, filled_entry, tp_price or tp, sl_price or sl)
     except Exception as e:
         log_event(f"❌ Error in handle_signal for {symbol}: {e}")
-
-
-def _fmt_price(value):
-    if value is None:
-        return "N/A"
-    if value < 0.01:
-        return f"{value:.8f}"
-    if value < 1:
-        return f"{value:.6f}"
-    if value < 100:
-        return f"{value:.4f}"
-    return f"{value:.2f}"
-
-
-def build_limit_order_hint(df, direction, strategy_type):
-    """Suggest a limit entry near support/resistance for manual traders."""
-    if df is None or len(df) == 0:
-        return "📝 Limit idea: not available (no candle data)"
-
-    last = df.iloc[-1]
-    close = float(last['close'])
-    support = float(last['support']) if pd.notna(last.get('support')) else close
-    resistance = float(last['resistance']) if pd.notna(last.get('resistance')) else close
-
-    if direction == 'long':
-        base_level = support if strategy_type == "range" else min(close, support * 1.003)
-        limit_price = base_level * (1 + LIMIT_ENTRY_OFFSET_PCT)
-        dist_pct = ((close - limit_price) / close) * 100
-        return (
-            f"📝 Limit idea: place a BUY LIMIT near support\n"
-            f"  • Support: {_fmt_price(support)}\n"
-            f"  • Suggested limit: {_fmt_price(limit_price)} (~{dist_pct:.2f}% below current)"
-        )
-
-    base_level = resistance if strategy_type == "range" else max(close, resistance * 0.997)
-    limit_price = base_level * (1 - LIMIT_ENTRY_OFFSET_PCT)
-    dist_pct = ((limit_price - close) / close) * 100
-    return (
-        f"📝 Limit idea: place a SELL LIMIT near resistance\n"
-        f"  • Resistance: {_fmt_price(resistance)}\n"
-        f"  • Suggested limit: {_fmt_price(limit_price)} (~{dist_pct:.2f}% above current)"
-    )
 
 
 def _limit_idea_fallback_signal(lower_df, trend_up, trend_down):
