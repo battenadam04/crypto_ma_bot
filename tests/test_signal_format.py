@@ -5,7 +5,7 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from utils.signalFormat import display_symbol, format_signal_message
+from utils.signalFormat import display_symbol, format_limit_hint, format_signal_message
 
 
 class TestSignalFormat:
@@ -13,7 +13,7 @@ class TestSignalFormat:
         assert display_symbol("XRP/USDT:USDT") == "XRP/USDT"
         assert display_symbol("SUI/USDT") == "SUI/USDT"
 
-    def test_compact_long_signal(self):
+    def test_beginner_friendly_long_signal(self):
         msg = format_signal_message(
             symbol="XRP/USDT:USDT",
             direction="long",
@@ -23,22 +23,20 @@ class TestSignalFormat:
             tp=0.5916,
             sl=0.5742,
             signal_source="SIG",
-            limit_hint="<b>Limit</b>  0.5770  <i>(~0.52% below)</i>",
+            limit_hint=format_limit_hint(0.577, 0.52, "long"),
         )
-        assert "📈 <b>LONG</b> · <b>XRP/USDT</b> · 15m" in msg
-        assert "Trend ·" in msg
-        assert "<b>Entry</b>" in msg
-        assert "<b>TP</b>" in msg
-        assert "<b>SL</b>" in msg
-        assert "<b>R:R</b>" in msg
-        assert "Limit" in msg
-        # Noise removed
+        assert "📈 <b>LONG</b> · <b>XRP/USDT</b> · 15-min chart" in msg
+        assert "1-hour uptrend" in msg
+        assert "Take-profit" in msg
+        assert "Stop-loss" in msg
+        assert "Reward/risk" in msg
+        assert "Optional limit entry" in msg
+        assert "not to buy at market" in msg
+        # Jargon / noise removed
+        assert "1h up" not in msg
         assert "Src:" not in msg
         assert "SIGNAL for" not in msg
         assert "Signals only" not in msg
-        assert "indicative" not in msg.lower()
-        assert "Reference price" not in msg
-        assert "/macro" not in msg
 
     def test_limit_source_label(self):
         msg = format_signal_message(
@@ -52,4 +50,6 @@ class TestSignalFormat:
             signal_source="LIM",
         )
         assert "📉 <b>SHORT</b>" in msg
-        assert "limit idea" in msg.lower()
+        assert "5-min chart" in msg
+        assert "limit-style" in msg.lower()
+        assert "downtrend" in msg
