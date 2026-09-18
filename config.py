@@ -86,7 +86,7 @@ CRYPTO_PAIRS = []
 TP_PERCENT = 2.0
 SL_PERCENT = 1.0
 # Require clearer momentum on the signal timeframe for trend entries (0 = disabled).
-MIN_ADX_TREND = 18.0
+MIN_ADX_TREND = 15.0
 
 # Signals-only product (live trading lives on tag v1.0.0-live-trading).
 TRADING_SIGNALS_ONLY = True
@@ -197,9 +197,9 @@ RANGE_TOUCH_BUFFER = 0.015
 # Range SL: placed beyond support/resistance (industry-style invalidation), not entry±ATR.
 RANGE_SL_BUFFER_PCT = 0.003       # min % beyond S/R level
 RANGE_SL_ATR_MULT = 0.5         # also allow at least this × ATR beyond S/R
-RANGE_TP_TARGET = "opposite"    # "opposite" = other range edge | "mid" = range midpoint
+RANGE_TP_TARGET = "mid"    # "opposite" = other range edge | "mid" = range midpoint
 # Continuations must tag closer to MA10 (reduces chop entries on loose pullbacks).
-CONTINUATION_PULLBACK_PCT = 0.003
+CONTINUATION_PULLBACK_PCT = 0.005
 
 LIMIT_ENTRY_OFFSET_PCT = 0.0015
 LIMIT_IDEA_FALLBACK_PCT = 0.003
@@ -217,7 +217,7 @@ BACKTEST_COMMISSION_BPS = 4.0
 # ~1h at 15m
 BACKTEST_COOLDOWN_BARS = 4
 # ~12h at 15m
-BACKTEST_LOOKAHEAD = 48
+BACKTEST_LOOKAHEAD = 72
 BACKTEST_DAYS = 42
 BACKTEST_USE_LIMIT_IDEAS = False
 BACKTEST_LIMIT_FILL_BARS = 3
