@@ -228,11 +228,18 @@ BACKTEST_ENFORCE_RR = False
 BACKTEST_APPLY_FEES = True
 BACKTEST_MIN_TRADES = 3
 BACKTEST_AUTO_TOP_PAIRS = True
-# After excluding mega-caps, keep this many liquid mid-alts by volume.
-BACKTEST_TOP_N = 30
+# After excluding mega-caps / non-crypto junk, screen a wide liquid universe by volume.
+# Liquidity is only the discovery floor — live pairs still require WR ≥ threshold.
+BACKTEST_TOP_N = 80
 # Mega-caps chop too hard for this MA pullback edge — skip them in auto discovery.
-BACKTEST_EXCLUDE_BASES = ["BTC", "ETH", "BNB"]
-BACKTEST_MIN_QUOTE_VOLUME = 1_000_000.0
+# Also skip Phemex equity/commodity/stock-token perps that pollute volume rankings.
+BACKTEST_EXCLUDE_BASES = [
+    "BTC", "ETH", "BNB",
+    "XAU", "XAG", "QQQ", "SPY", "AVGO", "AAPL", "TSLA", "NVDA", "AMZN", "META",
+    "GOOG", "MSFT", "SAMSUNG", "SOXL", "SOXS", "MRNA", "QCOM", "SKHY", "SKHYNIX",
+    "OPENAI", "RKLB", "NBIS", "SNDK", "BMNR", "MUX", "COIN", "HOOD", "MSTR",
+]
+BACKTEST_MIN_QUOTE_VOLUME = 500_000.0
 # 0 = rank by exchange 24h quote volume only (no large-cap CoinGecko filter)
 BACKTEST_COINGECKO_MIN_CAP = 0.0
 BACKTEST_PAIRS = []  # leave empty so auto top-N volume discovery is used
