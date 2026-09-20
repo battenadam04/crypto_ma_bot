@@ -183,9 +183,11 @@ CHANNEL_HEARTBEAT_AFTER_QUIET_HOURS = 8   # only after this long with no setups
 CHANNEL_HEARTBEAT_EVERY_HOURS = 8         # at most once per this interval while quiet
 
 # Signal volume controls
-SIGNAL_COOLDOWN_SEC = 1800
-MAX_SIGNALS_PER_CYCLE = 5
-ENABLE_LIMIT_IDEA_FALLBACK = True
+# 30m cooldown was letting LIM ideas re-fire near-identical entries (see Render logs 2026-09-20 XRP).
+SIGNAL_COOLDOWN_SEC = 3600
+MAX_SIGNALS_PER_CYCLE = 3
+# Off: proximity LIM alerts flooded the Pro channel and dominated SL outcomes.
+ENABLE_LIMIT_IDEA_FALLBACK = False
 
 # Slightly wider RSI bands so range mean-reversion can fire in mid-alt chop.
 RSI_OVERSOLD = 36.0
