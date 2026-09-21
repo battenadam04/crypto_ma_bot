@@ -246,8 +246,10 @@ BACKTEST_EXCLUDE_BASES = [
 BACKTEST_MIN_QUOTE_VOLUME = 500_000.0
 # 0 = rank by exchange 24h quote volume only (no large-cap CoinGecko filter)
 BACKTEST_COINGECKO_MIN_CAP = 0.0
-BACKTEST_PAIRS = []  # leave empty so auto top-N volume discovery is used
-BACKTEST_PER_PAIR_LIMIT_FALLBACK = False
+# Leave empty so auto top-N volume discovery is used.
+# Deprecated alias: per-pair LIM now always follows ENABLE_LIMIT_IDEA_FALLBACK (no live/backtest drift).
+BACKTEST_PAIRS = []
+BACKTEST_PER_PAIR_LIMIT_FALLBACK = False  # ignored; use ENABLE_LIMIT_IDEA_FALLBACK
 BACKTEST_OHLCV_LIMIT = 1000
 BACKTEST_FETCH_SLEEP_SEC = 0.05
 BACKTEST_VERBOSE = False

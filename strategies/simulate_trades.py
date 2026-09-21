@@ -2,11 +2,31 @@ import sys
 import os
 import json
 import math
+import types
 from datetime import datetime, timedelta, timezone
 
 import pandas as pd
-import pandas_ta as ta
 import time
+
+try:
+    import pandas_ta as ta  # noqa: F401 — registers DataFrame.ta
+    _HAS_PANDAS_TA = True
+except ModuleNotFoundError:
+    _HAS_PANDAS_TA = False
+    sys.modules.setdefault("pandas_ta", types.ModuleType("pandas_ta"))
+    from ta.momentum import RSIIndicator
+    from ta.trend import ADXIndicator
+
+
+def _add_rsi_adx(df: pd.DataFrame, length: int = 14) -> pd.DataFrame:
+    """Attach RSI/ADX columns (pandas_ta or `ta` fallback)."""
+    if _HAS_PANDAS_TA:
+        df["rsi"] = df.ta.rsi(length=length)
+        df["adx"] = df.ta.adx(length=length)[f"ADX_{length}"]
+    else:
+        df["rsi"] = RSIIndicator(df["close"], window=length).rsi()
+        df["adx"] = ADXIndicator(df["high"], df["low"], df["close"], window=length).adx()
+    return df
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 
@@ -15,29 +35,29 @@ import config
 from config import (
     BACKTEST_SLIPPAGE_BPS, BACKTEST_COMMISSION_BPS,
     BACKTEST_COOLDOWN_BARS, BACKTEST_LOOKAHEAD, BACKTEST_DAYS,
-    MIN_ADX_TREND, LIMIT_ENTRY_OFFSET_PCT, LIMIT_IDEA_FALLBACK_PCT,
+    LIMIT_ENTRY_OFFSET_PCT,
     BACKTEST_USE_LIMIT_IDEAS, BACKTEST_LIMIT_FILL_BARS, BACKTEST_MIN_RR_RATIO,
     BACKTEST_WIN_RATE_THRESHOLD, BACKTEST_ENFORCE_RR, BACKTEST_APPLY_FEES,
-    BACKTEST_AUTO_TOP_PAIRS, BACKTEST_PAIRS, BACKTEST_PER_PAIR_LIMIT_FALLBACK,
+    BACKTEST_AUTO_TOP_PAIRS, BACKTEST_PAIRS,
     BACKTEST_OHLCV_LIMIT, BACKTEST_FETCH_SLEEP_SEC, BACKTEST_VERBOSE,
     CRYPTO_PAIRS, EXCHANGE, SR_LOOKBACK_BARS, ENABLE_LIMIT_IDEA_FALLBACK,
-    MIN_SETUP_RR, TIMEFRAME, HTF_TIMEFRAME, BACKTEST_MIN_TRADES,
+    TIMEFRAME, HTF_TIMEFRAME, BACKTEST_MIN_TRADES,
 )
 from utils.utils import (
-    check_long_signal,
-    check_short_signal,
     calculate_trade_levels,
     add_atr_column,
-    check_range_trade,
-    is_ranging,
     log_event,
     calculate_mas,
+)
+from utils.signalLogic import (
+    evaluate_signal_at_bar,
+    resolve_outcome_on_df,
 )
 from utils.exchangeUtils import get_exchange, get_auto_backtest_pairs
 
 BACKTEST_STATE_FILE = os.path.join(os.path.dirname(__file__), '..', 'last_backtest.json')
-# Per-pair win-rate screening: false = trend + range trades only (legacy; higher pass rate).
-_BACKTEST_PER_PAIR_LIMIT_FALLBACK = BACKTEST_PER_PAIR_LIMIT_FALLBACK
+# LIM must match live: one flag only (ENABLE_LIMIT_IDEA_FALLBACK).
+_BACKTEST_PER_PAIR_LIMIT_FALLBACK = bool(ENABLE_LIMIT_IDEA_FALLBACK)
 # Fallback universes when CRYPTO_PAIRS / BACKTEST_PAIRS / auto-discovery are unset.
 DEFAULT_BACKTEST_PAIRS_PHEMEX = [
     'XRP/USDT:USDT', 'SOL/USDT:USDT', 'DOGE/USDT:USDT', 'ADA/USDT:USDT',
@@ -277,8 +297,7 @@ def fetch_data(pair, timeframe='5m', days=BACKTEST_DAYS):
 
     # Match live bot: SMAIndicator (utils.calculate_mas), not plain rolling — avoids signal drift.
     df = calculate_mas(df)
-    df['rsi'] = df.ta.rsi(length=14)
-    df['adx'] = df.ta.adx(length=14)['ADX_14']
+    df = _add_rsi_adx(df, length=14)
     df['support'] = df['low'].rolling(window=SR_LOOKBACK_BARS).min()
     df['resistance'] = df['high'].rolling(window=SR_LOOKBACK_BARS).max()
 
@@ -331,63 +350,34 @@ def check_trade_outcome(df, start_idx, direction, entry_price,
                         max_lookahead=BACKTEST_LOOKAHEAD, strategy="trend"):
     """Resolve a trade against TP/SL levels. Returns dict with result and P&L.
 
+    Uses shared first-touch policy (same-bar TP+SL → loss) via utils.signalLogic.
     Expects df to already have an 'ATR' column (precomputed).
     """
     if 'ATR' not in df.columns:
         df = add_atr_column(df, period=7)
 
     apply_fees = BACKTEST_APPLY_FEES
+    priced = entry_price
     if apply_fees:
-        entry_price = _apply_slippage(entry_price, direction)
-        commission = _commission_cost(entry_price) * 2
+        priced = _apply_slippage(entry_price, direction)
+        commission = _commission_cost(priced) * 2
     else:
         commission = 0.0
 
-    levels = calculate_trade_levels(entry_price, direction, df, start_idx, strategy)
+    levels = calculate_trade_levels(priced, direction, df, start_idx, strategy)
     tp, sl = levels['take_profit'], levels['stop_loss']
-
-    is_long = direction in ('buy', 'long')
-
-    for j in range(1, max_lookahead + 1):
-        if start_idx + j >= len(df):
-            break
-        high = df['high'].iat[start_idx + j]
-        low = df['low'].iat[start_idx + j]
-        if is_long:
-            if high >= tp:
-                pnl_pct = (tp - entry_price - commission) / entry_price
-                return {'result': 'win', 'pnl_pct': pnl_pct}
-            if low <= sl:
-                pnl_pct = (sl - entry_price - commission) / entry_price
-                return {'result': 'loss', 'pnl_pct': pnl_pct}
-        else:
-            if low <= tp:
-                pnl_pct = (entry_price - tp - commission) / entry_price
-                return {'result': 'win', 'pnl_pct': pnl_pct}
-            if high >= sl:
-                pnl_pct = (entry_price - sl - commission) / entry_price
-                return {'result': 'loss', 'pnl_pct': pnl_pct}
-
-    final_close = df['close'].iat[min(len(df) - 1, start_idx + max_lookahead)]
-    if is_long:
-        pnl_pct = (final_close - entry_price - commission) / entry_price
-    else:
-        pnl_pct = (entry_price - final_close - commission) / entry_price
-
-    # Unresolved at lookahead — do not coin-flip into win/loss (dilutes true edge).
-    return {'result': 'none', 'pnl_pct': pnl_pct}
-
-
-def _setup_rr_ok(slice_df, entry_price, side, strategy_type) -> bool:
-    """Reject setups whose indicative TP/SL offer weak reward:risk."""
-    try:
-        df = slice_df
-        if 'ATR' not in df.columns:
-            df = add_atr_column(df, period=7)
-        levels = calculate_trade_levels(entry_price, side, df, len(df) - 1, strategy_type)
-        return float(levels.get('rr_ratio') or 0) >= float(MIN_SETUP_RR)
-    except Exception:
-        return False
+    return resolve_outcome_on_df(
+        df,
+        start_idx,
+        direction,
+        priced,
+        tp,
+        sl,
+        max_lookahead=max_lookahead,
+        skip_entry_bar=True,
+        commission=commission,
+        same_bar="conservative_sl",
+    )
 
 
 def _get_signal_at_bar(
@@ -395,54 +385,21 @@ def _get_signal_at_bar(
     htf_slice,
     entry_price,
     *,
-    include_limit_idea_fallback=True,
+    include_limit_idea_fallback=None,
 ):
-    """Same signal logic as live at one bar. Returns ('buy'|'sell', 'trend'|'range') or None.
-
-    When include_limit_idea_fallback is False, skips the proximity-based LIM paths (matches older
-    per-pair screening). Live bot and portfolio backtest use True.
-    """
-    if len(htf_slice) < 6:
-        return None
-    ma20_slope = htf_slice['ma20'].iloc[-1] - htf_slice['ma20'].iloc[-4]
-    trend_up = (
-        htf_slice['ma20'].iloc[-1] > htf_slice['ma50'].iloc[-1] and
-        htf_slice['ma20'].iloc[-1] > htf_slice['ma20'].iloc[-5] and ma20_slope > 0
+    """Thin adapter: shared evaluate_signal_at_bar → legacy ('buy'|'sell', strategy) tuple."""
+    if include_limit_idea_fallback is None:
+        include_limit_idea_fallback = bool(ENABLE_LIMIT_IDEA_FALLBACK)
+    decision = evaluate_signal_at_bar(
+        slice_df,
+        htf_slice,
+        entry_price,
+        include_limit_idea_fallback=include_limit_idea_fallback,
+        include_breakout=True,
     )
-    trend_down = (
-        htf_slice['ma20'].iloc[-1] < htf_slice['ma50'].iloc[-1] and
-        htf_slice['ma20'].iloc[-1] < htf_slice['ma20'].iloc[-5] and ma20_slope < 0
-    )
-    adx_ok = (MIN_ADX_TREND <= 0 or ('adx' in slice_df.columns and pd.notna(slice_df['adx'].iloc[-1]) and slice_df['adx'].iloc[-1] >= MIN_ADX_TREND))
-    if adx_ok and check_long_signal(slice_df) and trend_up:
-        if _setup_rr_ok(slice_df, entry_price, 'buy', 'trend'):
-            return ('buy', 'trend')
-    if adx_ok and check_short_signal(slice_df) and trend_down:
-        if _setup_rr_ok(slice_df, entry_price, 'sell', 'trend'):
-            return ('sell', 'trend')
-    if is_ranging(slice_df) and not trend_up and not trend_down:
-        buy_signal, sell_signal = check_range_trade(slice_df)
-        if buy_signal and _setup_rr_ok(slice_df, entry_price, 'buy', 'range'):
-            return ('buy', 'range')
-        if sell_signal and _setup_rr_ok(slice_df, entry_price, 'sell', 'range'):
-            return ('sell', 'range')
-
-    if not include_limit_idea_fallback:
+    if decision is None:
         return None
-
-    # Fallback: if no normal signal, use limit-idea proximity in ranging conditions (live: _limit_idea_fallback_signal).
-    if not trend_up and not trend_down and is_ranging(slice_df) and len(slice_df) > 0:
-        last = slice_df.iloc[-1]
-        close = float(last['close'])
-        support = float(last['support']) if pd.notna(last.get('support')) else close
-        resistance = float(last['resistance']) if pd.notna(last.get('resistance')) else close
-        near_support = close <= support * (1 + LIMIT_IDEA_FALLBACK_PCT)
-        near_resistance = close >= resistance * (1 - LIMIT_IDEA_FALLBACK_PCT)
-        if near_support:
-            return ('buy', 'range')
-        if near_resistance:
-            return ('sell', 'range')
-    return None
+    return (decision.side, decision.strategy_type)
 
 
 def simulate_combined_strategy(pair, df_5m, df_1h):
@@ -493,7 +450,7 @@ def simulate_combined_strategy(pair, df_5m, df_1h):
         last_trade_bar = i
         outcome = check_trade_outcome(df_5m, i, direction, entry_price, BACKTEST_LOOKAHEAD, strat)
         result = outcome['result']
-        strategy_used.append('ma' if strat == 'trend' else 'range')
+        strategy_used.append('ma' if strat in ('trend', 'breakout') else 'range')
 
         is_long = direction == 'buy'
         if result == 'win':
@@ -522,7 +479,7 @@ def simulate_combined_strategy(pair, df_5m, df_1h):
                     df_5m, fill_idx, direction, filled_entry_price, BACKTEST_LOOKAHEAD, strat
                 )
                 limit_result = limit_outcome['result']
-                strategy_used.append('ma' if strat == 'trend' else 'range')
+                strategy_used.append('ma' if strat in ('trend', 'breakout') else 'range')
 
                 if limit_result == 'win':
                     pnl_list.append(limit_outcome['pnl_pct'])

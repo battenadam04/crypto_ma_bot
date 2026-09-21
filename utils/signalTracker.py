@@ -9,6 +9,7 @@ import uuid
 from datetime import datetime, timezone
 
 import config
+from utils.signalLogic import first_touch_walk
 from utils.utils import log_event
 
 _daily_signals: list[dict] = []
@@ -132,24 +133,8 @@ def _pnl_pct(entry: float, exit_price: float, is_long: bool) -> float:
 
 
 def _first_touch(is_long: bool, tp: float, sl: float, candles) -> tuple[str, float] | None:
-    """Walk candles in time order. Same-bar TP+SL → conservative SL (loss)."""
-    for row in candles:
-        high = float(row[2])
-        low = float(row[3])
-        if is_long:
-            hit_tp = high >= tp
-            hit_sl = low <= sl
-        else:
-            hit_tp = low <= tp
-            hit_sl = high >= sl
-        if hit_tp and hit_sl:
-            return "loss", sl
-        if hit_sl:
-            return "loss", sl
-        if hit_tp:
-            return "win", tp
-    return None
-
+    """Walk candles in time order. Same-bar TP+SL → conservative SL (shared with backtest)."""
+    return first_touch_walk(is_long, tp, sl, candles)
 
 def _resolve_from_ohlcv(signal, exchange, entry, tp, sl, is_long):
     """Return (result, pnl) from candle path, or None if OHLCV unavailable."""

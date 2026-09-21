@@ -10,22 +10,17 @@ from concurrent.futures import ThreadPoolExecutor
 import schedule
 
 from config import (
-    MIN_ADX_TREND,
     MAIN_LOOP_INTERVAL_SEC,
     LIMIT_ENTRY_OFFSET_PCT,
-    LIMIT_IDEA_FALLBACK_PCT,
     SIGNAL_COOLDOWN_SEC,
     MAX_SIGNALS_PER_CYCLE,
-    ENABLE_LIMIT_IDEA_FALLBACK,
     SR_LOOKBACK_BARS,
-    MIN_SETUP_RR,
 )
 from utils.telegramUtils import poll_telegram, send_telegram
 from utils.utils import (
-    add_atr_column, calculate_mas, check_long_signal, check_short_signal,
-    is_ranging, check_range_trade, log_event, calculate_trade_levels,
-    check_breakout_signal,
+    add_atr_column, calculate_mas, log_event,
 )
+from utils.signalLogic import evaluate_signal_at_bar
 from utils.exchangeUtils import get_exchange, build_indicative_levels
 from utils.signalTracker import record_signal, send_eod_report, monitor_signal_outcomes
 from utils.signalFormat import format_limit_hint, format_signal_message
@@ -328,50 +323,11 @@ def handle_signal(symbol, direction, df, strategy_type="trend", signal_source="S
         log_event(f"❌ Error in handle_signal for {symbol}: {e}")
 
 
-def _limit_idea_fallback_signal(lower_df, trend_up, trend_down):
-    """Optional fallback: range-biased limit idea near key levels when no confirmed signal."""
-    if not ENABLE_LIMIT_IDEA_FALLBACK:
-        return None
-    if lower_df is None or len(lower_df) < 51:
-        return None
-    if trend_up or trend_down:
-        return None
-    if not is_ranging(lower_df):
-        return None
-
-    last = lower_df.iloc[-1]
-    close = float(last['close'])
-    support = float(last['support']) if pd.notna(last.get('support')) else close
-    resistance = float(last['resistance']) if pd.notna(last.get('resistance')) else close
-
-    near_support = close <= support * (1 + LIMIT_IDEA_FALLBACK_PCT)
-    near_resistance = close >= resistance * (1 - LIMIT_IDEA_FALLBACK_PCT)
-
-    if near_support:
-        return {'direction': 'long', 'strategy_type': 'range'}
-    if near_resistance:
-        return {'direction': 'short', 'strategy_type': 'range'}
-    return None
-
-
-def get_backtest_win_rates():
-    """Load per-pair win rates from last backtest for ranking."""
-    state_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), BACKTEST_STATE_FILE)
-    if not os.path.isfile(state_path):
-        return {}
-    try:
-        with open(state_path, 'r') as f:
-            data = json.load(f)
-        results = data.get('results', {})
-        return {sym: float(r.get('win_rate', 0)) for sym, r in results.items() if isinstance(r, dict)}
-    except Exception:
-        return {}
-
-
 def process_pair(symbol):
     """
     Check one pair for a signal. Returns a signal dict or None.
     Does not send Telegram alerts; caller ranks/filters before dispatch.
+    Uses shared utils.signalLogic.evaluate_signal_at_bar (same as backtest).
     """
     log_event(f"🔍 Checking {symbol} on {config.TIMEFRAME} timeframe...")
     lower_df = fetch_data(symbol, config.TIMEFRAME)
@@ -410,66 +366,45 @@ def process_pair(symbol):
         higher_timeframe_cache.pop(symbol, None)
         return None
 
-    ma20_slope = higher_df['ma20'].iloc[-1] - higher_df['ma20'].iloc[-4]
-    trend_up = (
-        higher_df['ma20'].iloc[-1] > higher_df['ma50'].iloc[-1] and
-        higher_df['ma20'].iloc[-1] > higher_df['ma20'].iloc[-5] and
-        ma20_slope > 0
-    )
-    trend_down = (
-        higher_df['ma20'].iloc[-1] < higher_df['ma50'].iloc[-1] and
-        higher_df['ma20'].iloc[-1] < higher_df['ma20'].iloc[-5] and
-        ma20_slope < 0
-    )
-
     lower_df['rsi'] = lower_df.ta.rsi(length=14)
     lower_df['adx'] = lower_df.ta.adx(length=14)['ADX_14']
     lower_df['support'] = lower_df['low'].rolling(window=SR_LOOKBACK_BARS).min()
     lower_df['resistance'] = lower_df['high'].rolling(window=SR_LOOKBACK_BARS).max()
+    lower_df = add_atr_column(lower_df)
 
-    adx_ok = (MIN_ADX_TREND <= 0 or
-              (pd.notna(lower_df['adx'].iloc[-1]) and lower_df['adx'].iloc[-1] >= MIN_ADX_TREND))
+    # Align HTF slice to the same window backtest uses (last 6 HTF bars including current).
+    htf_slice = higher_df.iloc[-6:] if len(higher_df) >= 6 else higher_df
+    entry_price = float(lower_df['close'].iloc[-1])
+    decision = evaluate_signal_at_bar(lower_df, htf_slice, entry_price)
 
-    def _rr_ok(direction, strategy_type):
-        try:
-            df = add_atr_column(lower_df)
-            side = 'buy' if direction == 'long' else 'sell'
-            price = float(df['close'].iloc[-1])
-            levels = calculate_trade_levels(price, side, df, len(df) - 1, strategy_type)
-            return float(levels.get('rr_ratio') or 0) >= float(MIN_SETUP_RR)
-        except Exception:
-            return False
+    if decision is None:
+        log_event(f"✅ No confirmed signal for {symbol} this cycle.")
+        return None
 
-    if adx_ok and check_long_signal(lower_df) and trend_up and _rr_ok('long', 'trend'):
-        return {'symbol': symbol, 'direction': 'long', 'strategy_type': 'trend', 'signal_source': 'SIG', 'df': lower_df}
-    if adx_ok and check_short_signal(lower_df) and trend_down and _rr_ok('short', 'trend'):
-        return {'symbol': symbol, 'direction': 'short', 'strategy_type': 'trend', 'signal_source': 'SIG', 'df': lower_df}
+    if decision.signal_source == "LIM":
+        log_event(f"🧠 Limit-idea fallback triggered for {symbol} ({decision.direction})")
 
-    if check_breakout_signal(lower_df, "long") and trend_up and _rr_ok('long', 'trend'):
-        return {'symbol': symbol, 'direction': 'long', 'strategy_type': 'breakout', 'signal_source': 'SIG', 'df': lower_df}
-    if check_breakout_signal(lower_df, "short") and trend_down and _rr_ok('short', 'trend'):
-        return {'symbol': symbol, 'direction': 'short', 'strategy_type': 'breakout', 'signal_source': 'SIG', 'df': lower_df}
+    return {
+        'symbol': symbol,
+        'direction': decision.direction,
+        'strategy_type': decision.strategy_type,
+        'signal_source': decision.signal_source,
+        'df': lower_df,
+    }
 
-    if is_ranging(lower_df) and not trend_up and not trend_down:
-        buy_signal, sell_signal = check_range_trade(lower_df)
-        if buy_signal and _rr_ok('long', 'range'):
-            return {'symbol': symbol, 'direction': 'long', 'strategy_type': 'range', 'signal_source': 'SIG', 'df': lower_df}
-        if sell_signal and _rr_ok('short', 'range'):
-            return {'symbol': symbol, 'direction': 'short', 'strategy_type': 'range', 'signal_source': 'SIG', 'df': lower_df}
 
-    fallback = _limit_idea_fallback_signal(lower_df, trend_up, trend_down)
-    if fallback:
-        log_event(f"🧠 Limit-idea fallback triggered for {symbol} ({fallback['direction']})")
-        return {
-            'symbol': symbol,
-            'direction': fallback['direction'],
-            'strategy_type': fallback['strategy_type'],
-            'signal_source': 'LIM',
-            'df': lower_df,
-        }
-
-    log_event(f"✅ No confirmed signal for {symbol} this cycle.")
-    return None
+def get_backtest_win_rates():
+    """Load per-pair win rates from last backtest for ranking."""
+    state_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), BACKTEST_STATE_FILE)
+    if not os.path.isfile(state_path):
+        return {}
+    try:
+        with open(state_path, 'r') as f:
+            data = json.load(f)
+        results = data.get('results', {})
+        return {sym: float(r.get('win_rate', 0)) for sym, r in results.items() if isinstance(r, dict)}
+    except Exception:
+        return {}
 
 
 def get_trading_pairs():
