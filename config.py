@@ -145,9 +145,10 @@ _runtime_lock = threading.Lock()
 TIMEFRAME = "15m"
 # Higher-timeframe trend filter used by live + backtest.
 HTF_TIMEFRAME = "1h"
-# Multi-timeframe scanning: also check these timeframes each cycle for more entries.
-MULTI_TF_ENABLED = True
-MULTI_TF_EXTRA = ["5m"]
+# Multi-timeframe scanning: keep OFF unless those TFs are included in the WR screen.
+# Sep 2026 live: 5m drove most posts while the watchlist was qualified on 15m only → SIG 0% WR.
+MULTI_TF_ENABLED = False
+MULTI_TF_EXTRA = []
 
 # Overnight scan pause (Telegram /night on|off arms/disarms; state persists).
 NIGHT_QUIET_ENABLED = True
