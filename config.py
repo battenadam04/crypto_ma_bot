@@ -145,18 +145,19 @@ _runtime_lock = threading.Lock()
 TIMEFRAME = "15m"
 # Higher-timeframe trend filter used by live + backtest.
 HTF_TIMEFRAME = "1h"
-# Multi-timeframe scanning: keep OFF unless those TFs are included in the WR screen.
-# Sep 2026 live: 5m drove most posts while the watchlist was qualified on 15m only → SIG 0% WR.
-MULTI_TF_ENABLED = False
-MULTI_TF_EXTRA = []
+# Multi-timeframe: 5m secondary scan for more entries on the same WR-qualified pairs.
+# Decision path is shared with backtest via signalLogic (no separate LIM/5m rules).
+MULTI_TF_ENABLED = True
+MULTI_TF_EXTRA = ["5m"]
 
 # Overnight scan pause (Telegram /night on|off arms/disarms; state persists).
+# Default OFF for a signals product — 22–06 UTC was wiping ~1/3 of scanning time.
 NIGHT_QUIET_ENABLED = True
 NIGHT_QUIET_START_HOUR = 22
 NIGHT_QUIET_END_HOUR = 6
 NIGHT_QUIET_TZ = "UTC"
 NIGHT_QUIET_SLEEP_SEC = 60
-NIGHT_QUIET_ARMED_DEFAULT = True
+NIGHT_QUIET_ARMED_DEFAULT = False
 NIGHT_QUIET_ARMED = False
 
 # US high-impact macro pause (CPI / NFP / FOMC / GDP). Telegram /macro on|off.
@@ -184,9 +185,9 @@ CHANNEL_HEARTBEAT_AFTER_QUIET_HOURS = 8   # only after this long with no setups
 CHANNEL_HEARTBEAT_EVERY_HOURS = 8         # at most once per this interval while quiet
 
 # Signal volume controls
-# 30m cooldown was letting LIM ideas re-fire near-identical entries (see Render logs 2026-09-20 XRP).
-SIGNAL_COOLDOWN_SEC = 3600
-MAX_SIGNALS_PER_CYCLE = 3
+# Keep LIM off (proximity spam). Restore pre-drought cooldown/caps for confirmed SIGs.
+SIGNAL_COOLDOWN_SEC = 1800
+MAX_SIGNALS_PER_CYCLE = 5
 # Off: proximity LIM alerts flooded the Pro channel and dominated SL outcomes.
 ENABLE_LIMIT_IDEA_FALLBACK = False
 
@@ -201,8 +202,8 @@ RANGE_TOUCH_BUFFER = 0.015
 RANGE_SL_BUFFER_PCT = 0.003       # min % beyond S/R level
 RANGE_SL_ATR_MULT = 0.5         # also allow at least this × ATR beyond S/R
 RANGE_TP_TARGET = "mid"    # "opposite" = other range edge | "mid" = range midpoint
-# Continuations must tag closer to MA10 (reduces chop entries on loose pullbacks).
-CONTINUATION_PULLBACK_PCT = 0.005
+# Continuations: 0.3% tag (pre-combo_v1 volume). 0.5% was too sparse for the live feed.
+CONTINUATION_PULLBACK_PCT = 0.003
 
 LIMIT_ENTRY_OFFSET_PCT = 0.0015
 LIMIT_IDEA_FALLBACK_PCT = 0.003
