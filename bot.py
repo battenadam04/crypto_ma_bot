@@ -17,14 +17,18 @@ from config import (
     SR_LOOKBACK_BARS,
 )
 from utils.telegramUtils import poll_telegram, send_telegram
-from utils.utils import (
-    add_atr_column, calculate_mas, log_event,
+from utils.signalLogic import (
+    closed_bars_only,
+    evaluate_signal_at_bar,
+    prepare_htf_frame,
+    prepare_ltf_frame,
+    rank_signal_key,
+    signal_config_matches,
 )
-from utils.signalLogic import evaluate_signal_at_bar
+from utils.utils import log_event
 from utils.exchangeUtils import get_exchange, build_indicative_levels
 from utils.signalTracker import record_signal, send_eod_report, monitor_signal_outcomes
 from utils.signalFormat import format_limit_hint, format_signal_message
-
 
 BACKTEST_STATE_FILE = "last_backtest.json"  # relative to project root (bot dir)
 
@@ -180,7 +184,7 @@ def _hours_back_for_timeframe(timeframe: str, min_bars: int = 90) -> int:
 
 
 def fetch_data(symbol, timeframe=None, limit=350):
-    """Fetch OHLCV; limit size to avoid large allocations."""
+    """Fetch OHLCV; drop forming candle so live matches closed-bar backtest."""
     try:
         timeframe = timeframe or config.TIMEFRAME
         # Signal TF needs SR lookback; HTF needs MA50 — size window from the stricter need.
@@ -191,7 +195,7 @@ def fetch_data(symbol, timeframe=None, limit=350):
         ohlcv = exchange.fetch_ohlcv(symbol, timeframe=timeframe, since=since_ms, limit=min(limit, 500))
         df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-        return df
+        return closed_bars_only(df, timeframe)
     except Exception as e:
         log_event(f"❌ Error fetching data for {symbol}: {str(e)}")
         return None
@@ -239,11 +243,10 @@ def handle_signal(symbol, direction, df, strategy_type="trend", signal_source="S
     If live trading is enabled, also execute the trade on Phemex."""
     try:
         timeframe = timeframe or config.TIMEFRAME
-        df = add_atr_column(df)
         side = 'buy' if direction == 'long' else 'sell'
         log_event(f"📣 Signal: {strategy_type} {direction} for {symbol} (src={signal_source}, tf={timeframe})")
 
-        # Bar close — same entry basis the backtest uses when grading this signal.
+        # Frame already prepared in process_pair; bar close = same entry basis as backtest.
         entry_price = float(df['close'].iloc[-1])
         levels = build_indicative_levels(
             exchange=exchange,
@@ -330,14 +333,14 @@ def process_pair(symbol):
     """
     Check one pair for a signal. Returns a signal dict or None.
     Does not send Telegram alerts; caller ranks/filters before dispatch.
-    Uses shared utils.signalLogic.evaluate_signal_at_bar (same as backtest).
+    Uses shared utils.signalLogic (same evaluate + frame prep as backtest).
     """
     log_event(f"🔍 Checking {symbol} on {config.TIMEFRAME} timeframe...")
     lower_df = fetch_data(symbol, config.TIMEFRAME)
     if lower_df is None or len(lower_df) < 51:
         log_event(f"⚠️ Skipping {symbol} — insufficient lower timeframe data.")
         return None
-    lower_df = calculate_mas(lower_df)
+    lower_df = prepare_ltf_frame(lower_df)
 
     now = time.time()
     if symbol not in higher_timeframe_cache or now - higher_timeframe_cache[symbol]['timestamp'] > HTF_CACHE_TTL_SEC:
@@ -350,7 +353,7 @@ def process_pair(symbol):
                 f"({config.HTF_TIMEFRAME}: {got} bars, need ≥51)."
             )
             return None
-        higher_df = calculate_mas(higher_df)
+        higher_df = prepare_htf_frame(higher_df)
         higher_df = higher_df.tail(HTF_CACHE_MAX_ROWS).copy()
         if len(higher_timeframe_cache) >= HTF_CACHE_MAX_SYMBOLS:
             oldest = min(higher_timeframe_cache, key=lambda s: higher_timeframe_cache[s]['timestamp'])
@@ -363,20 +366,19 @@ def process_pair(symbol):
     if (
         pd.isna(higher_df['ma20'].iloc[-1])
         or pd.isna(higher_df['ma50'].iloc[-1])
-        or len(higher_df) < 5
+        or len(higher_df) < 6
     ):
         log_event(f"⚠️ Skipping {symbol} — HTF MAs not ready yet.")
         higher_timeframe_cache.pop(symbol, None)
         return None
 
-    lower_df['rsi'] = lower_df.ta.rsi(length=14)
-    lower_df['adx'] = lower_df.ta.adx(length=14)['ADX_14']
-    lower_df['support'] = lower_df['low'].rolling(window=SR_LOOKBACK_BARS).min()
-    lower_df['resistance'] = lower_df['high'].rolling(window=SR_LOOKBACK_BARS).max()
-    lower_df = add_atr_column(lower_df)
+    # Align HTF slice to the same window backtest uses (last 6 closed HTF bars).
+    from utils.signalLogic import htf_slice_for_bar
+    htf_slice = htf_slice_for_bar(higher_df, len(higher_df) - 1)
+    if htf_slice is None:
+        log_event(f"⚠️ Skipping {symbol} — HTF slice unavailable.")
+        return None
 
-    # Align HTF slice to the same window backtest uses (last 6 HTF bars including current).
-    htf_slice = higher_df.iloc[-6:] if len(higher_df) >= 6 else higher_df
     entry_price = float(lower_df['close'].iloc[-1])
     decision = evaluate_signal_at_bar(lower_df, htf_slice, entry_price)
 
@@ -419,11 +421,11 @@ def get_trading_pairs():
         if os.path.isfile(state_path):
             with open(state_path, 'r') as f:
                 data = json.load(f)
-            from utils.configUtils import levels_config_matches
-            if not levels_config_matches(data.get("levels_config")):
+            snap = data.get("signal_config")
+            if not signal_config_matches(snap):
                 log_event(
-                    "⚠️ last_backtest.json TP/SL settings differ from live (or missing fingerprint). "
-                    "Re-run `python strategies/simulate_trades.py` so the watchlist matches live levels."
+                    "⚠️ last_backtest.json signal knobs differ from live (or missing fingerprint). "
+                    "Re-run `python strategies/simulate_trades.py` so the watchlist matches live."
                 )
             raw = data.get('pairs') or []
             threshold = float(data.get('win_rate_threshold', 40))
@@ -451,11 +453,11 @@ def get_trading_pairs():
 
 def _rank_key(sig, win_rates):
     """Prefer confirmed SIG over LIM, trend/breakout over range, then backtest win rate."""
-    source_rank = 1 if sig.get('signal_source') == 'SIG' else 0
-    st = sig.get('strategy_type', '')
-    strategy_rank = 2 if st == 'trend' else (1 if st == 'breakout' else 0)
-    wr = win_rates.get(sig['symbol'], 0.0)
-    return (source_rank, strategy_rank, wr)
+    return rank_signal_key(
+        sig.get('signal_source', 'SIG'),
+        sig.get('strategy_type', ''),
+        win_rates.get(sig['symbol'], 0.0),
+    )
 
 
 def main():

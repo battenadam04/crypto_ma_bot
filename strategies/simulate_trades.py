@@ -9,24 +9,12 @@ import pandas as pd
 import time
 
 try:
-    import pandas_ta as ta  # noqa: F401 — registers DataFrame.ta
+    import pandas_ta as ta  # noqa: F401 — registers DataFrame.ta for prepare_ltf_frame
     _HAS_PANDAS_TA = True
 except ModuleNotFoundError:
     _HAS_PANDAS_TA = False
     sys.modules.setdefault("pandas_ta", types.ModuleType("pandas_ta"))
-    from ta.momentum import RSIIndicator
-    from ta.trend import ADXIndicator
 
-
-def _add_rsi_adx(df: pd.DataFrame, length: int = 14) -> pd.DataFrame:
-    """Attach RSI/ADX columns (pandas_ta or `ta` fallback)."""
-    if _HAS_PANDAS_TA:
-        df["rsi"] = df.ta.rsi(length=length)
-        df["adx"] = df.ta.adx(length=length)[f"ADX_{length}"]
-    else:
-        df["rsi"] = RSIIndicator(df["close"], window=length).rsi()
-        df["adx"] = ADXIndicator(df["high"], df["low"], df["close"], window=length).adx()
-    return df
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 
@@ -34,7 +22,7 @@ import config
 
 from config import (
     BACKTEST_SLIPPAGE_BPS, BACKTEST_COMMISSION_BPS,
-    BACKTEST_COOLDOWN_BARS, BACKTEST_LOOKAHEAD, BACKTEST_DAYS,
+    BACKTEST_LOOKAHEAD, BACKTEST_DAYS,
     LIMIT_ENTRY_OFFSET_PCT,
     BACKTEST_USE_LIMIT_IDEAS, BACKTEST_LIMIT_FILL_BARS, BACKTEST_MIN_RR_RATIO,
     BACKTEST_WIN_RATE_THRESHOLD, BACKTEST_ENFORCE_RR, BACKTEST_APPLY_FEES,
@@ -42,23 +30,36 @@ from config import (
     BACKTEST_OHLCV_LIMIT, BACKTEST_FETCH_SLEEP_SEC, BACKTEST_VERBOSE,
     CRYPTO_PAIRS, EXCHANGE, SR_LOOKBACK_BARS, ENABLE_LIMIT_IDEA_FALLBACK,
     TIMEFRAME, HTF_TIMEFRAME, BACKTEST_MIN_TRADES,
+    MAX_SIGNALS_PER_CYCLE,
 )
 from utils.utils import (
     add_atr_column,
     log_event,
-    calculate_mas,
 )
 from utils.signalLogic import (
+    closed_bars_only,
     evaluate_signal_at_bar,
+    htf_slice_for_bar,
     levels_for_signal,
+    prepare_htf_frame,
+    prepare_ltf_frame,
+    rank_signal_key,
     resolve_outcome_on_df,
+    signal_cooldown_bars,
+    signal_config_snapshot,
 )
-from utils.configUtils import levels_config_snapshot
 from utils.exchangeUtils import get_exchange, get_auto_backtest_pairs
 
 BACKTEST_STATE_FILE = os.path.join(os.path.dirname(__file__), '..', 'last_backtest.json')
 # LIM must match live: one flag only (ENABLE_LIMIT_IDEA_FALLBACK).
 _BACKTEST_PER_PAIR_LIMIT_FALLBACK = bool(ENABLE_LIMIT_IDEA_FALLBACK)
+
+
+def _cooldown_bars() -> int:
+    """Same silence window as live SIGNAL_COOLDOWN_SEC, in bars of TIMEFRAME."""
+    return signal_cooldown_bars(TIMEFRAME)
+
+
 # Fallback universes when CRYPTO_PAIRS / BACKTEST_PAIRS / auto-discovery are unset.
 DEFAULT_BACKTEST_PAIRS_PHEMEX = [
     'XRP/USDT:USDT', 'SOL/USDT:USDT', 'DOGE/USDT:USDT', 'ADA/USDT:USDT',
@@ -295,14 +296,10 @@ def fetch_data(pair, timeframe='5m', days=BACKTEST_DAYS):
 
     df = pd.DataFrame(unique_ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
     df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-
-    # Match live bot: SMAIndicator (utils.calculate_mas), not plain rolling — avoids signal drift.
-    df = calculate_mas(df)
-    df = _add_rsi_adx(df, length=14)
-    df['support'] = df['low'].rolling(window=SR_LOOKBACK_BARS).min()
-    df['resistance'] = df['high'].rolling(window=SR_LOOKBACK_BARS).max()
-
-    return df
+    df = closed_bars_only(df, timeframe)
+    if df is None or len(df) == 0:
+        return pd.DataFrame()
+    return prepare_ltf_frame(df)
 
 
 def fetch_higher_timeframe_data(pair, timeframe='15m', days=BACKTEST_DAYS):
@@ -343,9 +340,10 @@ def fetch_higher_timeframe_data(pair, timeframe='15m', days=BACKTEST_DAYS):
 
     df = pd.DataFrame(unique_ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
     df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-    df = calculate_mas(df)
-    return df
-
+    df = closed_bars_only(df, timeframe)
+    if df is None or len(df) == 0:
+        return pd.DataFrame()
+    return prepare_htf_frame(df)
 
 def check_trade_outcome(df, start_idx, direction, entry_price,
                         max_lookahead=BACKTEST_LOOKAHEAD, strategy="trend"):
@@ -390,19 +388,16 @@ def _get_signal_at_bar(
     *,
     include_limit_idea_fallback=None,
 ):
-    """Thin adapter: shared evaluate_signal_at_bar → legacy ('buy'|'sell', strategy) tuple."""
+    """Shared evaluate_signal_at_bar — returns SignalDecision or None."""
     if include_limit_idea_fallback is None:
         include_limit_idea_fallback = bool(ENABLE_LIMIT_IDEA_FALLBACK)
-    decision = evaluate_signal_at_bar(
+    return evaluate_signal_at_bar(
         slice_df,
         htf_slice,
         entry_price,
         include_limit_idea_fallback=include_limit_idea_fallback,
         include_breakout=True,
     )
-    if decision is None:
-        return None
-    return (decision.side, decision.strategy_type)
 
 
 def simulate_combined_strategy(pair, df_5m, df_1h):
@@ -410,18 +405,21 @@ def simulate_combined_strategy(pair, df_5m, df_1h):
     short_wins = short_losses = short_none = 0
     strategy_used = []
     pnl_list = []
-    last_trade_bar = -BACKTEST_COOLDOWN_BARS
+    cooldown = _cooldown_bars()
+    last_trade_bar = -cooldown
 
-    df_5m = add_atr_column(df_5m, period=7)
+    # ATR already attached by prepare_ltf_frame; keep idempotent.
+    if 'ATR' not in df_5m.columns:
+        df_5m = add_atr_column(df_5m, period=7)
 
-    # O(n) align 5m bars to 15m window ends — avoids filtering the whole HTF df every bar.
+    # O(n) align LTF bars to HTF window ends — avoids filtering the whole HTF df every bar.
     htf_end_idx = df_1h['timestamp'].searchsorted(df_5m['timestamp'], side='right') - 1
 
     # Signal helpers only need recent rows + precomputed indicators on full df (fixed window).
     _slice_lookback = max(120, SR_LOOKBACK_BARS + 20)
 
     for i in range(max(60, SR_LOOKBACK_BARS), len(df_5m) - 10):
-        if (i - last_trade_bar) < BACKTEST_COOLDOWN_BARS:
+        if (i - last_trade_bar) < cooldown:
             continue
 
         sl_start = max(0, i - _slice_lookback)
@@ -432,22 +430,19 @@ def simulate_combined_strategy(pair, df_5m, df_1h):
         entry_price = float(df_5m['close'].iat[i])
 
         ei = int(htf_end_idx[i])
-        if ei < 5:
-            continue
-        htf_slice = df_1h.iloc[ei - 5 : ei + 1]
-
-        if len(htf_slice) < 6:
+        htf_slice = htf_slice_for_bar(df_1h, ei)
+        if htf_slice is None:
             continue
 
-        sig = _get_signal_at_bar(
+        decision = _get_signal_at_bar(
             slice_df,
             htf_slice,
             entry_price,
             include_limit_idea_fallback=_BACKTEST_PER_PAIR_LIMIT_FALLBACK,
         )
-        if sig is None:
+        if decision is None:
             continue
-        direction, strat = sig
+        direction, strat = decision.side, decision.strategy_type
 
         # Always execute the normal signal entry (existing backtest behavior).
         last_trade_bar = i
@@ -568,7 +563,8 @@ def run_backtest(pairs_override=None):
             "pairs": good_pairs,
             "run_at": datetime.now(timezone.utc).isoformat(),
             "win_rate_threshold": win_rate_threshold,
-            "levels_config": levels_config_snapshot(),
+            "signal_config": signal_config_snapshot(),
+            "levels_config": {"strategy_settings": signal_config_snapshot()["strategy_settings"]},
             "timeframe": TIMEFRAME,
             "htf_timeframe": HTF_TIMEFRAME,
             "results": results_by_symbol,
@@ -588,11 +584,13 @@ def run_backtest(pairs_override=None):
         config.IS_BACKTESTING = prev_flag
 
 
-def run_portfolio_backtest(pairs_override=None, max_trades_per_bar=3):
+def run_portfolio_backtest(pairs_override=None, max_trades_per_bar=None):
     """
     Backtest the same way you trade live: at each bar, collect signals across all pairs,
-    pick the top N by backtest win rate (same order as live), and resolve those trades.
+    rank like live (SIG>LIM, trend>breakout>range, then WR), cap at MAX_SIGNALS_PER_CYCLE.
     """
+    if max_trades_per_bar is None:
+        max_trades_per_bar = int(MAX_SIGNALS_PER_CYCLE) if int(MAX_SIGNALS_PER_CYCLE) > 0 else 5
     pairs = _get_backtest_pairs(pairs_override)
     symbols = [p[0] if isinstance(p, (list, tuple)) else p for p in pairs]
 
@@ -612,7 +610,8 @@ def run_portfolio_backtest(pairs_override=None, max_trades_per_bar=3):
             df_ltf = fetch_data(sym, TIMEFRAME, days=BACKTEST_DAYS)
             df_htf = fetch_higher_timeframe_data(sym, HTF_TIMEFRAME, days=BACKTEST_DAYS)
             if len(df_ltf) > 300 and len(df_htf) > 50:
-                df_ltf = add_atr_column(df_ltf, period=7)
+                if 'ATR' not in df_ltf.columns:
+                    df_ltf = add_atr_column(df_ltf, period=7)
                 data_by_symbol[sym] = (df_ltf, df_htf)
         except Exception as e:
             log_event(f"Portfolio backtest: skip {sym}: {e}")
@@ -622,10 +621,11 @@ def run_portfolio_backtest(pairs_override=None, max_trades_per_bar=3):
         return 0.0
 
     htf_end_by_sym = {
-        sym: df_15m['timestamp'].searchsorted(df_5m['timestamp'], side='right') - 1
-        for sym, (df_5m, df_15m) in data_by_symbol.items()
+        sym: df_htf['timestamp'].searchsorted(df_ltf['timestamp'], side='right') - 1
+        for sym, (df_ltf, df_htf) in data_by_symbol.items()
     }
     _slice_lookback = max(120, SR_LOOKBACK_BARS + 20)
+    cooldown = _cooldown_bars()
 
     min_len = min(len(data_by_symbol[s][0]) for s in data_by_symbol) - 10
     if min_len < 70:
@@ -633,44 +633,47 @@ def run_portfolio_backtest(pairs_override=None, max_trades_per_bar=3):
         return 0.0
 
     pnl_list = []
-    last_trade_bar_by_sym = {s: -BACKTEST_COOLDOWN_BARS for s in data_by_symbol}
+    last_trade_bar_by_sym = {s: -cooldown for s in data_by_symbol}
 
     for i in range(60, min_len):
         signals_at_bar = []
-        for symbol, (df_5m, df_15m) in data_by_symbol.items():
-            if (i - last_trade_bar_by_sym[symbol]) < BACKTEST_COOLDOWN_BARS:
+        for symbol, (df_ltf, df_htf) in data_by_symbol.items():
+            if (i - last_trade_bar_by_sym[symbol]) < cooldown:
                 continue
             sl_start = max(0, i - _slice_lookback)
-            slice_df = df_5m.iloc[sl_start : i + 1]
+            slice_df = df_ltf.iloc[sl_start : i + 1]
             if len(slice_df) < 51:
                 continue
             ei = int(htf_end_by_sym[symbol][i])
-            if ei < 5:
+            htf_slice = htf_slice_for_bar(df_htf, ei)
+            if htf_slice is None:
                 continue
-            htf_slice = df_15m.iloc[ei - 5 : ei + 1]
-            if len(htf_slice) < 6:
-                continue
-            entry_price = float(df_5m['close'].iat[i])
-            sig = _get_signal_at_bar(
+            entry_price = float(df_ltf['close'].iat[i])
+            decision = _get_signal_at_bar(
                 slice_df,
                 htf_slice,
                 entry_price,
                 include_limit_idea_fallback=ENABLE_LIMIT_IDEA_FALLBACK,
             )
-            if sig is not None:
-                direction, strategy_type = sig
+            if decision is not None:
                 win_rate = 0.0
                 if isinstance(results_by_symbol.get(symbol), dict):
                     win_rate = float(results_by_symbol[symbol].get('win_rate', 0))
-                signals_at_bar.append((symbol, i, direction, strategy_type, win_rate))
+                signals_at_bar.append(
+                    (symbol, i, decision, win_rate, rank_signal_key(
+                        decision.signal_source, decision.strategy_type, win_rate
+                    ))
+                )
 
         signals_at_bar.sort(key=lambda x: x[4], reverse=True)
         for t in signals_at_bar[:max_trades_per_bar]:
-            symbol, idx, direction, strategy_type, _ = t
-            df_5m = data_by_symbol[symbol][0]
-            signal_entry_price = float(df_5m['close'].iat[idx])
+            symbol, idx, decision, _, _ = t
+            direction = decision.side
+            strategy_type = decision.strategy_type
+            df_ltf = data_by_symbol[symbol][0]
+            signal_entry_price = float(df_ltf['close'].iat[idx])
             outcome = check_trade_outcome(
-                df_5m, idx, direction, signal_entry_price, BACKTEST_LOOKAHEAD, strategy_type
+                df_ltf, idx, direction, signal_entry_price, BACKTEST_LOOKAHEAD, strategy_type
             )
             if outcome['result'] == 'none':
                 last_trade_bar_by_sym[symbol] = idx
@@ -679,10 +682,10 @@ def run_portfolio_backtest(pairs_override=None, max_trades_per_bar=3):
             last_trade_bar_by_sym[symbol] = idx
 
             if BACKTEST_USE_LIMIT_IDEAS:
-                fill_idx, filled_entry_price = _resolve_backtest_entry(df_5m, idx, direction, strategy_type)
+                fill_idx, filled_entry_price = _resolve_backtest_entry(df_ltf, idx, direction, strategy_type)
                 if fill_idx is not None:
                     limit_outcome = check_trade_outcome(
-                        df_5m, fill_idx, direction, filled_entry_price, BACKTEST_LOOKAHEAD, strategy_type
+                        df_ltf, fill_idx, direction, filled_entry_price, BACKTEST_LOOKAHEAD, strategy_type
                     )
                     if limit_outcome['result'] != 'none':
                         pnl_list.append(limit_outcome['pnl_pct'])
@@ -723,4 +726,4 @@ if __name__ == "__main__":
     results = run_backtest()
     print("Backtest completed, good pairs:", results)
     if results:
-        run_portfolio_backtest(pairs_override=results, max_trades_per_bar=3)
+        run_portfolio_backtest(pairs_override=results)

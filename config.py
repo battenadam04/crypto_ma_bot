@@ -218,8 +218,10 @@ AUTO_BACKTEST_NOTIFY = True  # Telegram start + finish summary
 BACKTEST_INTERVAL_HOURS = 168  # documentation alias for weekly cadence
 BACKTEST_SLIPPAGE_BPS = 5.0
 BACKTEST_COMMISSION_BPS = 4.0
-# ~1h at 15m
-BACKTEST_COOLDOWN_BARS = 4
+# Backtest cooldown bars are derived from SIGNAL_COOLDOWN_SEC / TIMEFRAME at runtime
+# (see utils.signalLogic.signal_cooldown_bars) so live and screens share one silence window.
+# Kept for docs / older ablation scripts only — simulate_trades no longer reads this.
+BACKTEST_COOLDOWN_BARS = 2  # ≈ SIGNAL_COOLDOWN_SEC=1800 at 15m
 # ~12h at 15m
 BACKTEST_LOOKAHEAD = 72
 BACKTEST_DAYS = 42

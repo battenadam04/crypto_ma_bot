@@ -1,5 +1,7 @@
 """Parity tests: live and backtest share utils.signalLogic decisions/outcomes."""
 
+import math
+
 import pandas as pd
 import pytest
 
@@ -100,10 +102,7 @@ class TestAdapterParity:
 
         decision = evaluate_signal_at_bar(df, htf, entry, include_limit_idea_fallback=False)
         legacy = _get_signal_at_bar(df, htf, entry, include_limit_idea_fallback=False)
-        if decision is None:
-            assert legacy is None
-        else:
-            assert legacy == (decision.side, decision.strategy_type)
+        assert legacy == decision
 
     def test_check_trade_outcome_uses_conservative_same_bar(self, monkeypatch):
         import config
@@ -160,6 +159,44 @@ class TestLevelsParity:
         bad["strategy_settings"]["trend"]["atr_tp"] = 99.0
         assert not levels_config_matches(bad)
         assert strategy_settings["trend"]["atr_tp"] != 99.0  # snapshot is a deep copy
+
+    def test_signal_config_and_cooldown(self):
+        from utils.signalLogic import (
+            closed_bars_only,
+            signal_cooldown_bars,
+            signal_config_snapshot,
+            signal_config_matches,
+            rank_signal_key,
+        )
+        import config
+
+        assert signal_cooldown_bars("15m") == max(
+            1, int(math.ceil(config.SIGNAL_COOLDOWN_SEC / (15 * 60)))
+        )
+        assert rank_signal_key("SIG", "trend", 40) > rank_signal_key("LIM", "trend", 99)
+        assert rank_signal_key("SIG", "trend", 40) > rank_signal_key("SIG", "range", 99)
+
+        snap = signal_config_snapshot()
+        assert signal_config_matches(snap)
+        bad = signal_config_snapshot()
+        bad["MIN_ADX_TREND"] = -1
+        assert not signal_config_matches(bad)
+
+        # Forming candle drop: last bar open = now → incomplete → dropped
+        n = 5
+        now = pd.Timestamp("2026-09-24 12:07:00", tz="UTC")
+        opens = pd.date_range("2026-09-24 11:00:00", periods=n, freq="15min", tz="UTC")
+        # Last open at 12:00; at 12:07 the 15m bar is still forming
+        df = pd.DataFrame({
+            "timestamp": opens,
+            "open": [1.0] * n,
+            "high": [1.0] * n,
+            "low": [1.0] * n,
+            "close": [1.0] * n,
+            "volume": [1.0] * n,
+        })
+        closed = closed_bars_only(df, "15m", now=now)
+        assert len(closed) == n - 1
 
 
 class TestResolveOutcomeOnDf:

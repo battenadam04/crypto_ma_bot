@@ -1,18 +1,21 @@
 """Shared live + backtest signal decision and first-touch outcome logic.
 
 Both `bot.process_pair` and `strategies.simulate_trades` must call these helpers
-so scan path, LIM/breakout gates, and same-bar TP/SL policy cannot drift.
+so scan path, LIM/breakout gates, frame prep, cooldown, ranking, and same-bar
+TP/SL policy cannot drift.
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
-from typing import Any, Iterable, Literal, Optional
+from typing import Any, Iterable, Literal, Optional, Tuple
 
 import pandas as pd
 
 import config
 from utils.utils import (
     add_atr_column,
+    calculate_mas,
     calculate_trade_levels,
     check_breakout_signal,
     check_long_signal,
@@ -59,6 +62,141 @@ def side_to_direction(side: str) -> Direction:
     if s in ("long", "buy"):
         return "long"
     return "short"
+
+
+def timeframe_to_seconds(timeframe: str) -> int:
+    tf = (timeframe or "15m").strip().lower()
+    unit = tf[-1]
+    try:
+        n = int(tf[:-1])
+    except ValueError:
+        return 15 * 60
+    if unit == "m":
+        return n * 60
+    if unit == "h":
+        return n * 3600
+    if unit == "d":
+        return n * 86400
+    return 15 * 60
+
+
+def closed_bars_only(
+    df: Optional[pd.DataFrame],
+    timeframe: str,
+    *,
+    now: Optional[pd.Timestamp] = None,
+) -> Optional[pd.DataFrame]:
+    """
+    Drop a still-forming candle so live matches backtest (closed bars only).
+
+    ccxt timestamps are candle *open* times; a bar is closed when now >= open + tf.
+    """
+    if df is None or len(df) == 0:
+        return df
+    if "timestamp" not in df.columns:
+        return df
+    ts_now = now if now is not None else pd.Timestamp.now(tz="UTC")
+    if ts_now.tzinfo is None:
+        ts_now = ts_now.tz_localize("UTC")
+    last_ts = df["timestamp"].iloc[-1]
+    last_ts = pd.Timestamp(last_ts)
+    if last_ts.tzinfo is None:
+        last_ts = last_ts.tz_localize("UTC")
+    else:
+        last_ts = last_ts.tz_convert("UTC")
+    period = pd.Timedelta(seconds=timeframe_to_seconds(timeframe))
+    if ts_now < last_ts + period:
+        return df.iloc[:-1].copy()
+    return df
+
+
+def prepare_ltf_frame(df: pd.DataFrame) -> pd.DataFrame:
+    """Attach MAs / RSI / ADX / S/R / ATR — identical for live and backtest."""
+    lookback = int(getattr(config, "SR_LOOKBACK_BARS", 80) or 80)
+    out = calculate_mas(df)
+    # Prefer pandas_ta (same as live bot); fall back to `ta` package.
+    try:
+        out["rsi"] = out.ta.rsi(length=14)
+        out["adx"] = out.ta.adx(length=14)["ADX_14"]
+    except Exception:
+        from ta.momentum import RSIIndicator
+        from ta.trend import ADXIndicator
+
+        out["rsi"] = RSIIndicator(out["close"], window=14).rsi()
+        out["adx"] = ADXIndicator(out["high"], out["low"], out["close"], window=14).adx()
+    out["support"] = out["low"].rolling(window=lookback).min()
+    out["resistance"] = out["high"].rolling(window=lookback).max()
+    out = add_atr_column(out, period=7)
+    return out
+
+
+def prepare_htf_frame(df: pd.DataFrame) -> pd.DataFrame:
+    """HTF frame only needs MAs for trend flags."""
+    return calculate_mas(df)
+
+
+def htf_slice_for_bar(htf_df: pd.DataFrame, end_idx: int) -> Optional[pd.DataFrame]:
+    """Last 6 HTF bars ending at end_idx (inclusive) — shared live/backtest window."""
+    if htf_df is None or len(htf_df) < 6 or end_idx < 5:
+        return None
+    return htf_df.iloc[end_idx - 5 : end_idx + 1]
+
+
+def signal_cooldown_bars(timeframe: Optional[str] = None) -> int:
+    """Bars of silence after a signal — derived from live SIGNAL_COOLDOWN_SEC."""
+    tf = timeframe or getattr(config, "TIMEFRAME", "15m")
+    sec = int(getattr(config, "SIGNAL_COOLDOWN_SEC", 1800) or 1800)
+    bar = max(1, timeframe_to_seconds(tf))
+    return max(1, int(math.ceil(sec / bar)))
+
+
+def rank_signal_key(
+    signal_source: str,
+    strategy_type: str,
+    win_rate: float = 0.0,
+) -> Tuple[int, int, float]:
+    """Same ranking live uses: SIG>LIM, trend>breakout>range, then backtest WR."""
+    source_rank = 1 if signal_source == "SIG" else 0
+    st = strategy_type or ""
+    strategy_rank = 2 if st == "trend" else (1 if st == "breakout" else 0)
+    return (source_rank, strategy_rank, float(win_rate or 0.0))
+
+
+def signal_config_snapshot() -> dict:
+    """Full fingerprint of knobs that affect signal decisions + levels."""
+    import copy
+    from utils.configUtils import strategy_settings
+
+    return {
+        "strategy_settings": copy.deepcopy(strategy_settings),
+        "TIMEFRAME": getattr(config, "TIMEFRAME", "15m"),
+        "HTF_TIMEFRAME": getattr(config, "HTF_TIMEFRAME", "1h"),
+        "MULTI_TF_ENABLED": bool(getattr(config, "MULTI_TF_ENABLED", False)),
+        "MULTI_TF_EXTRA": list(getattr(config, "MULTI_TF_EXTRA", []) or []),
+        "ENABLE_LIMIT_IDEA_FALLBACK": bool(
+            getattr(config, "ENABLE_LIMIT_IDEA_FALLBACK", False)
+        ),
+        "MIN_ADX_TREND": float(getattr(config, "MIN_ADX_TREND", 0) or 0),
+        "MIN_SETUP_RR": float(getattr(config, "MIN_SETUP_RR", 0) or 0),
+        "CONTINUATION_PULLBACK_PCT": float(
+            getattr(config, "CONTINUATION_PULLBACK_PCT", 0) or 0
+        ),
+        "SIGNAL_COOLDOWN_SEC": int(getattr(config, "SIGNAL_COOLDOWN_SEC", 0) or 0),
+        "MAX_SIGNALS_PER_CYCLE": int(getattr(config, "MAX_SIGNALS_PER_CYCLE", 0) or 0),
+        "SR_LOOKBACK_BARS": int(getattr(config, "SR_LOOKBACK_BARS", 0) or 0),
+        "RSI_OVERSOLD": float(getattr(config, "RSI_OVERSOLD", 0) or 0),
+        "RSI_OVERBOUGHT": float(getattr(config, "RSI_OVERBOUGHT", 0) or 0),
+        "RANGE_ADX_THRESHOLD": float(getattr(config, "RANGE_ADX_THRESHOLD", 0) or 0),
+        "RANGE_MAX_PCT": float(getattr(config, "RANGE_MAX_PCT", 0) or 0),
+        "RANGE_TP_TARGET": str(getattr(config, "RANGE_TP_TARGET", "")),
+        "BACKTEST_LOOKAHEAD": int(getattr(config, "BACKTEST_LOOKAHEAD", 0) or 0),
+    }
+
+
+def signal_config_matches(snapshot: Optional[dict]) -> bool:
+    if not snapshot or not isinstance(snapshot, dict):
+        return False
+    return snapshot == signal_config_snapshot()
 
 
 def htf_trend_flags(htf_slice: pd.DataFrame) -> Optional[TrendFlags]:
