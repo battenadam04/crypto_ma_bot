@@ -87,6 +87,28 @@ def htf_trend_flags(htf_slice: pd.DataFrame) -> Optional[TrendFlags]:
     return TrendFlags(trend_up=trend_up, trend_down=trend_down)
 
 
+def levels_for_signal(
+    entry_price: float,
+    direction: str,
+    df: pd.DataFrame,
+    start_idx: int,
+    strategy_type: str = "trend",
+) -> dict:
+    """
+    Single TP/SL calculator for live alerts and backtest grading.
+
+    Always uses `utils.configUtils.strategy_settings` via calculate_trade_levels.
+    Do not apply slippage here — signal levels must match what we post live.
+    """
+    work = df
+    if "ATR" not in work.columns:
+        work = add_atr_column(work, period=7)
+    side = direction_to_side(direction)
+    return calculate_trade_levels(
+        float(entry_price), side, work, int(start_idx), strategy_type
+    )
+
+
 def setup_meets_min_rr(
     slice_df: pd.DataFrame,
     entry_price: float,
@@ -97,11 +119,9 @@ def setup_meets_min_rr(
 ) -> bool:
     """Reject setups whose indicative TP/SL offer weak reward:risk."""
     try:
-        df = slice_df
-        if "ATR" not in df.columns:
-            df = add_atr_column(df, period=7)
-        side = direction_to_side(direction)
-        levels = calculate_trade_levels(entry_price, side, df, len(df) - 1, strategy_type)
+        levels = levels_for_signal(
+            entry_price, direction, slice_df, len(slice_df) - 1, strategy_type
+        )
         threshold = float(min_rr if min_rr is not None else config.MIN_SETUP_RR)
         return float(levels.get("rr_ratio") or 0) >= threshold
     except Exception:

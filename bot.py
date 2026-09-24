@@ -243,12 +243,15 @@ def handle_signal(symbol, direction, df, strategy_type="trend", signal_source="S
         side = 'buy' if direction == 'long' else 'sell'
         log_event(f"📣 Signal: {strategy_type} {direction} for {symbol} (src={signal_source}, tf={timeframe})")
 
+        # Bar close — same entry basis the backtest uses when grading this signal.
+        entry_price = float(df['close'].iloc[-1])
         levels = build_indicative_levels(
             exchange=exchange,
             df=df,
             symbol=symbol,
             side=side,
             strategy_type=strategy_type,
+            entry_price=entry_price,
         )
         if levels is None or not isinstance(levels, dict):
             log_event(f"❌ build_indicative_levels returned invalid result for {symbol}: {levels!r}")
@@ -416,6 +419,12 @@ def get_trading_pairs():
         if os.path.isfile(state_path):
             with open(state_path, 'r') as f:
                 data = json.load(f)
+            from utils.configUtils import levels_config_matches
+            if not levels_config_matches(data.get("levels_config")):
+                log_event(
+                    "⚠️ last_backtest.json TP/SL settings differ from live (or missing fingerprint). "
+                    "Re-run `python strategies/simulate_trades.py` so the watchlist matches live levels."
+                )
             raw = data.get('pairs') or []
             threshold = float(data.get('win_rate_threshold', 40))
             results = data.get('results') or {}

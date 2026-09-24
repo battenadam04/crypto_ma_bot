@@ -2,7 +2,7 @@ import ccxt
 
 import config
 from utils.coinGeckoData import fetch_market_caps
-from utils.utils import calculate_trade_levels, get_decimal_places, log_event
+from utils.utils import log_event
 
 EXCHANGE_NAME = (config.EXCHANGE or "phemex").strip().lower()
 
@@ -444,31 +444,34 @@ def get_top_tradable_pairs(
     return filtered_pairs[:top_n]
 
 
-def build_indicative_levels(exchange, df, symbol, side, strategy_type="trend"):
+def build_indicative_levels(exchange, df, symbol, side, strategy_type="trend", entry_price=None):
     """
-    Read-only: last price + ATR-based indicative TP/SL for a signal message.
+    Read-only: ATR-based indicative TP/SL for a signal message.
+    Uses the same levels_for_signal calculator as backtest (strategy_settings).
+    Prefer passing the signal bar close as entry_price so live matches the screen.
     Never places orders or reads account balances.
     """
     try:
-        exchange.load_markets()
-        market = exchange.market(symbol)
-        price_precision = min(max(get_decimal_places(market['precision']['price']), 6), 12)
+        from utils.signalLogic import levels_for_signal
 
-        ticker = exchange.fetch_ticker(symbol)
-        price = ticker.get('last')
-        if price is None or price <= 0:
-            return {'status': 'error', 'message': f"Invalid ticker data for {symbol}: {ticker}"}
+        if entry_price is None:
+            ticker = exchange.fetch_ticker(symbol)
+            price = ticker.get('last')
+            if price is None or price <= 0:
+                return {'status': 'error', 'message': f"Invalid ticker data for {symbol}: {ticker}"}
+        else:
+            price = float(entry_price)
+            if price <= 0:
+                return {'status': 'error', 'message': f"Invalid entry_price for {symbol}: {entry_price}"}
 
-        levels = calculate_trade_levels(price, side, df, len(df) - 1, strategy_type)
-        tp_price = round(levels['take_profit'], price_precision)
-        sl_price = round(levels['stop_loss'], price_precision)
+        levels = levels_for_signal(price, side, df, len(df) - 1, strategy_type)
         return {
             'status': 'success',
-            'filled_entry': price,
-            'tp_order': tp_price,
-            'sl_order': sl_price,
-            'tp_price': tp_price,
-            'sl_price': sl_price,
+            'filled_entry': levels['entry'],
+            'tp_order': levels['take_profit'],
+            'sl_order': levels['stop_loss'],
+            'tp_price': levels['take_profit'],
+            'sl_price': levels['stop_loss'],
         }
     except Exception as e:
         return {'status': 'error', 'message': f"Unexpected error: {str(e)}"}

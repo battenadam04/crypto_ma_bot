@@ -1,7 +1,10 @@
 # Asymmetric R:R: TP distance > SL so break-even win rate stays realistic (~35%).
+# Live alerts and backtest BOTH read these via utils.signalLogic.levels_for_signal.
+# Never mutate for a screen and ship that watchlist while live still uses different values.
+from typing import Optional
+
 strategy_settings = {
     "trend": {
-        # Restored from combo_v1 (pre easier-TP): live SIG trend was 0/8 after atr_tp 2.3 / 0.75%.
         "atr_tp": 2.6,
         "atr_sl": 1.2,
         "min_tp_pct": 0.009,    # 0.9%
@@ -26,3 +29,21 @@ strategy_settings = {
         "min_sl_pct": 0.003,
     },
 }
+
+
+def levels_config_snapshot() -> dict:
+    """Fingerprint of TP/SL knobs used by live + backtest (for last_backtest.json)."""
+    import copy
+    return {
+        "strategy_settings": copy.deepcopy(strategy_settings),
+    }
+
+
+def levels_config_matches(snapshot: Optional[dict]) -> bool:
+    """True if snapshot matches current live TP/SL settings (missing snapshot = unknown)."""
+    if not snapshot or not isinstance(snapshot, dict):
+        return False
+    saved = snapshot.get("strategy_settings")
+    if not isinstance(saved, dict):
+        return False
+    return saved == strategy_settings

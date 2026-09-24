@@ -44,15 +44,16 @@ from config import (
     TIMEFRAME, HTF_TIMEFRAME, BACKTEST_MIN_TRADES,
 )
 from utils.utils import (
-    calculate_trade_levels,
     add_atr_column,
     log_event,
     calculate_mas,
 )
 from utils.signalLogic import (
     evaluate_signal_at_bar,
+    levels_for_signal,
     resolve_outcome_on_df,
 )
+from utils.configUtils import levels_config_snapshot
 from utils.exchangeUtils import get_exchange, get_auto_backtest_pairs
 
 BACKTEST_STATE_FILE = os.path.join(os.path.dirname(__file__), '..', 'last_backtest.json')
@@ -350,27 +351,29 @@ def check_trade_outcome(df, start_idx, direction, entry_price,
                         max_lookahead=BACKTEST_LOOKAHEAD, strategy="trend"):
     """Resolve a trade against TP/SL levels. Returns dict with result and P&L.
 
-    Uses shared first-touch policy (same-bar TP+SL → loss) via utils.signalLogic.
-    Expects df to already have an 'ATR' column (precomputed).
+    TP/SL come from the same levels_for_signal path as live (no slippage on levels).
+    Slippage/fees only affect the fill used for P&L accounting.
     """
     if 'ATR' not in df.columns:
         df = add_atr_column(df, period=7)
 
+    # Signal levels = live alert levels (shared calculator, raw entry).
+    levels = levels_for_signal(entry_price, direction, df, start_idx, strategy)
+    tp, sl = levels['take_profit'], levels['stop_loss']
+
     apply_fees = BACKTEST_APPLY_FEES
-    priced = entry_price
+    fill = entry_price
     if apply_fees:
-        priced = _apply_slippage(entry_price, direction)
-        commission = _commission_cost(priced) * 2
+        fill = _apply_slippage(entry_price, direction)
+        commission = _commission_cost(fill) * 2
     else:
         commission = 0.0
 
-    levels = calculate_trade_levels(priced, direction, df, start_idx, strategy)
-    tp, sl = levels['take_profit'], levels['stop_loss']
     return resolve_outcome_on_df(
         df,
         start_idx,
         direction,
-        priced,
+        fill,
         tp,
         sl,
         max_lookahead=max_lookahead,
@@ -565,6 +568,9 @@ def run_backtest(pairs_override=None):
             "pairs": good_pairs,
             "run_at": datetime.now(timezone.utc).isoformat(),
             "win_rate_threshold": win_rate_threshold,
+            "levels_config": levels_config_snapshot(),
+            "timeframe": TIMEFRAME,
+            "htf_timeframe": HTF_TIMEFRAME,
             "results": results_by_symbol,
         }
         try:

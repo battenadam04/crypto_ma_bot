@@ -123,6 +123,45 @@ class TestAdapterParity:
         assert "pnl_pct" in out
 
 
+class TestLevelsParity:
+    def test_live_and_backtest_same_tp_sl(self):
+        """Same bar close + ATR → identical TP/SL for live and backtest."""
+        from utils.signalLogic import levels_for_signal
+        from strategies.simulate_trades import check_trade_outcome
+        import config
+
+        df = _base_df(n=80, trend="up")
+        idx = len(df) - 1
+        entry = float(df["close"].iat[idx])
+        live = levels_for_signal(entry, "long", df, idx, "trend")
+
+        # Backtest must grade against those exact levels (not slipped-entry levels).
+        prev = config.BACKTEST_APPLY_FEES
+        config.BACKTEST_APPLY_FEES = True
+        try:
+            # Force next bar to hit SL so outcome resolves; levels are what we assert.
+            out = check_trade_outcome(df, idx - 1, "buy", float(df["close"].iat[idx - 1]), max_lookahead=2, strategy="trend")
+        finally:
+            config.BACKTEST_APPLY_FEES = prev
+
+        bt_entry = float(df["close"].iat[idx - 1])
+        bt_levels = levels_for_signal(bt_entry, "buy", df, idx - 1, "trend")
+        # Shared helper is the sole calculator
+        assert live["take_profit"] == levels_for_signal(entry, "buy", df, idx, "trend")["take_profit"]
+        assert live["stop_loss"] == levels_for_signal(entry, "buy", df, idx, "trend")["stop_loss"]
+        assert out["tp"] == bt_levels["take_profit"]
+        assert out["sl"] == bt_levels["stop_loss"]
+
+    def test_levels_config_fingerprint(self):
+        from utils.configUtils import levels_config_snapshot, levels_config_matches, strategy_settings
+        snap = levels_config_snapshot()
+        assert levels_config_matches(snap)
+        bad = levels_config_snapshot()
+        bad["strategy_settings"]["trend"]["atr_tp"] = 99.0
+        assert not levels_config_matches(bad)
+        assert strategy_settings["trend"]["atr_tp"] != 99.0  # snapshot is a deep copy
+
+
 class TestResolveOutcomeOnDf:
     def test_unresolved_none(self):
         df = _base_df(n=70, trend="flat")
