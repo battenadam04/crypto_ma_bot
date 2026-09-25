@@ -78,8 +78,9 @@ class TestFirstTouchPolicy:
 
 
 class TestHtfFlags:
-    def test_needs_six_rows(self):
-        df = _htf_from(_base_df(), "up").iloc[:3]
+    def test_needs_ma_columns(self):
+        df = _base_df().iloc[:3].copy()
+        df = df.drop(columns=["ma20", "ma50"], errors="ignore")
         assert htf_trend_flags(df) is None
 
     def test_up_down(self):

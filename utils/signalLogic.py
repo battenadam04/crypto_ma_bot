@@ -200,28 +200,17 @@ def signal_config_matches(snapshot: Optional[dict]) -> bool:
 
 
 def htf_trend_flags(htf_slice: pd.DataFrame) -> Optional[TrendFlags]:
-    """HTF bias used by live and backtest. Needs ≥6 rows with ma20/ma50."""
-    if htf_slice is None or len(htf_slice) < 6:
+    """1h bias: ma20 vs ma50 only (no slope/extra lookback gates)."""
+    if htf_slice is None or len(htf_slice) < 1:
         return None
     if "ma20" not in htf_slice.columns or "ma50" not in htf_slice.columns:
         return None
     ma20_last = htf_slice["ma20"].iloc[-1]
     ma50_last = htf_slice["ma50"].iloc[-1]
-    ma20_prev5 = htf_slice["ma20"].iloc[-5]
-    ma20_prev4 = htf_slice["ma20"].iloc[-4]
-    if pd.isna(ma20_last) or pd.isna(ma50_last) or pd.isna(ma20_prev5) or pd.isna(ma20_prev4):
+    if pd.isna(ma20_last) or pd.isna(ma50_last):
         return None
-    ma20_slope = float(ma20_last) - float(ma20_prev4)
-    trend_up = (
-        float(ma20_last) > float(ma50_last)
-        and float(ma20_last) > float(ma20_prev5)
-        and ma20_slope > 0
-    )
-    trend_down = (
-        float(ma20_last) < float(ma50_last)
-        and float(ma20_last) < float(ma20_prev5)
-        and ma20_slope < 0
-    )
+    trend_up = float(ma20_last) > float(ma50_last)
+    trend_down = float(ma20_last) < float(ma50_last)
     return TrendFlags(trend_up=trend_up, trend_down=trend_down)
 
 
@@ -255,12 +244,14 @@ def setup_meets_min_rr(
     *,
     min_rr: Optional[float] = None,
 ) -> bool:
-    """Reject setups whose indicative TP/SL offer weak reward:risk."""
+    """Reject setups whose indicative TP/SL offer weak reward:risk. min_rr<=0 disables."""
     try:
+        threshold = float(min_rr if min_rr is not None else config.MIN_SETUP_RR)
+        if threshold <= 0:
+            return True
         levels = levels_for_signal(
             entry_price, direction, slice_df, len(slice_df) - 1, strategy_type
         )
-        threshold = float(min_rr if min_rr is not None else config.MIN_SETUP_RR)
         return float(levels.get("rr_ratio") or 0) >= threshold
     except Exception:
         return False
@@ -305,13 +296,13 @@ def evaluate_signal_at_bar(
     entry_price: float,
     *,
     include_limit_idea_fallback: Optional[bool] = None,
-    include_breakout: bool = True,
+    include_breakout: bool = False,
 ) -> Optional[SignalDecision]:
     """
     Single bar signal decision for live and backtest.
 
-    Priority (matches former live `process_pair`):
-      trend SIG → breakout SIG → range SIG → optional LIM
+    Core path: simplified 15m MA entry + 1h HTF agree.
+    Breakout/range/LIM stay available but off by default (include_breakout=False, LIM via config).
     """
     if slice_df is None or len(slice_df) < 51:
         return None
@@ -334,7 +325,6 @@ def evaluate_signal_at_bar(
             return SignalDecision("short", "trend", "SIG")
 
     if include_breakout:
-        # RR gate uses trend levels (legacy live behaviour); alert/backtest use breakout levels.
         if check_breakout_signal(slice_df, "long") and flags.trend_up:
             if setup_meets_min_rr(slice_df, entry_price, "long", "trend"):
                 return SignalDecision("long", "breakout", "SIG")

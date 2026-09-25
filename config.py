@@ -86,7 +86,7 @@ CRYPTO_PAIRS = []
 TP_PERCENT = 2.0
 SL_PERCENT = 1.0
 # Require clearer momentum on the signal timeframe for trend entries (0 = disabled).
-MIN_ADX_TREND = 15.0
+MIN_ADX_TREND = 0.0  # disabled — plain MA + HTF path; 0 = no ADX gate
 
 # Signals-only product (live trading lives on tag v1.0.0-live-trading).
 TRADING_SIGNALS_ONLY = True
@@ -145,10 +145,9 @@ _runtime_lock = threading.Lock()
 TIMEFRAME = "15m"
 # Higher-timeframe trend filter used by live + backtest.
 HTF_TIMEFRAME = "1h"
-# Multi-timeframe: 5m secondary scan for frequency on the same WR-qualified pairs.
-# Same cycle never dual-alerts the same pair (15m wins if both fire). HTF stays 1h.
-MULTI_TF_ENABLED = True
-MULTI_TF_EXTRA = ["5m"]
+# Single signal TF only (no dual 5m+15m alerts). Classic stack: 15m entries + 1h HTF filter.
+MULTI_TF_ENABLED = False
+MULTI_TF_EXTRA = []
 
 # Overnight scan pause (Telegram /night on|off arms/disarms; state persists).
 # Default OFF for a signals product — 22–06 UTC was wiping ~1/3 of scanning time.
@@ -229,7 +228,7 @@ BACKTEST_USE_LIMIT_IDEAS = False
 BACKTEST_LIMIT_FILL_BARS = 3
 BACKTEST_MIN_RR_RATIO = 1.5
 BACKTEST_WIN_RATE_THRESHOLD = 40.0
-MIN_SETUP_RR = 1.3
+MIN_SETUP_RR = 0.0  # disabled — do not reject MA entries on indicative RR
 BACKTEST_ENFORCE_RR = False
 BACKTEST_APPLY_FEES = True
 BACKTEST_MIN_TRADES = 3

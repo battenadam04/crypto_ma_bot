@@ -24,6 +24,27 @@ class TestCheckLongSignal:
         df['ma50'] = df['close']
         assert check_long_signal(df) is False
 
+    def test_detects_plain_ma_crossover(self):
+        n = 60
+        closes = list(range(n))
+        df = pd.DataFrame({
+            'open': closes,
+            'high': [c + 1 for c in closes],
+            'low': [c - 1 for c in closes],
+            'close': closes,
+        })
+        df['ma10'] = 10.0
+        df['ma20'] = 11.0
+        df['ma50'] = 9.0
+        # Force cross on last bar: prev ma10<ma20, last ma10>ma20
+        df.loc[df.index[-2], 'ma10'] = 10.0
+        df.loc[df.index[-2], 'ma20'] = 11.0
+        df.loc[df.index[-1], 'ma10'] = 12.0
+        df.loc[df.index[-1], 'ma20'] = 11.0
+        df.loc[df.index[-1], 'low'] = float(closes[-1])
+        df.loc[df.index[-1], 'close'] = float(closes[-1])
+        assert check_long_signal(df) is True
+
     def test_detects_long_in_uptrend(self, bullish_df):
         result = check_long_signal(bullish_df)
         assert isinstance(result, bool)

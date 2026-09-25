@@ -457,55 +457,41 @@ def check_breakout_signal(df, direction="long"):
         return breakdown and alignment and strong_candle
 
 def check_long_signal(df, lookahead=10):
+    """15m MA entry: ma10/ma20 cross up, or pullback reclaim while still bullish-stacked."""
     if len(df) < 51:
         return False
 
     last = df.iloc[-1]
     prev = df.iloc[-2]
+    if pd.isna(last['ma10']) or pd.isna(last['ma20']) or pd.isna(prev['ma10']) or pd.isna(prev['ma20']):
+        return False
 
     crossover = prev['ma10'] < prev['ma20'] and last['ma10'] > last['ma20']
-
-    # Continuation: pullback tags MA10 and reclaim closes with a strong body (chop filter).
     continuation = (
         last['ma10'] > last['ma20']
         and last['low'] <= last['ma10'] * (1 + CONTINUATION_PULLBACK_PCT)
         and last['close'] > last['ma10']
-        and _strong_bullish_close(last)
     )
+    return bool(crossover or continuation)
 
-    alignment = last['ma20'] > last['ma50']
-    momentum = last['close'] > last['ma10']
-    bullish_candle = last['close'] > last['open']
-
-    if (crossover or continuation) and alignment and momentum and bullish_candle and not is_near_resistance(df):
-        return True
-
-    return False
 
 def check_short_signal(df, lookahead=10):
+    """15m MA entry: ma10/ma20 cross down, or pullback reject while still bearish-stacked."""
     if len(df) < 51:
         return False
 
     last = df.iloc[-1]
     prev = df.iloc[-2]
+    if pd.isna(last['ma10']) or pd.isna(last['ma20']) or pd.isna(prev['ma10']) or pd.isna(prev['ma20']):
+        return False
 
     crossover = prev['ma10'] > prev['ma20'] and last['ma10'] < last['ma20']
-
     continuation = (
         last['ma10'] < last['ma20']
         and last['high'] >= last['ma10'] * (1 - CONTINUATION_PULLBACK_PCT)
         and last['close'] < last['ma10']
-        and _strong_bearish_close(last)
     )
-
-    alignment = last['ma20'] < last['ma50']
-    momentum = last['close'] < last['ma10']
-    bearish_candle = last['close'] < last['open']
-
-    if (crossover or continuation) and alignment and momentum and bearish_candle and not is_near_support(df):
-        return True
-
-    return False
+    return bool(crossover or continuation)
 
 # Log rotation: max size before rotating (5 MB), keep this many old logs
 MAX_LOG_BYTES = 5 * 1024 * 1024

@@ -396,7 +396,7 @@ def _get_signal_at_bar(
         htf_slice,
         entry_price,
         include_limit_idea_fallback=include_limit_idea_fallback,
-        include_breakout=True,
+        include_breakout=False,
     )
 
 

@@ -39,10 +39,8 @@
     },
     "TIMEFRAME": "15m",
     "HTF_TIMEFRAME": "1h",
-    "MULTI_TF_ENABLED": true,
-    "MULTI_TF_EXTRA": [
-      "5m"
-    ],
+    "MULTI_TF_ENABLED": false,
+    "MULTI_TF_EXTRA": [],
     "ENABLE_LIMIT_IDEA_FALLBACK": false,
     "MIN_ADX_TREND": 15.0,
     "MIN_SETUP_RR": 1.3,
