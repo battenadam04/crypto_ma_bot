@@ -145,10 +145,10 @@ _runtime_lock = threading.Lock()
 TIMEFRAME = "15m"
 # Higher-timeframe trend filter used by live + backtest.
 HTF_TIMEFRAME = "1h"
-# Multi-timeframe secondary scan (OFF = classic 15m signals + 1h HTF filter only).
-# When enabled, MULTI_TF_EXTRA TFs also emit alerts alongside TIMEFRAME.
-MULTI_TF_ENABLED = False
-MULTI_TF_EXTRA = []
+# Multi-timeframe: 5m secondary scan for frequency on the same WR-qualified pairs.
+# Same cycle never dual-alerts the same pair (15m wins if both fire). HTF stays 1h.
+MULTI_TF_ENABLED = True
+MULTI_TF_EXTRA = ["5m"]
 
 # Overnight scan pause (Telegram /night on|off arms/disarms; state persists).
 # Default OFF for a signals product — 22–06 UTC was wiping ~1/3 of scanning time.
