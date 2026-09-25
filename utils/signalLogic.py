@@ -22,11 +22,13 @@ from utils.utils import (
     check_range_trade,
     check_short_signal,
     is_ranging,
+    _strong_bearish_close,
+    _strong_bullish_close,
 )
 
 Direction = Literal["long", "short"]
 Side = Literal["buy", "sell"]
-StrategyType = Literal["trend", "range", "breakout"]
+StrategyType = Literal["trend", "range", "breakout", "scalp"]
 SignalSource = Literal["SIG", "LIM"]
 SameBarPolicy = Literal["conservative_sl"]  # sole supported policy — live + backtest
 
@@ -155,10 +157,17 @@ def rank_signal_key(
     strategy_type: str,
     win_rate: float = 0.0,
 ) -> Tuple[int, int, float]:
-    """Same ranking live uses: SIG>LIM, trend>breakout>range, then backtest WR."""
+    """Same ranking live uses: SIG>LIM, trend>breakout>scalp>range, then backtest WR."""
     source_rank = 1 if signal_source == "SIG" else 0
     st = strategy_type or ""
-    strategy_rank = 2 if st == "trend" else (1 if st == "breakout" else 0)
+    if st == "trend":
+        strategy_rank = 3
+    elif st == "breakout":
+        strategy_rank = 2
+    elif st == "scalp":
+        strategy_rank = 1
+    else:
+        strategy_rank = 0
     return (source_rank, strategy_rank, float(win_rate or 0.0))
 
 
@@ -180,6 +189,9 @@ def signal_config_snapshot() -> dict:
         "MIN_SETUP_RR": float(getattr(config, "MIN_SETUP_RR", 0) or 0),
         "CONTINUATION_PULLBACK_PCT": float(
             getattr(config, "CONTINUATION_PULLBACK_PCT", 0) or 0
+        ),
+        "ENABLE_COUNTER_HTF_SCALP": bool(
+            getattr(config, "ENABLE_COUNTER_HTF_SCALP", True)
         ),
         "SIGNAL_COOLDOWN_SEC": int(getattr(config, "SIGNAL_COOLDOWN_SEC", 0) or 0),
         "MAX_SIGNALS_PER_CYCLE": int(getattr(config, "MAX_SIGNALS_PER_CYCLE", 0) or 0),
@@ -267,6 +279,30 @@ def _adx_ok(slice_df: pd.DataFrame) -> bool:
     return bool(pd.notna(adx) and float(adx) >= min_adx)
 
 
+def _location_ok(slice_df: pd.DataFrame, direction: str, *, strict: bool = False) -> bool:
+    """Confirm #3: price not pressing into the opposing structural S/R."""
+    last = slice_df.iloc[-1]
+    close = float(last["close"])
+    buf = 0.015 if strict else 0.01
+    if direction in ("long", "buy"):
+        res = last.get("resistance")
+        if res is None or pd.isna(res):
+            return True
+        return close < float(res) * (1.0 - buf)
+    sup = last.get("support")
+    if sup is None or pd.isna(sup):
+        return True
+    return close > float(sup) * (1.0 + buf)
+
+
+def _scalp_candle_ok(slice_df: pd.DataFrame, direction: str) -> bool:
+    """Extra scalp quality: decisive close in trade direction."""
+    last = slice_df.iloc[-1]
+    if direction in ("long", "buy"):
+        return _strong_bullish_close(last)
+    return _strong_bearish_close(last)
+
+
 def _limit_idea_decision(
     slice_df: pd.DataFrame,
     flags: TrendFlags,
@@ -299,10 +335,19 @@ def evaluate_signal_at_bar(
     include_breakout: bool = False,
 ) -> Optional[SignalDecision]:
     """
-    Single bar signal decision for live and backtest.
+    Shared live/backtest decision.
 
-    Core path: simplified 15m MA entry + 1h HTF agree.
-    Breakout/range/LIM stay available but off by default (include_breakout=False, LIM via config).
+    Primary (trend) — core 3 confirms:
+      1) 1h HTF bias agrees
+      2) 15m MA cross / pullback reclaim
+      3) location clear of opposing S/R
+      (+ optional mild ADX via MIN_ADX_TREND)
+
+    Secondary (scalp) — counter-HTF, tighter TP via strategy_type=scalp:
+      1) 15m MA trigger
+      2) stronger location
+      3) decisive candle
+      4) explicitly against 1h bias
     """
     if slice_df is None or len(slice_df) < 51:
         return None
@@ -314,15 +359,38 @@ def evaluate_signal_at_bar(
         include_limit_idea_fallback = bool(
             getattr(config, "ENABLE_LIMIT_IDEA_FALLBACK", False)
         )
+    allow_scalp = bool(getattr(config, "ENABLE_COUNTER_HTF_SCALP", True))
 
     adx_ok = _adx_ok(slice_df)
+    long_trig = check_long_signal(slice_df)
+    short_trig = check_short_signal(slice_df)
 
-    if adx_ok and check_long_signal(slice_df) and flags.trend_up:
+    # --- Primary: with-HTF trend ---
+    if adx_ok and long_trig and flags.trend_up and _location_ok(slice_df, "long"):
         if setup_meets_min_rr(slice_df, entry_price, "long", "trend"):
             return SignalDecision("long", "trend", "SIG")
-    if adx_ok and check_short_signal(slice_df) and flags.trend_down:
+    if adx_ok and short_trig and flags.trend_down and _location_ok(slice_df, "short"):
         if setup_meets_min_rr(slice_df, entry_price, "short", "trend"):
             return SignalDecision("short", "trend", "SIG")
+
+    # --- Secondary: against-HTF scalp (tighter targets) ---
+    if allow_scalp:
+        if (
+            long_trig
+            and flags.trend_down
+            and _location_ok(slice_df, "long", strict=True)
+            and _scalp_candle_ok(slice_df, "long")
+        ):
+            if setup_meets_min_rr(slice_df, entry_price, "long", "scalp"):
+                return SignalDecision("long", "scalp", "SIG")
+        if (
+            short_trig
+            and flags.trend_up
+            and _location_ok(slice_df, "short", strict=True)
+            and _scalp_candle_ok(slice_df, "short")
+        ):
+            if setup_meets_min_rr(slice_df, entry_price, "short", "scalp"):
+                return SignalDecision("short", "scalp", "SIG")
 
     if include_breakout:
         if check_breakout_signal(slice_df, "long") and flags.trend_up:

@@ -48,6 +48,7 @@ def strategy_label(strategy_type: str, signal_source: str = "SIG") -> str:
         "trend": "Trend setup",
         "range": "Range setup",
         "breakout": "Breakout setup",
+        "scalp": "Scalp setup (counter higher-TF)",
     }
     base = labels.get(str(strategy_type or "").lower(), "Setup")
     if str(signal_source or "").upper() == "LIM":
@@ -55,7 +56,7 @@ def strategy_label(strategy_type: str, signal_source: str = "SIG") -> str:
     return base
 
 
-def htf_bias_line(direction: str) -> str:
+def htf_bias_line(direction: str, strategy_type: str = "trend") -> str:
     """Explain higher-timeframe confirmation in plain English."""
     htf = str(getattr(config, "HTF_TIMEFRAME", "1h") or "1h").strip().lower()
     htf_name = {
@@ -65,6 +66,12 @@ def htf_bias_line(direction: str) -> str:
         "4h": "4-hour",
         "1d": "daily",
     }.get(htf, htf)
+    st = str(strategy_type or "").lower()
+    if st == "scalp":
+        # Counter-HTF: trade is against the 1h bias
+        if direction == "long":
+            return f"Scalp long against the {htf_name} downtrend — smaller target"
+        return f"Scalp short against the {htf_name} uptrend — smaller target"
     if direction == "long":
         return f"Confirmed by the {htf_name} uptrend"
     return f"Confirmed by the {htf_name} downtrend"
@@ -122,7 +129,7 @@ def format_signal_message(
 
     lines = [
         f"{emoji} <b>{side}</b> · <b>{pair}</b> · {display_timeframe(timeframe)}",
-        f"🧭 {setup} · {htf_bias_line(direction)}",
+        f"🧭 {setup} · {htf_bias_line(direction, strategy_type)}",
         "",
         f"💲 <b>Entry</b>        {fmt_price(entry)}",
         f"🎯 <b>Take-profit</b>  {fmt_price(tp)}" + (f"  <i>({tp_pct})</i>" if tp_pct else ""),

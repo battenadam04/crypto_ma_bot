@@ -23,10 +23,11 @@ strategy_settings = {
         "min_sl_pct": 0.006,    # 0.6%
     },
     "scalp": {
-        "atr_tp": 2.0,
+        # Counter-HTF lane: smaller targets so adverse higher-TF drift doesn't need a full trend TP.
+        "atr_tp": 1.4,
         "atr_sl": 1.0,
-        "min_tp_pct": 0.008,
-        "min_sl_pct": 0.003,
+        "min_tp_pct": 0.005,    # 0.5%
+        "min_sl_pct": 0.0035,   # 0.35%
     },
 }
 

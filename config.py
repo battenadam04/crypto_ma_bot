@@ -86,7 +86,8 @@ CRYPTO_PAIRS = []
 TP_PERCENT = 2.0
 SL_PERCENT = 1.0
 # Require clearer momentum on the signal timeframe for trend entries (0 = disabled).
-MIN_ADX_TREND = 0.0  # disabled — plain MA + HTF path; 0 = no ADX gate
+# Mild momentum floor for primary (with-HTF) trend lane. 0 = off.
+MIN_ADX_TREND = 12.0
 
 # Signals-only product (live trading lives on tag v1.0.0-live-trading).
 TRADING_SIGNALS_ONLY = True
@@ -203,6 +204,8 @@ RANGE_SL_ATR_MULT = 0.5         # also allow at least this × ATR beyond S/R
 RANGE_TP_TARGET = "mid"    # "opposite" = other range edge | "mid" = range midpoint
 # Continuations: 0.3% tag (pre-combo_v1 volume). 0.5% was too sparse for the live feed.
 CONTINUATION_PULLBACK_PCT = 0.003
+# Counter-HTF scalp lane (tighter ATR TP via strategy_settings["scalp"]).
+ENABLE_COUNTER_HTF_SCALP = True
 
 LIMIT_ENTRY_OFFSET_PCT = 0.0015
 LIMIT_IDEA_FALLBACK_PCT = 0.003

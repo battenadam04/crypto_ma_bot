@@ -448,7 +448,7 @@ def simulate_combined_strategy(pair, df_5m, df_1h):
         last_trade_bar = i
         outcome = check_trade_outcome(df_5m, i, direction, entry_price, BACKTEST_LOOKAHEAD, strat)
         result = outcome['result']
-        strategy_used.append('ma' if strat in ('trend', 'breakout') else 'range')
+        strategy_used.append('ma' if strat in ('trend', 'breakout', 'scalp') else 'range')
 
         is_long = direction == 'buy'
         if result == 'win':
@@ -477,7 +477,7 @@ def simulate_combined_strategy(pair, df_5m, df_1h):
                     df_5m, fill_idx, direction, filled_entry_price, BACKTEST_LOOKAHEAD, strat
                 )
                 limit_result = limit_outcome['result']
-                strategy_used.append('ma' if strat in ('trend', 'breakout') else 'range')
+                strategy_used.append('ma' if strat in ('trend', 'breakout', 'scalp') else 'range')
 
                 if limit_result == 'win':
                     pnl_list.append(limit_outcome['pnl_pct'])

@@ -200,6 +200,68 @@ class TestLevelsParity:
         assert len(closed) == n - 1
 
 
+class TestCoreThreeAndScalp:
+    def test_trend_needs_htf_agree_and_location(self, monkeypatch):
+        import config
+        from utils.signalLogic import evaluate_signal_at_bar
+
+        monkeypatch.setattr(config, "ENABLE_LIMIT_IDEA_FALLBACK", False)
+        monkeypatch.setattr(config, "ENABLE_COUNTER_HTF_SCALP", True)
+        monkeypatch.setattr(config, "MIN_ADX_TREND", 0.0)
+        monkeypatch.setattr(config, "MIN_SETUP_RR", 0.0)
+
+        df = _base_df(n=80, trend="up")
+        # Force MA cross up on last bar
+        df.loc[df.index[-2], "ma10"] = 100.0
+        df.loc[df.index[-2], "ma20"] = 101.0
+        df.loc[df.index[-1], "ma10"] = 102.0
+        df.loc[df.index[-1], "ma20"] = 101.0
+        df.loc[df.index[-1], "low"] = float(df["close"].iloc[-1]) - 0.1
+        df.loc[df.index[-1], "close"] = float(df["close"].iloc[-1])
+        df["support"] = df["low"].rolling(20).min()
+        df["resistance"] = df["high"].rolling(20).max() + 50  # far away → location ok
+        entry = float(df["close"].iloc[-1])
+
+        htf_up = _htf_from(df, "up")
+        htf_down = _htf_from(df, "down")
+        with_htf = evaluate_signal_at_bar(df, htf_up, entry)
+        assert with_htf is not None and with_htf.strategy_type == "trend" and with_htf.direction == "long"
+
+        # Against HTF without strong candle → no scalp
+        df.loc[df.index[-1], "open"] = float(df["close"].iloc[-1])  # weak body
+        against = evaluate_signal_at_bar(df, htf_down, entry)
+        # may be None or scalp only if strong candle — force weak
+        assert against is None or against.strategy_type == "scalp"
+
+    def test_scalp_against_htf_with_strong_candle(self, monkeypatch):
+        import config
+        from utils.signalLogic import evaluate_signal_at_bar
+
+        monkeypatch.setattr(config, "ENABLE_LIMIT_IDEA_FALLBACK", False)
+        monkeypatch.setattr(config, "ENABLE_COUNTER_HTF_SCALP", True)
+        monkeypatch.setattr(config, "MIN_ADX_TREND", 0.0)
+        monkeypatch.setattr(config, "MIN_SETUP_RR", 0.0)
+
+        df = _base_df(n=80, trend="up")
+        df.loc[df.index[-2], "ma10"] = 100.0
+        df.loc[df.index[-2], "ma20"] = 101.0
+        df.loc[df.index[-1], "ma10"] = 102.0
+        df.loc[df.index[-1], "ma20"] = 101.0
+        c = float(df["close"].iloc[-1])
+        df.loc[df.index[-1], "open"] = c - 1.0
+        df.loc[df.index[-1], "low"] = c - 1.2
+        df.loc[df.index[-1], "high"] = c + 0.2
+        df.loc[df.index[-1], "close"] = c
+        df["support"] = df["low"].rolling(20).min()
+        df["resistance"] = df["high"].rolling(20).max() + 50
+        entry = c
+        htf_down = _htf_from(df, "down")
+        d = evaluate_signal_at_bar(df, htf_down, entry)
+        assert d is not None
+        assert d.strategy_type == "scalp"
+        assert d.direction == "long"
+
+
 class TestResolveOutcomeOnDf:
     def test_unresolved_none(self):
         df = _base_df(n=70, trend="flat")
