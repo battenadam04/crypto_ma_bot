@@ -193,6 +193,10 @@ def signal_config_snapshot() -> dict:
         "ENABLE_COUNTER_HTF_SCALP": bool(
             getattr(config, "ENABLE_COUNTER_HTF_SCALP", True)
         ),
+        "LOCATION_CLEAR_PCT": float(getattr(config, "LOCATION_CLEAR_PCT", 0.015) or 0),
+        "LOCATION_CLEAR_PCT_STRICT": float(
+            getattr(config, "LOCATION_CLEAR_PCT_STRICT", 0.02) or 0
+        ),
         "SIGNAL_COOLDOWN_SEC": int(getattr(config, "SIGNAL_COOLDOWN_SEC", 0) or 0),
         "MAX_SIGNALS_PER_CYCLE": int(getattr(config, "MAX_SIGNALS_PER_CYCLE", 0) or 0),
         "SR_LOOKBACK_BARS": int(getattr(config, "SR_LOOKBACK_BARS", 0) or 0),
@@ -283,7 +287,10 @@ def _location_ok(slice_df: pd.DataFrame, direction: str, *, strict: bool = False
     """Confirm #3: price not pressing into the opposing structural S/R."""
     last = slice_df.iloc[-1]
     close = float(last["close"])
-    buf = 0.015 if strict else 0.01
+    if strict:
+        buf = float(getattr(config, "LOCATION_CLEAR_PCT_STRICT", 0.02) or 0.02)
+    else:
+        buf = float(getattr(config, "LOCATION_CLEAR_PCT", 0.015) or 0.015)
     if direction in ("long", "buy"):
         res = last.get("resistance")
         if res is None or pd.isna(res):

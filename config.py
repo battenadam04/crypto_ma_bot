@@ -86,8 +86,9 @@ CRYPTO_PAIRS = []
 TP_PERCENT = 2.0
 SL_PERCENT = 1.0
 # Require clearer momentum on the signal timeframe for trend entries (0 = disabled).
-# Mild momentum floor for primary (with-HTF) trend lane. 0 = off.
-MIN_ADX_TREND = 12.0
+# Quality floor for primary (with-HTF) trend lane — ablated to clear ~8 pairs ≥40% WR
+# without loosening other core-3 gates. 0 = off.
+MIN_ADX_TREND = 21.0
 
 # Signals-only product (live trading lives on tag v1.0.0-live-trading).
 TRADING_SIGNALS_ONLY = True
@@ -206,6 +207,10 @@ RANGE_TP_TARGET = "mid"    # "opposite" = other range edge | "mid" = range midpo
 CONTINUATION_PULLBACK_PCT = 0.003
 # Counter-HTF scalp lane (tighter ATR TP via strategy_settings["scalp"]).
 ENABLE_COUNTER_HTF_SCALP = True
+# Core-3 location: require this clearance from opposing structural S/R (fraction of price).
+# Ablation: 1.5% + ADX 21 cleared ≥8 pairs ≥40% WR by cutting late-chase entries.
+LOCATION_CLEAR_PCT = 0.015
+LOCATION_CLEAR_PCT_STRICT = 0.02  # scalp lane
 
 LIMIT_ENTRY_OFFSET_PCT = 0.0015
 LIMIT_IDEA_FALLBACK_PCT = 0.003
