@@ -39,6 +39,21 @@ class TestSignalOutcomeMonitor:
         assert closed[0]["result"] == "win"
         assert sent and "Take-profit hit" in sent[0]
 
+    def test_pair_stays_open_until_resolved(self):
+        from utils.signalTracker import has_open_signal
+
+        assert not has_open_signal("XRP/USDT:USDT")
+        record_signal("XRP/USDT:USDT", "long", "trend", 1.0, 1.02, 0.99, timeframe="15m")
+        assert has_open_signal("XRP/USDT:USDT")
+        assert not has_open_signal("ADA/USDT:USDT")
+
+        exchange = MagicMock()
+        exchange.fetch_ohlcv.return_value = [
+            [int(datetime.now(timezone.utc).timestamp() * 1000), 1.0, 1.03, 0.995, 1.02, 10],
+        ]
+        monitor_signal_outcomes(exchange=exchange, send_fn=lambda *a, **k: None)
+        assert not has_open_signal("XRP/USDT:USDT")
+
     def test_disabled_skips(self):
         config.SIGNAL_OUTCOME_ALERTS_ENABLED = False
         record_signal("XRP/USDT:USDT", "long", "trend", 1.0, 1.02, 0.99)

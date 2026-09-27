@@ -407,6 +407,8 @@ def simulate_combined_strategy(pair, df_5m, df_1h):
     pnl_list = []
     cooldown = _cooldown_bars()
     last_trade_bar = -cooldown
+    one_open = bool(getattr(config, "ONE_OPEN_SIGNAL_PER_PAIR", True))
+    busy_until = -1
 
     # ATR already attached by prepare_ltf_frame; keep idempotent.
     if 'ATR' not in df_5m.columns:
@@ -420,6 +422,8 @@ def simulate_combined_strategy(pair, df_5m, df_1h):
 
     for i in range(max(60, SR_LOOKBACK_BARS), len(df_5m) - 10):
         if (i - last_trade_bar) < cooldown:
+            continue
+        if one_open and i <= busy_until:
             continue
 
         sl_start = max(0, i - _slice_lookback)
@@ -448,6 +452,7 @@ def simulate_combined_strategy(pair, df_5m, df_1h):
         last_trade_bar = i
         outcome = check_trade_outcome(df_5m, i, direction, entry_price, BACKTEST_LOOKAHEAD, strat)
         result = outcome['result']
+        busy_until = int(outcome.get('exit_idx', i))
         strategy_used.append('ma' if strat in ('trend', 'breakout', 'scalp') else 'range')
 
         is_long = direction == 'buy'
@@ -634,11 +639,15 @@ def run_portfolio_backtest(pairs_override=None, max_trades_per_bar=None):
 
     pnl_list = []
     last_trade_bar_by_sym = {s: -cooldown for s in data_by_symbol}
+    one_open = bool(getattr(config, "ONE_OPEN_SIGNAL_PER_PAIR", True))
+    busy_until_by_sym = {s: -1 for s in data_by_symbol}
 
     for i in range(60, min_len):
         signals_at_bar = []
         for symbol, (df_ltf, df_htf) in data_by_symbol.items():
             if (i - last_trade_bar_by_sym[symbol]) < cooldown:
+                continue
+            if one_open and i <= busy_until_by_sym[symbol]:
                 continue
             sl_start = max(0, i - _slice_lookback)
             slice_df = df_ltf.iloc[sl_start : i + 1]
@@ -675,6 +684,7 @@ def run_portfolio_backtest(pairs_override=None, max_trades_per_bar=None):
             outcome = check_trade_outcome(
                 df_ltf, idx, direction, signal_entry_price, BACKTEST_LOOKAHEAD, strategy_type
             )
+            busy_until_by_sym[symbol] = int(outcome.get('exit_idx', idx))
             if outcome['result'] == 'none':
                 last_trade_bar_by_sym[symbol] = idx
                 continue

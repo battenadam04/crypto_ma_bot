@@ -193,6 +193,9 @@ def signal_config_snapshot() -> dict:
         "ENABLE_COUNTER_HTF_SCALP": bool(
             getattr(config, "ENABLE_COUNTER_HTF_SCALP", True)
         ),
+        "ONE_OPEN_SIGNAL_PER_PAIR": bool(
+            getattr(config, "ONE_OPEN_SIGNAL_PER_PAIR", True)
+        ),
         "LOCATION_CLEAR_PCT": float(getattr(config, "LOCATION_CLEAR_PCT", 0.015) or 0),
         "LOCATION_CLEAR_PCT_STRICT": float(
             getattr(config, "LOCATION_CLEAR_PCT_STRICT", 0.02) or 0
@@ -502,13 +505,13 @@ def resolve_outcome_on_df(
                 pnl = (tp - entry_price - commission) / entry_price
             else:
                 pnl = (entry_price - tp - commission) / entry_price
-            return {"result": "win", "pnl_pct": pnl, "tp": tp, "sl": sl}
+            return {"result": "win", "pnl_pct": pnl, "tp": tp, "sl": sl, "exit_idx": j}
         if hit == "loss":
             if is_long:
                 pnl = (sl - entry_price - commission) / entry_price
             else:
                 pnl = (entry_price - sl - commission) / entry_price
-            return {"result": "loss", "pnl_pct": pnl, "tp": tp, "sl": sl}
+            return {"result": "loss", "pnl_pct": pnl, "tp": tp, "sl": sl, "exit_idx": j}
 
     final_idx = min(len(df) - 1, start_idx + max_lookahead)
     final_close = float(df["close"].iat[final_idx])
@@ -516,4 +519,4 @@ def resolve_outcome_on_df(
         pnl = (final_close - entry_price - commission) / entry_price
     else:
         pnl = (entry_price - final_close - commission) / entry_price
-    return {"result": "none", "pnl_pct": pnl, "tp": tp, "sl": sl}
+    return {"result": "none", "pnl_pct": pnl, "tp": tp, "sl": sl, "exit_idx": final_idx}

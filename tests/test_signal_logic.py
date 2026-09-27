@@ -273,3 +273,45 @@ class TestResolveOutcomeOnDf:
             df, start, "long", entry, tp, sl, max_lookahead=3, commission=0.0
         )
         assert out["result"] == "none"
+        assert out["exit_idx"] == start + 3
+
+    def test_exit_idx_is_touch_bar(self):
+        df = _base_df(n=70, trend="flat")
+        start = 60
+        entry = float(df["close"].iat[start])
+        df.loc[df.index[start + 2], "high"] = entry * 1.2
+        out = resolve_outcome_on_df(
+            df, start, "long", entry, entry * 1.1, entry * 0.5, max_lookahead=5, commission=0.0
+        )
+        assert out["result"] == "win"
+        assert out["exit_idx"] == start + 2
+
+
+class TestOneOpenSignalPerPair:
+    def _run(self, monkeypatch, one_open):
+        import config
+        import strategies.simulate_trades as sim
+
+        monkeypatch.setattr(config, "ONE_OPEN_SIGNAL_PER_PAIR", one_open)
+        monkeypatch.setattr(sim, "_cooldown_bars", lambda: 1)
+        monkeypatch.setattr(sim, "htf_slice_for_bar", lambda df, ei: df)
+        monkeypatch.setattr(
+            sim, "_get_signal_at_bar",
+            lambda *a, **k: SignalDecision("long", "trend", "SIG"),
+        )
+        entries = []
+
+        def fake_outcome(df, i, direction, entry, lookahead, strat):
+            entries.append(i)
+            return {"result": "loss", "pnl_pct": -0.005, "exit_idx": i + 10}
+
+        monkeypatch.setattr(sim, "check_trade_outcome", fake_outcome)
+        df = _base_df(n=200, trend="up")
+        sim.simulate_combined_strategy("X/USDT:USDT", df, _htf_from(df, "up"))
+        return entries
+
+    def test_backtest_waits_for_prior_exit(self, monkeypatch):
+        stacked = self._run(monkeypatch, one_open=False)
+        spaced = self._run(monkeypatch, one_open=True)
+        assert len(spaced) < len(stacked)
+        assert all(b - a > 10 for a, b in zip(spaced, spaced[1:]))

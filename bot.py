@@ -27,7 +27,12 @@ from utils.signalLogic import (
 )
 from utils.utils import log_event
 from utils.exchangeUtils import get_exchange, build_indicative_levels
-from utils.signalTracker import record_signal, send_eod_report, monitor_signal_outcomes
+from utils.signalTracker import (
+    has_open_signal,
+    monitor_signal_outcomes,
+    record_signal,
+    send_eod_report,
+)
 from utils.signalFormat import format_limit_hint, format_signal_message
 
 BACKTEST_STATE_FILE = "last_backtest.json"  # relative to project root (bot dir)
@@ -509,6 +514,12 @@ def main():
     skipped_cd = before_cd - len(signals)
     if skipped_cd:
         log_event(f"⏳ Skipped {skipped_cd} signal(s) still on cooldown ({SIGNAL_COOLDOWN_SEC}s).")
+
+    if getattr(config, "ONE_OPEN_SIGNAL_PER_PAIR", True):
+        still_open = [s['symbol'] for s in signals if has_open_signal(s['symbol'])]
+        if still_open:
+            signals = [s for s in signals if s['symbol'] not in still_open]
+            log_event(f"🔒 Skipped {len(still_open)} signal(s) with a trade still open: {still_open}")
 
     signals.sort(key=lambda s: _rank_key(s, win_rates), reverse=True)
 

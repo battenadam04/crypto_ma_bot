@@ -188,6 +188,9 @@ CHANNEL_HEARTBEAT_EVERY_HOURS = 8         # at most once per this interval while
 # Signal volume controls
 # Keep LIM off (proximity spam). Restore pre-drought cooldown/caps for confirmed SIGs.
 SIGNAL_COOLDOWN_SEC = 1800
+# Don't re-post a pair while its previous signal is still open (TP/SL/expiry pending).
+# Backtest mirrors this by skipping bars until the prior trade's exit bar.
+ONE_OPEN_SIGNAL_PER_PAIR = True
 MAX_SIGNALS_PER_CYCLE = 5
 # Off: proximity LIM alerts flooded the Pro channel and dominated SL outcomes.
 ENABLE_LIMIT_IDEA_FALLBACK = False

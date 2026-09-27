@@ -91,6 +91,13 @@ def get_open_signals() -> list[dict]:
         return [dict(s) for s in _open_signals]
 
 
+def has_open_signal(symbol: str) -> bool:
+    """True if a posted signal on this pair hasn't hit TP/SL or expired yet."""
+    _load_open_signals()
+    with _open_lock:
+        return any(s.get("symbol") == symbol for s in _open_signals)
+
+
 def reset_open_signals_for_tests() -> None:
     global _open_loaded
     with _open_lock:
