@@ -7,11 +7,15 @@ import pytest
 
 from utils.signalLogic import (
     SignalDecision,
+    backtest_result_qualifies,
+    closed_htf_end_indices,
     evaluate_signal_at_bar,
     first_touch_on_bar,
     first_touch_walk,
+    htf_frame_is_current,
     htf_trend_flags,
     resolve_outcome_on_df,
+    symbols_from_backtest_state,
 )
 from strategies.simulate_trades import _get_signal_at_bar, check_trade_outcome
 from utils.utils import add_atr_column
@@ -88,6 +92,64 @@ class TestHtfFlags:
         down = htf_trend_flags(_htf_from(_base_df(), "down"))
         assert up and up.trend_up and not up.trend_down
         assert down and down.trend_down and not down.trend_up
+
+
+class TestClosedHtfAlignment:
+    def test_in_progress_hour_is_excluded(self):
+        htf = pd.to_datetime(
+            [
+                "2025-01-01 08:00",
+                "2025-01-01 09:00",
+                "2025-01-01 10:00",
+                "2025-01-01 11:00",
+            ],
+            utc=True,
+        )
+        # 15m bar that opens at 10:00 closes at 10:15. The 10:00 hour is still open.
+        early = pd.to_datetime(["2025-01-01 10:00"], utc=True)
+        early_idx = int(closed_htf_end_indices(htf, early, "15m", "1h")[0])
+        assert early_idx == 1  # 09:00 bar
+
+        # The old open-time join would have selected the 10:00 hour (future close).
+        leaky = int(pd.DatetimeIndex(htf).searchsorted(early, side="right")[0] - 1)
+        assert leaky == 2
+        assert early_idx != leaky
+
+        # 15m bar that opens at 10:45 closes at 11:00, when the 10:00 hour is done.
+        late = pd.to_datetime(["2025-01-01 10:45"], utc=True)
+        assert int(closed_htf_end_indices(htf, late, "15m", "1h")[0]) == 2
+
+    def test_htf_cache_requires_latest_closed_bar(self):
+        # Closed bars only, last open 13:00. Still valid at 14:30 (14:00 hour not closed yet).
+        opens = pd.date_range("2025-01-01 08:00", periods=6, freq="1h", tz="UTC")
+        df = pd.DataFrame({"timestamp": opens, "close": range(6)})
+        assert htf_frame_is_current(df, "1h", now=pd.Timestamp("2025-01-01 14:30", tz="UTC")) is True
+        # At 15:05 the 14:00 hour has closed and this frame does not include it.
+        assert htf_frame_is_current(df, "1h", now=pd.Timestamp("2025-01-01 15:05", tz="UTC")) is False
+
+
+class TestWatchlistGate:
+    def test_win_rate_without_profit_factor_does_not_qualify(self):
+        assert backtest_result_qualifies(
+            {"win_rate": 50.0, "total_trades": 100, "profit_factor": 0.86}
+        ) is False
+        assert backtest_result_qualifies(
+            {"win_rate": 50.0, "total_trades": 6, "profit_factor": 1.4}
+        ) is False
+        assert backtest_result_qualifies(
+            {"win_rate": 42.0, "total_trades": 80, "profit_factor": 1.16}
+        ) is True
+
+    def test_symbols_from_state_drop_losers(self):
+        data = {
+            "pairs": ["DOGE/USDT:USDT", "AVAX/USDT:USDT", "TRX/USDT:USDT"],
+            "results": {
+                "DOGE/USDT:USDT": {"win_rate": 50.0, "total_trades": 100, "profit_factor": 1.42},
+                "AVAX/USDT:USDT": {"win_rate": 40.51, "total_trades": 79, "profit_factor": 0.86},
+                "TRX/USDT:USDT": {"win_rate": 50.0, "total_trades": 6, "profit_factor": 0.92},
+            },
+        }
+        assert symbols_from_backtest_state(data) == ["DOGE/USDT:USDT"]
 
 
 class TestAdapterParity:

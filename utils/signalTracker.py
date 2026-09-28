@@ -6,10 +6,10 @@ import json
 import os
 import threading
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import config
-from utils.signalLogic import first_touch_walk
+from utils.signalLogic import first_touch_walk, timeframe_to_seconds
 from utils.utils import log_event
 
 _daily_signals: list[dict] = []
@@ -23,8 +23,21 @@ _RESOLVE_TIMEFRAME = "5m"
 _RESOLVE_OHLCV_LIMIT = 500
 
 
-def record_signal(symbol, direction, strategy_type, entry_price, tp_price, sl_price, timeframe=None):
-    """Call this every time a signal is generated."""
+def record_signal(
+    symbol,
+    direction,
+    strategy_type,
+    entry_price,
+    tp_price,
+    sl_price,
+    timeframe=None,
+    bar_open=None,
+):
+    """Call this every time a signal is generated.
+
+    bar_open is the signal candle's open time. Outcome walks start at that
+    candle's close so the first minutes after entry are not skipped.
+    """
     sig = {
         "id": uuid.uuid4().hex[:12],
         "symbol": symbol,
@@ -35,6 +48,7 @@ def record_signal(symbol, direction, strategy_type, entry_price, tp_price, sl_pr
         "sl": sl_price,
         "timeframe": timeframe or getattr(config, "TIMEFRAME", "15m"),
         "timestamp": datetime.now(timezone.utc).isoformat(),
+        "bar_open": bar_open,
     }
     _daily_signals.append(sig)
     log_event(f"Signal recorded: {direction} {symbol} @ {entry_price}")
@@ -148,7 +162,16 @@ def _resolve_from_ohlcv(signal, exchange, entry, tp, sl, is_long):
     ts = _parse_signal_ts(signal)
     if ts is None:
         return None
-    since_ms = int(ts.timestamp() * 1000)
+    tf = (signal.get("timeframe") or getattr(config, "TIMEFRAME", "15m") or "15m")
+    bar_open = _parse_signal_ts({"timestamp": signal.get("bar_open")}) if signal.get("bar_open") else None
+    # Start at the signal bar's close. Using alert time skips the 5m candle that
+    # contains the move right after the close, which the backtest still scores.
+    if bar_open is not None:
+        since_ms = int(bar_open.timestamp() * 1000) + timeframe_to_seconds(tf) * 1000
+        anchor = bar_open + timedelta(seconds=timeframe_to_seconds(tf))
+    else:
+        since_ms = int(ts.timestamp() * 1000)
+        anchor = ts
     try:
         ohlcv = exchange.fetch_ohlcv(
             signal["symbol"],
@@ -168,7 +191,7 @@ def _resolve_from_ohlcv(signal, exchange, entry, tp, sl, is_long):
         result, exit_px = touch
         return result, _pnl_pct(entry, exit_px, is_long)
 
-    age_sec = (datetime.now(timezone.utc) - ts).total_seconds()
+    age_sec = (datetime.now(timezone.utc) - anchor).total_seconds()
     mtm = _pnl_pct(entry, last_close, is_long)
     if age_sec >= _lookahead_seconds():
         return "expired", mtm

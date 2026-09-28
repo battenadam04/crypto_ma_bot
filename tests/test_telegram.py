@@ -192,7 +192,9 @@ class TestPairsCommand:
         state_file = tmp_path / 'last_backtest.json'
         state_file.write_text(json.dumps({
             'pairs': ['BTC/USDT'],
-            'results': {'BTC/USDT': {'win_rate': 65.0, 'total_trades': 42}}
+            'results': {
+                'BTC/USDT': {'win_rate': 65.0, 'total_trades': 42, 'profit_factor': 1.4},
+            }
         }))
         monkeypatch.setattr(
             'utils.telegramUtils.BACKTEST_STATE_FILE',

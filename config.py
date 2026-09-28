@@ -209,7 +209,10 @@ RANGE_TP_TARGET = "mid"    # "opposite" = other range edge | "mid" = range midpo
 # Continuations: 0.3% tag (pre-combo_v1 volume). 0.5% was too sparse for the live feed.
 CONTINUATION_PULLBACK_PCT = 0.003
 # Counter-HTF scalp lane (tighter ATR TP via strategy_settings["scalp"]).
-ENABLE_COUNTER_HTF_SCALP = True
+# Off: on the Sep 28 42-day screen this lane was most of the alerts and lost
+# money on every pair checked, while with-HTF trend trades were net positive.
+# The old win-rate gate hid that because it mixed the two lanes together.
+ENABLE_COUNTER_HTF_SCALP = False
 # Core-3 location: require this clearance from opposing structural S/R (fraction of price).
 # Ablation: 1.5% + ADX 21 cleared ≥8 pairs ≥40% WR by cutting late-chase entries.
 LOCATION_CLEAR_PCT = 0.015
@@ -242,7 +245,11 @@ BACKTEST_WIN_RATE_THRESHOLD = 40.0
 MIN_SETUP_RR = 0.0  # disabled — do not reject MA entries on indicative RR
 BACKTEST_ENFORCE_RR = False
 BACKTEST_APPLY_FEES = True
-BACKTEST_MIN_TRADES = 3
+# 3 trades let a 50% coin-flip (e.g. 3/6) onto the live list. Require a real sample.
+BACKTEST_MIN_TRADES = 20
+# Win rate >= 40% is not an edge when average win ≈ average loss.
+# Pairs with profit factor under this stay off the live watchlist.
+BACKTEST_MIN_PROFIT_FACTOR = 1.05
 BACKTEST_AUTO_TOP_PAIRS = True
 # After excluding mega-caps / non-crypto junk, screen a wide liquid universe by volume.
 # Liquidity is only the discovery floor — live pairs still require WR ≥ threshold.
