@@ -20,10 +20,13 @@ from utils.telegramUtils import poll_telegram, send_telegram
 from utils.signalLogic import (
     closed_bars_only,
     evaluate_signal_at_bar,
+    htf_frame_is_current,
     prepare_htf_frame,
     prepare_ltf_frame,
     rank_signal_key,
     signal_config_matches,
+    symbols_from_backtest_state,
+    timeframe_to_seconds,
 )
 from utils.utils import log_event
 from utils.exchangeUtils import get_exchange, build_indicative_levels
@@ -66,14 +69,16 @@ DEFAULT_PAIRS = _default_live_pairs()
 
 exchange = get_exchange()
 
-# Higher-timeframe cache: keep only last 60 rows per symbol (enough for MA50); cap total entries
-HTF_CACHE_TTL_SEC = 900
+# Higher-timeframe cache: keep only last 60 rows per symbol (enough for MA50); cap total entries.
+# Refresh when a new HTF candle has closed — a TTL was serving the previous hour after it closed.
 HTF_CACHE_MAX_ROWS = 60
 HTF_CACHE_MAX_SYMBOLS = 32
 higher_timeframe_cache = {}
 _eod_job_scheduled = False
 _auto_backtest_scheduled = False
 _auto_backtest_lock = threading.Lock()
+_logged_watchlist_drop = False
+_logged_config_mismatch = False
 
 
 def _fmt_symbols_short(symbols, limit=8):
@@ -161,43 +166,22 @@ def _schedule_auto_backtest_job():
     log_event(f"🗓️ Auto-backtest scheduled: every {day} at {at} {tz}")
 
 
-def _minutes_per_bar(timeframe: str) -> int:
-    tf = (timeframe or "").strip().lower()
-    return {
-        "1m": 1,
-        "3m": 3,
-        "5m": 5,
-        "15m": 15,
-        "30m": 30,
-        "1h": 60,
-        "2h": 120,
-        "4h": 240,
-        "1d": 1440,
-    }.get(tf, 15)
+def fetch_data(symbol, timeframe=None, limit=500):
+    """Fetch OHLCV ending at now; drop the forming candle so live matches closed-bar backtest.
 
-
-def _hours_back_for_timeframe(timeframe: str, min_bars: int = 90) -> int:
+    `since` is sized to the requested page. A short lookback (about 100 bars) left
+    Wilder ADX under-warmed versus the 42-day screen, so the live ADX>=21 gate
+    did not match the backtest on the same close.
     """
-    Bound OHLCV history so we always have enough bars for MA50 (+buffer).
-
-    Previously 1h used a flat 48h window (~48 candles), which failed the HTF
-    len>=51 gate and skipped every pair after HTF moved to 1h.
-    """
-    minutes = _minutes_per_bar(timeframe)
-    hours_needed = int((min_bars * minutes + 59) // 60)
-    return max(hours_needed, 6)
-
-
-def fetch_data(symbol, timeframe=None, limit=350):
-    """Fetch OHLCV; drop forming candle so live matches closed-bar backtest."""
     try:
         timeframe = timeframe or config.TIMEFRAME
-        # Signal TF needs SR lookback; HTF needs MA50 — size window from the stricter need.
-        min_bars = max(90, int(SR_LOOKBACK_BARS) + 20)
-        hours_back = _hours_back_for_timeframe(timeframe, min_bars=min_bars)
-        since_dt = datetime.now(timezone.utc) - timedelta(hours=hours_back)
+        # One page that reaches "now". If `since` is older than `limit` bars, the
+        # exchange returns the oldest page and the latest candles are missing.
+        page = min(500, max(int(limit), max(80, int(SR_LOOKBACK_BARS) + 20)))
+        span = timeframe_to_seconds(timeframe) * (page + 3)
+        since_dt = datetime.now(timezone.utc) - timedelta(seconds=span)
         since_ms = int(since_dt.timestamp() * 1000)
-        ohlcv = exchange.fetch_ohlcv(symbol, timeframe=timeframe, since=since_ms, limit=min(limit, 500))
+        ohlcv = exchange.fetch_ohlcv(symbol, timeframe=timeframe, since=since_ms, limit=page)
         df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
         return closed_bars_only(df, timeframe)
@@ -321,6 +305,17 @@ def handle_signal(symbol, direction, df, strategy_type="trend", signal_source="S
                 log_event(f"Admin live-status notify failed: {e}")
 
         if status == 'success':
+            bar_open = None
+            try:
+                if df is not None and "timestamp" in df.columns and len(df):
+                    ts = pd.Timestamp(df["timestamp"].iloc[-1])
+                    if ts.tzinfo is None:
+                        ts = ts.tz_localize("UTC")
+                    else:
+                        ts = ts.tz_convert("UTC")
+                    bar_open = ts.isoformat()
+            except Exception:
+                bar_open = None
             record_signal(
                 symbol,
                 direction,
@@ -329,6 +324,7 @@ def handle_signal(symbol, direction, df, strategy_type="trend", signal_source="S
                 tp_price or tp,
                 sl_price or sl,
                 timeframe=timeframe,
+                bar_open=bar_open,
             )
     except Exception as e:
         log_event(f"❌ Error in handle_signal for {symbol}: {e}")
@@ -348,7 +344,9 @@ def process_pair(symbol):
     lower_df = prepare_ltf_frame(lower_df)
 
     now = time.time()
-    if symbol not in higher_timeframe_cache or now - higher_timeframe_cache[symbol]['timestamp'] > HTF_CACHE_TTL_SEC:
+    cached = higher_timeframe_cache.get(symbol)
+    cached_df = cached.get("data") if cached else None
+    if not htf_frame_is_current(cached_df, config.HTF_TIMEFRAME):
         # Need >=51 1h bars for MA50; request a comfortable buffer.
         higher_df = fetch_data(symbol, config.HTF_TIMEFRAME, limit=200)
         if higher_df is None or len(higher_df) < 51:
@@ -419,34 +417,45 @@ def get_backtest_win_rates():
 
 def get_trading_pairs():
     """
-    Scan universe: last_backtest.json pairs (win-rate filtered), then CRYPTO_PAIRS, then defaults.
+    Scan universe: last_backtest.json pairs that clear WR, sample size, and profit factor.
+    Defaults are only used when there is no backtest file — a file full of losers must
+    not fall through to the unfiltered built-in list.
     """
+    global _logged_watchlist_drop, _logged_config_mismatch
     state_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), BACKTEST_STATE_FILE)
     try:
         if os.path.isfile(state_path):
             with open(state_path, 'r') as f:
                 data = json.load(f)
             snap = data.get("signal_config")
-            if not signal_config_matches(snap):
+            if not signal_config_matches(snap) and not _logged_config_mismatch:
+                _logged_config_mismatch = True
                 log_event(
                     "⚠️ last_backtest.json signal knobs differ from live (or missing fingerprint). "
-                    "Re-run `python strategies/simulate_trades.py` so the watchlist matches live."
+                    "Re-run `python strategies/simulate_trades.py` so the watchlist matches live. "
+                    "Until then, pairs still have to clear win rate, sample size, and profit factor."
                 )
-            raw = data.get('pairs') or []
-            threshold = float(data.get('win_rate_threshold', 40))
-            results = data.get('results') or {}
-            qualified = []
-            for p in raw:
-                if not isinstance(p, str) or not p.strip():
-                    continue
-                sym = p.strip()
-                r = results.get(sym)
-                if isinstance(r, dict) and r.get('win_rate') is not None:
-                    if float(r['win_rate']) < threshold:
-                        continue
-                qualified.append(sym)
-            if qualified:
-                return qualified
+            qualified = symbols_from_backtest_state(data)
+            raw = [
+                p.strip()
+                for p in (data.get("pairs") or [])
+                if isinstance(p, str) and p.strip()
+            ]
+            dropped = [p for p in raw if p not in qualified]
+            if dropped and not _logged_watchlist_drop:
+                _logged_watchlist_drop = True
+                log_event(
+                    "📉 Dropped backtest pair(s) that fail live gates "
+                    f"(WR ≥ {config.BACKTEST_WIN_RATE_THRESHOLD}%, "
+                    f"trades ≥ {config.BACKTEST_MIN_TRADES}, "
+                    f"profit factor ≥ {config.BACKTEST_MIN_PROFIT_FACTOR}): {dropped}"
+                )
+            if not qualified:
+                log_event(
+                    "⚠️ No pairs clear win rate, sample size, and profit factor. "
+                    "Not scanning the default watchlist."
+                )
+            return qualified
     except Exception:
         pass
 

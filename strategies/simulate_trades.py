@@ -29,7 +29,7 @@ from config import (
     BACKTEST_AUTO_TOP_PAIRS, BACKTEST_PAIRS,
     BACKTEST_OHLCV_LIMIT, BACKTEST_FETCH_SLEEP_SEC, BACKTEST_VERBOSE,
     CRYPTO_PAIRS, EXCHANGE, SR_LOOKBACK_BARS, ENABLE_LIMIT_IDEA_FALLBACK,
-    TIMEFRAME, HTF_TIMEFRAME, BACKTEST_MIN_TRADES,
+    TIMEFRAME, HTF_TIMEFRAME,
     MAX_SIGNALS_PER_CYCLE,
 )
 from utils.utils import (
@@ -37,7 +37,9 @@ from utils.utils import (
     log_event,
 )
 from utils.signalLogic import (
+    backtest_result_qualifies,
     closed_bars_only,
+    closed_htf_end_indices,
     evaluate_signal_at_bar,
     htf_slice_for_bar,
     levels_for_signal,
@@ -414,8 +416,10 @@ def simulate_combined_strategy(pair, df_5m, df_1h):
     if 'ATR' not in df_5m.columns:
         df_5m = add_atr_column(df_5m, period=7)
 
-    # O(n) align LTF bars to HTF window ends — avoids filtering the whole HTF df every bar.
-    htf_end_idx = df_1h['timestamp'].searchsorted(df_5m['timestamp'], side='right') - 1
+    # Last HTF bar that has closed by each LTF bar's close (no in-progress hour).
+    htf_end_idx = closed_htf_end_indices(
+        df_1h['timestamp'], df_5m['timestamp'], TIMEFRAME, HTF_TIMEFRAME
+    )
 
     # Signal helpers only need recent rows + precomputed indicators on full df (fixed window).
     _slice_lookback = max(120, SR_LOOKBACK_BARS + 20)
@@ -532,7 +536,7 @@ def simulate_combined_strategy(pair, df_5m, df_1h):
 
 
 def run_backtest(pairs_override=None):
-    """Run backtest on pairs. Only pairs with win_rate >= threshold (default 50%) are kept. No fallback."""
+    """Run backtest on pairs. Keep pairs that clear win rate, sample size, and profit factor."""
     prev_flag = config.IS_BACKTESTING
     config.IS_BACKTESTING = True
     try:
@@ -540,8 +544,6 @@ def run_backtest(pairs_override=None):
         win_rate_threshold = float(BACKTEST_WIN_RATE_THRESHOLD)
         enforce_rr = BACKTEST_ENFORCE_RR
         min_rr_ratio = float(BACKTEST_MIN_RR_RATIO) if enforce_rr else 0.0
-        min_trades = max(2, int(BACKTEST_MIN_TRADES))  # require enough resolved trades so flukes don't qualify
-
         good_pairs = []
         results_by_symbol = {}
 
@@ -557,9 +559,8 @@ def run_backtest(pairs_override=None):
                     result_save = {k: v for k, v in result.items() if k != 'equity_curve'}
                     results_by_symbol[symbol] = result_save
                     _bt_log(f"Result: {result_save}", verbose=True)
-                    total_trades = result.get('total_trades', 0)
                     rr_ratio = float(result.get('rr_ratio', 0.0))
-                    if total_trades >= min_trades and result['win_rate'] >= win_rate_threshold and rr_ratio >= min_rr_ratio:
+                    if backtest_result_qualifies(result_save) and rr_ratio >= min_rr_ratio:
                         good_pairs.append(symbol)
             except Exception as e:
                 _bt_log(f"❌ Error backtesting {symbol}: {e}", verbose=False)
@@ -579,7 +580,12 @@ def run_backtest(pairs_override=None):
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, "w") as f:
                 json.dump(state, f, indent=2)
-            _bt_log(f"Backtest complete: {len(good_pairs)} good pairs (threshold {win_rate_threshold}%, min trades {min_trades}, min RR {min_rr_ratio}).", verbose=False)
+            _bt_log(
+                f"Backtest complete: {len(good_pairs)} good pairs "
+                f"(WR>={win_rate_threshold}%, min trades {config.BACKTEST_MIN_TRADES}, "
+                f"min PF {config.BACKTEST_MIN_PROFIT_FACTOR}, min RR {min_rr_ratio}).",
+                verbose=False,
+            )
             _bt_log(f"Wrote backtest state to {path}", verbose=False)
         except Exception as e:
             _bt_log(f"Failed to write last_backtest.json: {e}", verbose=False)
@@ -626,7 +632,9 @@ def run_portfolio_backtest(pairs_override=None, max_trades_per_bar=None):
         return 0.0
 
     htf_end_by_sym = {
-        sym: df_htf['timestamp'].searchsorted(df_ltf['timestamp'], side='right') - 1
+        sym: closed_htf_end_indices(
+            df_htf['timestamp'], df_ltf['timestamp'], TIMEFRAME, HTF_TIMEFRAME
+        )
         for sym, (df_ltf, df_htf) in data_by_symbol.items()
     }
     _slice_lookback = max(120, SR_LOOKBACK_BARS + 20)

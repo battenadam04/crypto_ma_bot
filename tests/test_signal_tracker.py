@@ -91,6 +91,29 @@ class TestResolveSignal:
         assert result == 'loss'
         assert pnl < 0
 
+    def test_bar_open_starts_walk_at_candle_close(self):
+        from datetime import datetime, timezone
+        exchange = MagicMock()
+        exchange.fetch_ohlcv.return_value = [
+            [0, 100.0, 106.0, 99.0, 104.0, 1],
+        ]
+        signal = {
+            "symbol": "BTC/USDT",
+            "direction": "long",
+            "entry": 100.0,
+            "tp": 105.0,
+            "sl": 95.0,
+            "timeframe": "15m",
+            "timestamp": "2026-09-28T10:19:00+00:00",
+            "bar_open": "2026-09-28T10:00:00+00:00",
+        }
+        result, pnl = _resolve_signal(signal, exchange)
+        assert result == "win"
+        assert pnl > 0
+        since = exchange.fetch_ohlcv.call_args.kwargs["since"]
+        expected = int(datetime(2026, 9, 28, 10, 15, tzinfo=timezone.utc).timestamp() * 1000)
+        assert since == expected
+
     def test_expired_when_lookahead_passed_without_touch(self):
         from datetime import datetime, timezone, timedelta
         exchange = MagicMock()

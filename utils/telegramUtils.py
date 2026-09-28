@@ -472,17 +472,24 @@ def _backtest_confidence_lines(data) -> list:
     if not data:
         return ["Backtest: <i>no results yet — waiting for weekly auto-backtest or run simulate_trades.py</i>"]
     run_at = _fmt_backtest_run_at(data.get("run_at"))
+    from utils.signalLogic import symbols_from_backtest_state
+
     portfolio_wr = data.get("portfolio_win_rate")
-    pairs = data.get("pairs") or []
     results = data.get("results") or {}
-    threshold = data.get("win_rate_threshold", "?")
+    active = symbols_from_backtest_state(data)
     lines = []
     if portfolio_wr is not None:
-        lines.append(f"Portfolio win rate: <b>{portfolio_wr}%</b>")
+        pf = data.get("portfolio_profit_factor")
+        if pf is not None:
+            lines.append(f"Portfolio win rate: <b>{portfolio_wr}%</b> (profit factor {pf})")
+        else:
+            lines.append(f"Portfolio win rate: <b>{portfolio_wr}%</b>")
     else:
         lines.append("Portfolio win rate: <i>n/a</i>")
     lines.append(f"Last backtest: <code>{run_at}</code>")
-    lines.append(f"Pairs qualifying (≥{threshold}%): <b>{len(pairs)}</b>/{len(results)}")
+    lines.append(
+        f"Pairs qualifying (WR, sample, profit factor): <b>{len(active)}</b>/{len(results)}"
+    )
     return lines
 
 
@@ -549,12 +556,19 @@ def _cmd_pairs():
     data = _load_backtest_state()
     if not data:
         return "📭 No backtest data available yet."
-    pairs = data.get("pairs", [])
+    from utils.signalLogic import symbols_from_backtest_state
+
+    pairs = symbols_from_backtest_state(data)
     results = data.get("results", {})
     if not pairs:
-        return "📭 No pairs selected by last backtest."
+        return (
+            "📭 No pairs clear the live gate "
+            f"(WR ≥ {config.BACKTEST_WIN_RATE_THRESHOLD}%, "
+            f"≥ {config.BACKTEST_MIN_TRADES} trades, "
+            f"profit factor ≥ {config.BACKTEST_MIN_PROFIT_FACTOR})."
+        )
     lines = [
-        "<b>📋 Active Pairs</b> (from last backtest)",
+        "<b>📋 Active Pairs</b> (win rate, sample size, and profit factor)",
         f"Last run: <code>{_fmt_backtest_run_at(data.get('run_at'))}</code>",
     ]
     portfolio_wr = data.get("portfolio_win_rate")
@@ -562,9 +576,11 @@ def _cmd_pairs():
         lines.append(f"Portfolio win rate: <b>{portfolio_wr}%</b>")
     lines.append("")
     for sym in pairs:
-        wr = results.get(sym, {}).get("win_rate", "?")
-        trades = results.get(sym, {}).get("total_trades", "?")
-        lines.append(f"  • {sym}: <b>{wr}%</b> win rate ({trades} trades)")
+        row = results.get(sym, {}) if isinstance(results.get(sym), dict) else {}
+        wr = row.get("win_rate", "?")
+        trades = row.get("total_trades", "?")
+        pf = row.get("profit_factor", "?")
+        lines.append(f"  • {sym}: <b>{wr}%</b> win rate, PF {pf} ({trades} trades)")
     return "\n".join(lines)
 
 
@@ -575,13 +591,17 @@ def _cmd_backtest():
             "📭 No backtest results available.\n"
             "Run <code>python strategies/simulate_trades.py</code> to generate them."
         )
-    pairs = data.get("pairs", [])
+    from utils.signalLogic import backtest_result_qualifies
+
     results = data.get("results", {})
-    threshold = data.get("win_rate_threshold", "?")
 
     lines = ["<b>📊 Last Backtest</b>"]
     lines.extend(_backtest_confidence_lines(data))
-    lines.append(f"Qualify threshold: {threshold}%")
+    lines.append(
+        f"Qualify: WR ≥ {config.BACKTEST_WIN_RATE_THRESHOLD}%, "
+        f"≥ {config.BACKTEST_MIN_TRADES} trades, "
+        f"PF ≥ {config.BACKTEST_MIN_PROFIT_FACTOR}"
+    )
     lines.append("")
     lines.append("<b>Per-pair results</b>")
 
@@ -596,9 +616,10 @@ def _cmd_backtest():
         r = results.get(sym)
         if not isinstance(r, dict):
             continue
-        mark = "✅" if sym in pairs else "❌"
+        mark = "✅" if backtest_result_qualifies(r) else "❌"
         lines.append(
             f"  {mark} {sym}: <b>{r.get('win_rate', '?')}%</b> "
+            f"PF {r.get('profit_factor', '?')} "
             f"({r.get('total_trades', '?')} trades)"
         )
     return "\n".join(lines)

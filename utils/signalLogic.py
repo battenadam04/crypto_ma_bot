@@ -144,6 +144,97 @@ def htf_slice_for_bar(htf_df: pd.DataFrame, end_idx: int) -> Optional[pd.DataFra
     return htf_df.iloc[end_idx - 5 : end_idx + 1]
 
 
+def closed_htf_end_indices(
+    htf_timestamps,
+    ltf_timestamps,
+    ltf_timeframe: str,
+    htf_timeframe: str,
+):
+    """
+    For each LTF bar, index of the last HTF bar that is fully closed by that LTF bar's close.
+
+    Timestamps are candle open times. Aligning with "latest HTF open <= LTF open" pulls in
+    the hour that is still forming. That hour's close is in the future, so HTF ma20/ma50
+    in the backtest see a move the live bot cannot see (live drops the forming HTF candle).
+    """
+    ltf_sec = timeframe_to_seconds(ltf_timeframe)
+    htf_sec = timeframe_to_seconds(htf_timeframe)
+    ltf = pd.to_datetime(pd.Series(ltf_timestamps), utc=True)
+    htf = pd.DatetimeIndex(pd.to_datetime(pd.Series(htf_timestamps), utc=True))
+    # HTF bar is known when htf_open + htf_period <= ltf_open + ltf_period.
+    cutoff = ltf + pd.to_timedelta(ltf_sec - htf_sec, unit="s")
+    return htf.searchsorted(cutoff, side="right") - 1
+
+
+def htf_frame_is_current(df: Optional[pd.DataFrame], timeframe: str, *, now=None) -> bool:
+    """True when df's last bar is the latest HTF candle that has fully closed."""
+    if df is None or len(df) < 6 or "timestamp" not in df.columns:
+        return False
+    now_ts = pd.Timestamp.now(tz="UTC") if now is None else pd.Timestamp(now)
+    if now_ts.tzinfo is None:
+        now_ts = now_ts.tz_localize("UTC")
+    else:
+        now_ts = now_ts.tz_convert("UTC")
+    last_open = pd.Timestamp(df["timestamp"].iloc[-1])
+    if last_open.tzinfo is None:
+        last_open = last_open.tz_localize("UTC")
+    else:
+        last_open = last_open.tz_convert("UTC")
+    period = timeframe_to_seconds(timeframe)
+    now_epoch = int(now_ts.timestamp())
+    latest_closed_open = now_epoch - (now_epoch % period) - period
+    latest = pd.Timestamp(latest_closed_open, unit="s", tz="UTC")
+    return last_open >= latest
+
+
+def backtest_result_qualifies(
+    result: Any,
+    *,
+    win_rate_threshold: Optional[float] = None,
+    min_trades: Optional[int] = None,
+    min_profit_factor: Optional[float] = None,
+) -> bool:
+    """
+    Live watchlist gate. Win rate alone promoted pairs that lose money:
+    a 40% hit rate with profit factor <= 1 is a losing book.
+    """
+    if not isinstance(result, dict):
+        return False
+    try:
+        trades = int(result.get("total_trades") or 0)
+        wr = float(result.get("win_rate"))
+        pf = float(result.get("profit_factor"))
+    except (TypeError, ValueError):
+        return False
+    wr_min = float(
+        config.BACKTEST_WIN_RATE_THRESHOLD
+        if win_rate_threshold is None
+        else win_rate_threshold
+    )
+    n_min = int(config.BACKTEST_MIN_TRADES if min_trades is None else min_trades)
+    pf_min = float(
+        config.BACKTEST_MIN_PROFIT_FACTOR
+        if min_profit_factor is None
+        else min_profit_factor
+    )
+    return trades >= n_min and wr >= wr_min and pf >= pf_min
+
+
+def symbols_from_backtest_state(data: Optional[dict]) -> list:
+    """Pairs from last_backtest.json that still clear the live gate."""
+    if not isinstance(data, dict):
+        return []
+    results = data.get("results") or {}
+    qualified = []
+    for p in data.get("pairs") or []:
+        if not isinstance(p, str) or not p.strip():
+            continue
+        sym = p.strip()
+        if backtest_result_qualifies(results.get(sym)):
+            qualified.append(sym)
+    return qualified
+
+
 def signal_cooldown_bars(timeframe: Optional[str] = None) -> int:
     """Bars of silence after a signal — derived from live SIGNAL_COOLDOWN_SEC."""
     tf = timeframe or getattr(config, "TIMEFRAME", "15m")
@@ -209,6 +300,10 @@ def signal_config_snapshot() -> dict:
         "RANGE_MAX_PCT": float(getattr(config, "RANGE_MAX_PCT", 0) or 0),
         "RANGE_TP_TARGET": str(getattr(config, "RANGE_TP_TARGET", "")),
         "BACKTEST_LOOKAHEAD": int(getattr(config, "BACKTEST_LOOKAHEAD", 0) or 0),
+        "BACKTEST_MIN_TRADES": int(getattr(config, "BACKTEST_MIN_TRADES", 0) or 0),
+        "BACKTEST_MIN_PROFIT_FACTOR": float(
+            getattr(config, "BACKTEST_MIN_PROFIT_FACTOR", 0) or 0
+        ),
     }
 
 
