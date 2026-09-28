@@ -139,6 +139,14 @@ class TestWatchlistGate:
         assert backtest_result_qualifies(
             {"win_rate": 42.0, "total_trades": 80, "profit_factor": 1.16}
         ) is True
+        # Sub-40% win rate still qualifies when the payoff is real.
+        assert backtest_result_qualifies(
+            {"win_rate": 38.89, "total_trades": 72, "profit_factor": 1.62}
+        ) is True
+        # Thin profit factor does not, even with a large sample.
+        assert backtest_result_qualifies(
+            {"win_rate": 38.14, "total_trades": 97, "profit_factor": 1.06}
+        ) is False
 
     def test_symbols_from_state_drop_losers(self):
         data = {

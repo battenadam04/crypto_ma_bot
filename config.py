@@ -241,15 +241,18 @@ BACKTEST_DAYS = 42
 BACKTEST_USE_LIMIT_IDEAS = False
 BACKTEST_LIMIT_FILL_BARS = 3
 BACKTEST_MIN_RR_RATIO = 1.5
-BACKTEST_WIN_RATE_THRESHOLD = 40.0
+# Realized reward:risk on the 2026-09-28 trend-only screen is about 2:1, so
+# break-even win rate is ~33%. A 40% floor dropped ENA (PF 1.62, 72 trades)
+# and ADA (PF 1.40). Profit factor is the gate that matches that payoff.
+BACKTEST_WIN_RATE_THRESHOLD = 35.0
 MIN_SETUP_RR = 0.0  # disabled — do not reject MA entries on indicative RR
 BACKTEST_ENFORCE_RR = False
 BACKTEST_APPLY_FEES = True
 # 3 trades let a 50% coin-flip (e.g. 3/6) onto the live list. Require a real sample.
-BACKTEST_MIN_TRADES = 20
-# Win rate >= 40% is not an edge when average win ≈ average loss.
-# Pairs with profit factor under this stay off the live watchlist.
-BACKTEST_MIN_PROFIT_FACTOR = 1.05
+BACKTEST_MIN_TRADES = 30
+# 1.05 let marginal books through. 1.15 keeps a cushion over fees and the
+# in-sample screen. Pairs under this stay off the live watchlist.
+BACKTEST_MIN_PROFIT_FACTOR = 1.15
 BACKTEST_AUTO_TOP_PAIRS = True
 # After excluding mega-caps / non-crypto junk, screen a wide liquid universe by volume.
 # Liquidity is only the discovery floor — live pairs still require WR ≥ threshold.
