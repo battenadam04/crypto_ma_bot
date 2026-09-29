@@ -431,6 +431,58 @@ def _limit_idea_decision(
     return None
 
 
+def trigger_block_reason(
+    slice_df: pd.DataFrame,
+    htf_slice: pd.DataFrame,
+) -> Optional[str]:
+    """
+    Why a 15m MA trigger did not become an alert.
+
+    None when there is no trigger, or when evaluate_signal_at_bar would emit a
+    signal (including a counter-trend scalp when that lane is on).
+    """
+    if slice_df is None or len(slice_df) < 51:
+        return None
+    flags = htf_trend_flags(htf_slice)
+    if flags is None:
+        return None
+    long_trig = check_long_signal(slice_df)
+    short_trig = check_short_signal(slice_df)
+    if not long_trig and not short_trig:
+        return None
+    entry_price = float(slice_df["close"].iloc[-1])
+    if evaluate_signal_at_bar(slice_df, htf_slice, entry_price) is not None:
+        return None
+
+    direction = "long" if long_trig else "short"
+    if long_trig and short_trig:
+        if flags.trend_down and not flags.trend_up:
+            direction = "short"
+        elif flags.trend_up and not flags.trend_down:
+            direction = "long"
+
+    with_htf = (direction == "long" and flags.trend_up) or (
+        direction == "short" and flags.trend_down
+    )
+    if not with_htf:
+        return "counter-trend"
+
+    reasons = []
+    if not _adx_ok(slice_df):
+        min_adx = float(getattr(config, "MIN_ADX_TREND", 0) or 0)
+        adx = slice_df["adx"].iloc[-1]
+        adx_txt = f"{float(adx):.1f}" if pd.notna(adx) else "missing"
+        reasons.append(f"ADX under {min_adx:g} ({adx_txt})")
+    if not _location_ok(slice_df, direction):
+        if direction == "long":
+            reasons.append("too close to resistance")
+        else:
+            reasons.append("too close to support")
+    if not reasons:
+        return None
+    return " and ".join(reasons)
+
+
 def evaluate_signal_at_bar(
     slice_df: pd.DataFrame,
     htf_slice: pd.DataFrame,
