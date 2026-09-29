@@ -5,7 +5,6 @@ import threading
 import pandas as pd
 import pandas_ta as ta  # noqa: F401 — registers `DataFrame.ta` for RSI/ADX in process_pair
 import time
-from datetime import datetime, timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor
 import schedule
 
@@ -26,7 +25,7 @@ from utils.signalLogic import (
     rank_signal_key,
     signal_config_matches,
     symbols_from_backtest_state,
-    timeframe_to_seconds,
+    trigger_block_reason,
 )
 from utils.utils import log_event
 from utils.exchangeUtils import get_exchange, build_indicative_levels
@@ -167,21 +166,17 @@ def _schedule_auto_backtest_job():
 
 
 def fetch_data(symbol, timeframe=None, limit=500):
-    """Fetch OHLCV ending at now; drop the forming candle so live matches closed-bar backtest.
+    """Fetch the newest OHLCV page; drop the forming candle so live matches closed bars.
 
-    `since` is sized to the requested page. A short lookback (about 100 bars) left
-    Wilder ADX under-warmed versus the 42-day screen, so the live ADX>=21 gate
-    did not match the backtest on the same close.
+    Do not pass `since`. Phemex returns the oldest `limit` candles from `since`, so a
+    lookback a few bars longer than the page (candle-boundary alignment) omitted the
+    latest candles — about 45 minutes on 15m and about 3 hours on 1h. Omitting `since`
+    returns the latest page. 500×15m and 200×1h are still enough to warm ADX and MA50.
     """
     try:
         timeframe = timeframe or config.TIMEFRAME
-        # One page that reaches "now". If `since` is older than `limit` bars, the
-        # exchange returns the oldest page and the latest candles are missing.
         page = min(500, max(int(limit), max(80, int(SR_LOOKBACK_BARS) + 20)))
-        span = timeframe_to_seconds(timeframe) * (page + 3)
-        since_dt = datetime.now(timezone.utc) - timedelta(seconds=span)
-        since_ms = int(since_dt.timestamp() * 1000)
-        ohlcv = exchange.fetch_ohlcv(symbol, timeframe=timeframe, since=since_ms, limit=page)
+        ohlcv = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=page)
         df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
         return closed_bars_only(df, timeframe)
@@ -386,7 +381,11 @@ def process_pair(symbol):
     decision = evaluate_signal_at_bar(lower_df, htf_slice, entry_price)
 
     if decision is None:
-        log_event(f"✅ No confirmed signal for {symbol} this cycle.")
+        reason = trigger_block_reason(lower_df, htf_slice)
+        if reason:
+            log_event(f"🚫 {symbol} trigger blocked: {reason}")
+        else:
+            log_event(f"✅ No confirmed signal for {symbol} this cycle.")
         return None
 
     if decision.signal_source == "LIM":

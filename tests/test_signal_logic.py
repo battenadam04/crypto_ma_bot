@@ -16,6 +16,7 @@ from utils.signalLogic import (
     htf_trend_flags,
     resolve_outcome_on_df,
     symbols_from_backtest_state,
+    trigger_block_reason,
 )
 from strategies.simulate_trades import _get_signal_at_bar, check_trade_outcome
 from utils.utils import add_atr_column
@@ -385,3 +386,76 @@ class TestOneOpenSignalPerPair:
         spaced = self._run(monkeypatch, one_open=True)
         assert len(spaced) < len(stacked)
         assert all(b - a > 10 for a, b in zip(spaced, spaced[1:]))
+
+
+def _ma_cross(df, direction):
+    if direction == "long":
+        df.loc[df.index[-2], "ma10"] = 100.0
+        df.loc[df.index[-2], "ma20"] = 101.0
+        df.loc[df.index[-1], "ma10"] = 102.0
+        df.loc[df.index[-1], "ma20"] = 101.0
+    else:
+        df.loc[df.index[-2], "ma10"] = 101.0
+        df.loc[df.index[-2], "ma20"] = 100.0
+        df.loc[df.index[-1], "ma10"] = 100.0
+        df.loc[df.index[-1], "ma20"] = 101.0
+
+
+class TestTriggerBlockReason:
+    def test_no_trigger_is_silent(self, monkeypatch):
+        import config
+        monkeypatch.setattr(config, "ENABLE_COUNTER_HTF_SCALP", False)
+        df = _base_df(n=80, trend="flat")
+        df["ma10"] = df["ma20"]
+        assert trigger_block_reason(df, _htf_from(df, "down")) is None
+
+    def test_counter_trend(self, monkeypatch):
+        import config
+        monkeypatch.setattr(config, "ENABLE_COUNTER_HTF_SCALP", False)
+        monkeypatch.setattr(config, "MIN_SETUP_RR", 0.0)
+        df = _base_df(n=80, trend="up")
+        _ma_cross(df, "long")
+        df.loc[df.index[-1], "adx"] = 30.0
+        assert trigger_block_reason(df, _htf_from(df, "down")) == "counter-trend"
+
+    def test_adx_under_minimum(self, monkeypatch):
+        import config
+        monkeypatch.setattr(config, "ENABLE_COUNTER_HTF_SCALP", False)
+        monkeypatch.setattr(config, "MIN_ADX_TREND", 21.0)
+        monkeypatch.setattr(config, "MIN_SETUP_RR", 0.0)
+        df = _base_df(n=80, trend="down")
+        _ma_cross(df, "short")
+        df.loc[df.index[-1], "adx"] = 18.4
+        close = float(df["close"].iloc[-1])
+        df.loc[df.index[-1], "support"] = close * 0.9
+        df.loc[df.index[-1], "resistance"] = close * 1.2
+        reason = trigger_block_reason(df, _htf_from(df, "down"))
+        assert reason == "ADX under 21 (18.4)"
+
+    def test_too_close_to_support(self, monkeypatch):
+        import config
+        monkeypatch.setattr(config, "ENABLE_COUNTER_HTF_SCALP", False)
+        monkeypatch.setattr(config, "MIN_ADX_TREND", 21.0)
+        monkeypatch.setattr(config, "MIN_SETUP_RR", 0.0)
+        df = _base_df(n=80, trend="down")
+        _ma_cross(df, "short")
+        df.loc[df.index[-1], "adx"] = 28.0
+        close = float(df["close"].iloc[-1])
+        df.loc[df.index[-1], "support"] = close / 1.005
+        reason = trigger_block_reason(df, _htf_from(df, "down"))
+        assert reason == "too close to support"
+
+    def test_passing_setup_has_no_block_reason(self, monkeypatch):
+        import config
+        monkeypatch.setattr(config, "ENABLE_COUNTER_HTF_SCALP", False)
+        monkeypatch.setattr(config, "MIN_ADX_TREND", 0.0)
+        monkeypatch.setattr(config, "MIN_SETUP_RR", 0.0)
+        df = _base_df(n=80, trend="up")
+        _ma_cross(df, "long")
+        df.loc[df.index[-1], "adx"] = 30.0
+        close = float(df["close"].iloc[-1])
+        df["resistance"] = close * 1.2
+        df["support"] = close * 0.8
+        htf = _htf_from(df, "up")
+        assert evaluate_signal_at_bar(df, htf, close) is not None
+        assert trigger_block_reason(df, htf) is None
