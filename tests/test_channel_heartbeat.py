@@ -62,6 +62,16 @@ class TestQuietHeartbeat:
         assert "Still scanning" in msg
         assert "good" in msg.lower() or "selective" in msg.lower()
 
+    def test_skips_heartbeat_when_candle_fetches_failed(self):
+        now = datetime(2026, 9, 14, 18, 0, tzinfo=timezone.utc)
+        hb.note_signal_sent(now - timedelta(hours=20))
+        hb.note_scan_cycle(evaluated=0, data_failures=6)
+        assert hb.scan_can_evaluate() is False
+        assert hb.should_send_heartbeat(now) is False
+        hb.note_scan_cycle(evaluated=6, data_failures=0)
+        assert hb.scan_can_evaluate() is True
+        assert hb.should_send_heartbeat(now) is True
+
 
 class TestQuietDayEod:
     def test_quiet_day_copy(self):

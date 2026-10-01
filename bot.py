@@ -28,7 +28,8 @@ from utils.signalLogic import (
     trigger_block_reason,
 )
 from utils.utils import log_event
-from utils.exchangeUtils import get_exchange, build_indicative_levels
+from utils.exchangeUtils import get_exchange, build_indicative_levels, ohlcv_page_limit
+from utils.channelHeartbeat import note_scan_cycle
 from utils.signalTracker import (
     has_open_signal,
     monitor_signal_outcomes,
@@ -77,6 +78,8 @@ _eod_job_scheduled = False
 _auto_backtest_scheduled = False
 _auto_backtest_lock = threading.Lock()
 _logged_watchlist_drop = False
+_cycle_evaluated = 0
+_cycle_data_failures = 0
 _logged_config_mismatch = False
 
 
@@ -171,11 +174,14 @@ def fetch_data(symbol, timeframe=None, limit=500):
     Do not pass `since`. Phemex returns the oldest `limit` candles from `since`, so a
     lookback a few bars longer than the page (candle-boundary alignment) omitted the
     latest candles — about 45 minutes on 15m and about 3 hours on 1h. Omitting `since`
-    returns the latest page. 500×15m and 200×1h are still enough to warm ADX and MA50.
+    returns the latest page. The page size is snapped to a limit Phemex accepts
+    (10, 50, 100, 500, 1000). 200 is not one of those, and that rejection left
+    every 1h fetch empty.
     """
     try:
         timeframe = timeframe or config.TIMEFRAME
         page = min(500, max(int(limit), max(80, int(SR_LOOKBACK_BARS) + 20)))
+        page = ohlcv_page_limit(page)
         ohlcv = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=page)
         df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
@@ -325,6 +331,16 @@ def handle_signal(symbol, direction, df, strategy_type="trend", signal_source="S
         log_event(f"❌ Error in handle_signal for {symbol}: {e}")
 
 
+def _mark_cycle_evaluated() -> None:
+    global _cycle_evaluated
+    _cycle_evaluated += 1
+
+
+def _mark_cycle_data_failure() -> None:
+    global _cycle_data_failures
+    _cycle_data_failures += 1
+
+
 def process_pair(symbol):
     """
     Check one pair for a signal. Returns a signal dict or None.
@@ -334,6 +350,7 @@ def process_pair(symbol):
     log_event(f"🔍 Checking {symbol} on {config.TIMEFRAME} timeframe...")
     lower_df = fetch_data(symbol, config.TIMEFRAME)
     if lower_df is None or len(lower_df) < 51:
+        _mark_cycle_data_failure()
         log_event(f"⚠️ Skipping {symbol} — insufficient lower timeframe data.")
         return None
     lower_df = prepare_ltf_frame(lower_df)
@@ -342,9 +359,11 @@ def process_pair(symbol):
     cached = higher_timeframe_cache.get(symbol)
     cached_df = cached.get("data") if cached else None
     if not htf_frame_is_current(cached_df, config.HTF_TIMEFRAME):
-        # Need >=51 1h bars for MA50; request a comfortable buffer.
-        higher_df = fetch_data(symbol, config.HTF_TIMEFRAME, limit=200)
+        # Need >=51 1h bars for MA50. 500 is the smallest allowed Phemex page
+        # above that with room for MA warmup (200 is rejected by the exchange).
+        higher_df = fetch_data(symbol, config.HTF_TIMEFRAME, limit=500)
         if higher_df is None or len(higher_df) < 51:
+            _mark_cycle_data_failure()
             got = 0 if higher_df is None else len(higher_df)
             log_event(
                 f"⚠️ Skipping {symbol} — insufficient higher timeframe data "
@@ -366,6 +385,7 @@ def process_pair(symbol):
         or pd.isna(higher_df['ma50'].iloc[-1])
         or len(higher_df) < 6
     ):
+        _mark_cycle_data_failure()
         log_event(f"⚠️ Skipping {symbol} — HTF MAs not ready yet.")
         higher_timeframe_cache.pop(symbol, None)
         return None
@@ -374,9 +394,11 @@ def process_pair(symbol):
     from utils.signalLogic import htf_slice_for_bar
     htf_slice = htf_slice_for_bar(higher_df, len(higher_df) - 1)
     if htf_slice is None:
+        _mark_cycle_data_failure()
         log_event(f"⚠️ Skipping {symbol} — HTF slice unavailable.")
         return None
 
+    _mark_cycle_evaluated()
     entry_price = float(lower_df['close'].iloc[-1])
     decision = evaluate_signal_at_bar(lower_df, htf_slice, entry_price)
 
@@ -474,6 +496,9 @@ def _rank_key(sig, win_rates):
 
 
 def main():
+    global _cycle_evaluated, _cycle_data_failures
+    _cycle_evaluated = 0
+    _cycle_data_failures = 0
     generated_pairs = get_trading_pairs()
     if not generated_pairs:
         log_event(
@@ -560,6 +585,8 @@ def main():
         for sym in list(higher_timeframe_cache):
             if sym not in allowed:
                 del higher_timeframe_cache[sym]
+
+    note_scan_cycle(_cycle_evaluated, _cycle_data_failures)
 
 
 if __name__ == '__main__':

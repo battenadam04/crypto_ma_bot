@@ -6,6 +6,28 @@ from utils.utils import log_event
 
 EXCHANGE_NAME = (config.EXCHANGE or "phemex").strip().lower()
 
+# Phemex GET /md/v2/kline/last rejects every other limit with code 30000
+# ("Please double check input arguments") and an empty page. Live 1h fetches
+# asked for 200 bars, so every pair was skipped for missing higher-timeframe data.
+PHEMEX_KLINE_LAST_LIMITS = (10, 50, 100, 500, 1000)
+
+
+def ohlcv_page_limit(requested: int, exchange_name: str | None = None) -> int:
+    """Page size safe for the venue's latest-candle endpoint.
+
+    Phemex only accepts the sizes in PHEMEX_KLINE_LAST_LIMITS. Round up so a
+    request for 200 bars becomes 500 instead of a rejected call. Other venues
+    keep the requested size.
+    """
+    need = max(1, int(requested))
+    name = (exchange_name if exchange_name is not None else EXCHANGE_NAME).strip().lower()
+    if name != "phemex":
+        return need
+    for allowed in PHEMEX_KLINE_LAST_LIMITS:
+        if allowed >= need:
+            return allowed
+    return PHEMEX_KLINE_LAST_LIMITS[-1]
+
 
 def init_exchange():
     """Public/read-only market-data client (no trading keys)."""
