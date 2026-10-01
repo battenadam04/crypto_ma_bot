@@ -16,6 +16,9 @@ _lock = threading.Lock()
 _last_signal_at: datetime | None = None
 _last_heartbeat_at: datetime | None = None
 _loaded = False
+# False after a cycle where every pair failed to load candles. The quiet
+# heartbeat must not tell the channel that filters are being selective then.
+_scan_can_evaluate = True
 
 
 def _parse_iso(raw) -> datetime | None:
@@ -110,11 +113,39 @@ def _fmt_quiet_hours(hours: float | None) -> str:
     return f"{days:.0f}d"
 
 
+def note_scan_cycle(evaluated: int, data_failures: int) -> None:
+    """Record whether this scan could actually judge setups.
+
+    A cycle that only fails candle fetches is not a quiet market. Leave the
+    reassuring heartbeat off until a later cycle evaluates at least one pair.
+    """
+    global _scan_can_evaluate
+    evaluated = int(evaluated)
+    data_failures = int(data_failures)
+    if evaluated > 0:
+        if not _scan_can_evaluate:
+            log_event("Scan is evaluating pairs again.")
+        _scan_can_evaluate = True
+        return
+    if data_failures > 0 and _scan_can_evaluate:
+        _scan_can_evaluate = False
+        log_event(
+            "Scan evaluated 0 pairs because candle fetches failed. "
+            "Quiet heartbeat suppressed until data loads."
+        )
+
+
+def scan_can_evaluate() -> bool:
+    return _scan_can_evaluate
+
+
 def should_send_heartbeat(now: datetime | None = None) -> bool:
     """True when scanning is on, quiet long enough, and interval has elapsed."""
     if not getattr(config, "CHANNEL_HEARTBEAT_ENABLED", True):
         return False
     if not config.TRADING_ENABLED:
+        return False
+    if not _scan_can_evaluate:
         return False
     # Don't nag overnight while the scanner itself is paused.
     if config.should_skip_cycle_for_night_quiet():
@@ -211,10 +242,11 @@ def maybe_send_quiet_heartbeat(send_fn, now: datetime | None = None) -> bool:
 
 def reset_heartbeat_state_for_tests() -> None:
     """Test helper — clear in-memory + optional file state."""
-    global _last_signal_at, _last_heartbeat_at, _loaded
+    global _last_signal_at, _last_heartbeat_at, _loaded, _scan_can_evaluate
     with _lock:
         _last_signal_at = None
         _last_heartbeat_at = None
+        _scan_can_evaluate = True
         _loaded = True
         try:
             if os.path.isfile(_STATE_FILE):

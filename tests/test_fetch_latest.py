@@ -4,6 +4,16 @@ from unittest.mock import MagicMock
 
 import pandas as pd
 
+from utils.exchangeUtils import ohlcv_page_limit
+
+
+def test_phemex_kline_limit_rounds_up_to_an_accepted_size():
+    assert ohlcv_page_limit(80, "phemex") == 100
+    assert ohlcv_page_limit(200, "phemex") == 500
+    assert ohlcv_page_limit(500, "phemex") == 500
+    assert ohlcv_page_limit(1000, "phemex") == 1000
+    assert ohlcv_page_limit(200, "binance_margin") == 200
+
 
 def test_fetch_data_omits_since(monkeypatch):
     mock_ex = MagicMock()
@@ -40,5 +50,5 @@ def test_fetch_data_htf_page_size(monkeypatch):
     df = bot.fetch_data("ADA/USDT:USDT", "1h", limit=200)
 
     assert len(df) == 80
-    assert mock_ex.fetch_ohlcv.call_args.kwargs["limit"] == 200
+    assert mock_ex.fetch_ohlcv.call_args.kwargs["limit"] == 500
     assert "since" not in mock_ex.fetch_ohlcv.call_args.kwargs
