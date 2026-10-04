@@ -191,6 +191,29 @@ def build_heartbeat_message(now: datetime | None = None) -> str:
         quiet_h = _hours_since(boot, now)
 
     quiet_label = _fmt_quiet_hours(quiet_h)
+    try:
+        from utils.feedHalt import book_status, new_signals_blocked
+
+        halted, halt_reason = new_signals_blocked()
+        stood_down, stand_reason = book_status()
+    except Exception:
+        halted, halt_reason = False, ""
+        stood_down, stand_reason = False, ""
+    if halted or stood_down:
+        why = halt_reason or stand_reason or "The recent book is not positive."
+        return "\n".join(
+            [
+                "📡 <b>Feed stood down</b>",
+                "",
+                why,
+                "",
+                f"Quiet for: <b>{quiet_label}</b>",
+                "Status: <b>online, not posting new setups</b>",
+                "",
+                "<i>No signal ≠ offline. Open setups still resolve.</i>",
+            ]
+        )
+
     tf = config.TIMEFRAME
     extra = ""
     if getattr(config, "MULTI_TF_ENABLED", False) and getattr(config, "MULTI_TF_EXTRA", None):

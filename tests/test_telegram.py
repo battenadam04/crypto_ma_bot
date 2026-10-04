@@ -192,8 +192,19 @@ class TestPairsCommand:
         state_file = tmp_path / 'last_backtest.json'
         state_file.write_text(json.dumps({
             'pairs': ['BTC/USDT'],
+            'promotion': {'stood_down': False},
             'results': {
-                'BTC/USDT': {'win_rate': 65.0, 'total_trades': 42, 'profit_factor': 1.4},
+                'BTC/USDT': {
+                    'win_rate': 65.0,
+                    'total_trades': 42,
+                    'profit_factor': 1.4,
+                    'holdout': {
+                        'win_rate': 65.0,
+                        'total_trades': 10,
+                        'profit_factor': 1.4,
+                        'net_pnl_pct': 3.2,
+                    },
+                },
             }
         }))
         monkeypatch.setattr(

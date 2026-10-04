@@ -15,8 +15,11 @@ from utils.utils import log_event
 _daily_signals: list[dict] = []
 _open_signals: list[dict] = []
 _open_lock = threading.Lock()
+_daily_lock = threading.Lock()
 _OPEN_SIGNALS_FILE = os.path.join(os.path.dirname(__file__), "..", "open_signals.json")
+_DAILY_SIGNALS_FILE = os.path.join(os.path.dirname(__file__), "..", "daily_signals.json")
 _open_loaded = False
+_daily_loaded = False
 
 # Path-dependent EOD resolution uses this TF so TP/SL touches aren't missed.
 _RESOLVE_TIMEFRAME = "5m"
@@ -50,7 +53,9 @@ def record_signal(
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "bar_open": bar_open,
     }
+    _ensure_daily_loaded()
     _daily_signals.append(sig)
+    _persist_daily_signals()
     log_event(f"Signal recorded: {direction} {symbol} @ {entry_price}")
     try:
         from utils.channelHeartbeat import note_signal_sent
@@ -58,6 +63,49 @@ def record_signal(
     except Exception as e:
         log_event(f"Heartbeat signal stamp failed: {e}")
     _add_open_signal(sig)
+
+
+def _signal_is_today(sig: dict, today) -> bool:
+    ts = _parse_signal_ts(sig)
+    if ts is None:
+        return True
+    return ts.date() == today
+
+
+def _ensure_daily_loaded() -> None:
+    """Restore today's alerts after a restart so EOD cannot report a false zero."""
+    global _daily_loaded, _daily_signals
+    if _daily_loaded:
+        return
+    with _daily_lock:
+        if _daily_loaded:
+            return
+        loaded: list[dict] = []
+        try:
+            if os.path.isfile(_DAILY_SIGNALS_FILE):
+                with open(_DAILY_SIGNALS_FILE, "r") as f:
+                    data = json.load(f) or []
+                today = datetime.now(timezone.utc).date()
+                if isinstance(data, list):
+                    loaded = [
+                        s for s in data
+                        if isinstance(s, dict) and _signal_is_today(s, today)
+                    ]
+        except Exception as e:
+            log_event(f"Daily signals load failed: {e}")
+            loaded = []
+        _daily_signals = loaded
+        _daily_loaded = True
+
+
+def _persist_daily_signals() -> None:
+    tmp = _DAILY_SIGNALS_FILE + ".tmp"
+    try:
+        with open(tmp, "w") as f:
+            json.dump(_daily_signals, f)
+        os.replace(tmp, _DAILY_SIGNALS_FILE)
+    except Exception as e:
+        log_event(f"Daily signals save failed: {e}")
 
 
 def _load_open_signals() -> None:
@@ -248,6 +296,7 @@ def _resolve_signal(signal, exchange):
 
 def build_eod_summary(exchange):
     """Build an HTML summary of today's signals and their outcomes."""
+    _ensure_daily_loaded()
     if not _daily_signals:
         return None
 
@@ -300,8 +349,29 @@ def build_eod_summary(exchange):
 
 
 def build_quiet_day_eod_message() -> str:
-    """Short EOD note when filters produced zero setups."""
+    """Short EOD note when the day produced zero setups."""
     day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    try:
+        from utils.feedHalt import book_status, new_signals_blocked
+
+        halted, halt_reason = new_signals_blocked()
+        stood_down, stand_reason = book_status()
+    except Exception:
+        halted, halt_reason = False, ""
+        stood_down, stand_reason = False, ""
+    if halted or stood_down:
+        why = halt_reason or stand_reason or "The recent book is not positive."
+        return "\n".join(
+            [
+                f"<b>📋 Daily Signal Report</b> ({day})",
+                "",
+                "Signals today: <b>0</b>",
+                "",
+                f"The feed is stood down: {why}",
+                "",
+                "<i>No signal ≠ offline. New alerts stay off until the recent window is positive.</i>",
+            ]
+        )
     return "\n".join(
         [
             f"<b>📋 Daily Signal Report</b> ({day})",
@@ -322,6 +392,7 @@ def send_eod_report():
     from utils.telegramUtils import send_telegram
 
     try:
+        _ensure_daily_loaded()
         if not _daily_signals:
             send_telegram(
                 build_quiet_day_eod_message(),
@@ -344,11 +415,15 @@ def send_eod_report():
 
 def reset_daily_signals():
     """Clear the day's signals (called after EOD report)."""
+    global _daily_loaded
     _daily_signals.clear()
+    _daily_loaded = True
+    _persist_daily_signals()
 
 
 def get_daily_signals():
     """Return a copy of today's signals (for testing or Telegram commands)."""
+    _ensure_daily_loaded()
     return list(_daily_signals)
 
 
@@ -405,6 +480,13 @@ def monitor_signal_outcomes(exchange=None, send_fn=None) -> list[dict]:
                     f"Signal outcome posted: {result} {sig.get('symbol')} ({pnl:+.2f}%)"
                 )
             closed.append({"signal": sig, "result": result, "pnl": pnl})
+            if result in ("win", "loss"):
+                try:
+                    from utils.feedHalt import note_resolved_outcome
+
+                    note_resolved_outcome(pnl, sig.get("symbol") or "", result)
+                except Exception as e:
+                    log_event(f"Feed halt record failed: {e}")
         elif result == "unresolved":
             # Keep trying next cycle
             remaining.append(sig)

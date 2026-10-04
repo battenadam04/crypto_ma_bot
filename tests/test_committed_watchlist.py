@@ -1,9 +1,7 @@
-"""The committed screen must match the live signal knobs and list real pairs.
+"""The committed screen must match the live signal knobs.
 
-A PR that changes signal, level, or pair-gate settings has to refresh
-last_backtest.json with `python strategies/simulate_trades.py` (then re-apply
-the live gate if the threshold moved). Hand-edited win rates will fail the
-profit-factor and sample checks below.
+A file from before walk-forward promotion has research stats and no holdout.
+Those pairs must not scan. A fresh screen is what puts pairs back on the feed.
 """
 
 import json
@@ -11,7 +9,6 @@ import os
 
 from utils.configUtils import levels_config_matches
 from utils.signalLogic import (
-    backtest_result_qualifies,
     signal_config_matches,
     symbols_from_backtest_state,
 )
@@ -36,15 +33,7 @@ def test_committed_screen_matches_live_config():
     assert levels_config_matches(data.get("levels_config"))
 
 
-def test_committed_pairs_clear_the_live_gate():
+def test_committed_screen_is_not_live_without_a_holdout():
     data = _load()
-    pairs = data.get("pairs") or []
-    results = data.get("results") or {}
-    # Six pairs cleared the 2026-09-28 trend-only screen. Fewer than five means
-    # the book is too thin to ship; rerun the screen instead of padding symbols.
-    assert len(pairs) >= 5, pairs
-    for sym in pairs:
-        assert backtest_result_qualifies(results.get(sym)), sym
-    assert symbols_from_backtest_state(data) == pairs
-    assert data.get("portfolio_trades", 0) >= 30
-    assert float(data.get("portfolio_profit_factor") or 0) >= 1.15
+    assert not isinstance(data.get("promotion"), dict) or data["promotion"].get("stood_down")
+    assert symbols_from_backtest_state(data) == []

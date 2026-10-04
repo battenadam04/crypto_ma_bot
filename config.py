@@ -235,9 +235,23 @@ BACKTEST_COMMISSION_BPS = 4.0
 # (see utils.signalLogic.signal_cooldown_bars) so live and screens share one silence window.
 # Kept for docs / older ablation scripts only — simulate_trades no longer reads this.
 BACKTEST_COOLDOWN_BARS = 2  # ≈ SIGNAL_COOLDOWN_SEC=1800 at 15m
-# ~12h at 15m
+# 72 closed 15m bars = 18h. Walk-forward embargo is 2× this horizon.
 BACKTEST_LOOKAHEAD = 72
 BACKTEST_DAYS = 42
+# Rolling promotion for a 15m/1h book (walk-forward-validation skill):
+# train 14–30d, test 3–7d, embargo >= 2× the label horizon.
+# The research window is the only place the existing pair gates apply.
+# The holdout is untouched and is what decides the live list.
+WALK_FORWARD_TRAIN_DAYS = 30
+WALK_FORWARD_TEST_DAYS = 7
+WALK_FORWARD_EMBARGO_HOURS = 36
+WALK_FORWARD_HOLDOUT_MIN_TRADES = 8
+WALK_FORWARD_HOLDOUT_MIN_PF = 1.0
+# Intraweek circuit breaker on posted signal outcomes (signals product, no account).
+# Halt new alerts while the last 7 days are net negative, or the last 20
+# resolved signals have profit factor below 1. Open signals still resolve.
+FEED_HALT_WINDOW_DAYS = 7
+FEED_HALT_RECENT_TRADES = 20
 BACKTEST_USE_LIMIT_IDEAS = False
 BACKTEST_LIMIT_FILL_BARS = 3
 BACKTEST_MIN_RR_RATIO = 1.5

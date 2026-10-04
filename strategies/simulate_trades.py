@@ -146,7 +146,16 @@ def _resolve_backtest_entry(df, signal_idx, direction, strategy_type):
 def _compute_risk_metrics(pnl_list):
     """Compute risk metrics from a list of per-trade P&L percentages."""
     if not pnl_list:
-        return {'sharpe': 0.0, 'max_drawdown_pct': 0.0, 'profit_factor': 0.0, 'avg_win': 0.0, 'avg_loss': 0.0}
+        return {
+            'sharpe': 0.0,
+            'max_drawdown_pct': 0.0,
+            'profit_factor': 0.0,
+            'avg_win_pct': 0.0,
+            'avg_loss_pct': 0.0,
+            'rr_ratio': 0.0,
+            'equity_curve': [1.0],
+            'net_pnl_pct': 0.0,
+        }
 
     wins = [p for p in pnl_list if p > 0]
     losses = [p for p in pnl_list if p < 0]
@@ -185,6 +194,7 @@ def _compute_risk_metrics(pnl_list):
         'avg_loss_pct': round(avg_loss * 100, 4),
         'rr_ratio': round((avg_win / abs(avg_loss)), 2) if avg_loss < 0 else 0.0,
         'equity_curve': [round(e, 4) for e in equity],
+        'net_pnl_pct': round(sum(pnl_list) * 100, 4),
     }
 
 
@@ -402,7 +412,7 @@ def _get_signal_at_bar(
     )
 
 
-def simulate_combined_strategy(pair, df_5m, df_1h):
+def simulate_combined_strategy(pair, df_5m, df_1h, entry_start=None, entry_end=None):
     long_wins = long_losses = long_none = 0
     short_wins = short_losses = short_none = 0
     strategy_used = []
@@ -424,7 +434,11 @@ def simulate_combined_strategy(pair, df_5m, df_1h):
     # Signal helpers only need recent rows + precomputed indicators on full df (fixed window).
     _slice_lookback = max(120, SR_LOOKBACK_BARS + 20)
 
+    from utils.walkForward import in_entry_window
+
     for i in range(max(60, SR_LOOKBACK_BARS), len(df_5m) - 10):
+        if not in_entry_window(df_5m['timestamp'].iloc[i], entry_start, entry_end):
+            continue
         if (i - last_trade_bar) < cooldown:
             continue
         if one_open and i <= busy_until:
@@ -535,35 +549,138 @@ def simulate_combined_strategy(pair, df_5m, df_1h):
     return result
 
 
+def _strip_result(result: dict) -> dict:
+    """Drop the equity curve and make non-finite floats safe for JSON."""
+    out = {}
+    for key, value in result.items():
+        if key == "equity_curve":
+            continue
+        if isinstance(value, dict):
+            out[key] = _strip_result(value)
+            continue
+        if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
+            out[key] = None if math.isnan(value) else 1e6
+            continue
+        out[key] = value
+    return out
+
+
+def _empty_portfolio() -> dict:
+    return {
+        "win_rate": 0.0,
+        "trades": 0,
+        "sharpe": 0.0,
+        "max_drawdown_pct": 0.0,
+        "profit_factor": 0.0,
+        "net_pnl_pct": 0.0,
+    }
+
+
 def run_backtest(pairs_override=None):
-    """Run backtest on pairs. Keep pairs that clear win rate, sample size, and profit factor."""
+    """Screen pairs on a rolling research window and promote only a positive holdout.
+
+    Research uses the existing win-rate, sample, and profit-factor gates.
+    The holdout is the last test window after the embargo. Portfolio fields
+    stored on the state file are that holdout, not the research average.
+    """
+    from utils.feedHalt import clear_resolved_outcomes, note_book_status
+    from utils.walkForward import (
+        frame_covers_train,
+        holdout_result_qualifies,
+        promote_from_results,
+        promotion_fetch_days,
+        promotion_windows,
+    )
+
     prev_flag = config.IS_BACKTESTING
     config.IS_BACKTESTING = True
     try:
+        windows = promotion_windows()
+        fetch_days = promotion_fetch_days()
         pairs = _get_backtest_pairs(pairs_override)
         win_rate_threshold = float(BACKTEST_WIN_RATE_THRESHOLD)
         enforce_rr = BACKTEST_ENFORCE_RR
         min_rr_ratio = float(BACKTEST_MIN_RR_RATIO) if enforce_rr else 0.0
-        good_pairs = []
         results_by_symbol = {}
 
-        _bt_log(f"Backtesting {len(pairs)} pairs...", verbose=False)
+        _bt_log(
+            f"Walk-forward screen: train {windows['train_days']}d "
+            f"ending {windows['train_end'].isoformat()}, "
+            f"embargo {windows['embargo_hours']}h, "
+            f"holdout {windows['test_days']}d from {windows['test_start'].isoformat()}.",
+            verbose=False,
+        )
+        _bt_log(f"Backtesting {len(pairs)} pairs over {fetch_days} days...", verbose=False)
         for idx, pair in enumerate(pairs):
             symbol = pair[0] if isinstance(pair, (list, tuple)) else pair
             _bt_log(f"[{idx + 1}/{len(pairs)}] Backtesting {symbol}", verbose=False)
             try:
-                df = fetch_data(symbol, TIMEFRAME, days=BACKTEST_DAYS)
-                df_htf = fetch_higher_timeframe_data(symbol, HTF_TIMEFRAME, days=BACKTEST_DAYS)
-                if len(df) > 300:
-                    result = simulate_combined_strategy(pair, df, df_htf)
-                    result_save = {k: v for k, v in result.items() if k != 'equity_curve'}
-                    results_by_symbol[symbol] = result_save
-                    _bt_log(f"Result: {result_save}", verbose=True)
-                    rr_ratio = float(result.get('rr_ratio', 0.0))
-                    if backtest_result_qualifies(result_save) and rr_ratio >= min_rr_ratio:
-                        good_pairs.append(symbol)
+                df = fetch_data(symbol, TIMEFRAME, days=fetch_days)
+                df_htf = fetch_higher_timeframe_data(symbol, HTF_TIMEFRAME, days=fetch_days)
+                if len(df) <= 300:
+                    continue
+                if not frame_covers_train(df, windows["train_start"]):
+                    _bt_log(
+                        f"{symbol} skipped: history does not cover the research window.",
+                        verbose=False,
+                    )
+                    continue
+                train = simulate_combined_strategy(
+                    pair, df, df_htf,
+                    entry_start=windows["train_start"],
+                    entry_end=windows["train_end"],
+                )
+                holdout = simulate_combined_strategy(
+                    pair, df, df_htf,
+                    entry_start=windows["test_start"],
+                    entry_end=windows["test_end"],
+                )
+                result_save = _strip_result(train)
+                result_save["holdout"] = _strip_result(holdout)
+                results_by_symbol[symbol] = result_save
+                _bt_log(f"Result: {result_save}", verbose=True)
             except Exception as e:
                 _bt_log(f"❌ Error backtesting {symbol}: {e}", verbose=False)
+
+        research_pass = []
+        for symbol, result_save in results_by_symbol.items():
+            rr_ratio = float(result_save.get("rr_ratio") or 0.0)
+            if (
+                backtest_result_qualifies(result_save)
+                and holdout_result_qualifies(result_save.get("holdout"))
+                and rr_ratio >= min_rr_ratio
+            ):
+                research_pass.append(symbol)
+
+        if research_pass:
+            portfolio = run_portfolio_backtest(
+                pairs_override=research_pass,
+                max_trades_per_bar=3,
+                entry_start=windows["test_start"],
+                entry_end=windows["test_end"],
+                days=fetch_days,
+                results_by_symbol=results_by_symbol,
+                persist=False,
+            )
+        else:
+            portfolio = _empty_portfolio()
+
+        good_pairs, promotion = promote_from_results(results_by_symbol, portfolio)
+        if min_rr_ratio > 0:
+            good_pairs = [sym for sym in good_pairs if sym in research_pass]
+            if not good_pairs and not promotion.get("stood_down"):
+                promotion["stood_down"] = True
+                promotion["reason"] = "No pair cleared the reward:risk gate on the research window."
+        promotion.update({
+            "window_type": windows["window_type"],
+            "train_days": windows["train_days"],
+            "test_days": windows["test_days"],
+            "embargo_hours": windows["embargo_hours"],
+            "train_start": windows["train_start"].isoformat(),
+            "train_end": windows["train_end"].isoformat(),
+            "test_start": windows["test_start"].isoformat(),
+            "test_end": windows["test_end"].isoformat(),
+        })
 
         state = {
             "pairs": good_pairs,
@@ -574,6 +691,14 @@ def run_backtest(pairs_override=None):
             "timeframe": TIMEFRAME,
             "htf_timeframe": HTF_TIMEFRAME,
             "results": results_by_symbol,
+            "promotion": promotion,
+            "portfolio_win_rate": portfolio.get("win_rate"),
+            "portfolio_trades": portfolio.get("trades"),
+            "portfolio_sharpe": portfolio.get("sharpe"),
+            "portfolio_max_drawdown_pct": portfolio.get("max_drawdown_pct"),
+            "portfolio_profit_factor": portfolio.get("profit_factor"),
+            "portfolio_net_pnl_pct": portfolio.get("net_pnl_pct"),
+            "portfolio_run_at": datetime.now(timezone.utc).isoformat(),
         }
         try:
             path = os.path.abspath(BACKTEST_STATE_FILE)
@@ -581,45 +706,71 @@ def run_backtest(pairs_override=None):
             with open(path, "w") as f:
                 json.dump(state, f, indent=2)
             _bt_log(
-                f"Backtest complete: {len(good_pairs)} good pairs "
-                f"(WR>={win_rate_threshold}%, min trades {config.BACKTEST_MIN_TRADES}, "
-                f"min PF {config.BACKTEST_MIN_PROFIT_FACTOR}, min RR {min_rr_ratio}).",
+                f"Backtest complete: {len(good_pairs)} live pair(s). "
+                f"Research gates WR>={win_rate_threshold}%, "
+                f"trades>={config.BACKTEST_MIN_TRADES}, "
+                f"PF>={config.BACKTEST_MIN_PROFIT_FACTOR}. "
+                f"Holdout net={portfolio.get('net_pnl_pct')}%.",
                 verbose=False,
             )
+            if promotion.get("stood_down"):
+                _bt_log(f"Book stood down: {promotion.get('reason')}", verbose=False)
             _bt_log(f"Wrote backtest state to {path}", verbose=False)
         except Exception as e:
             _bt_log(f"Failed to write last_backtest.json: {e}", verbose=False)
 
+        if good_pairs:
+            clear_resolved_outcomes()
+            note_book_status(False, "")
+        else:
+            note_book_status(True, promotion.get("reason") or "Book stood down.")
         return good_pairs
     finally:
         config.IS_BACKTESTING = prev_flag
 
 
-def run_portfolio_backtest(pairs_override=None, max_trades_per_bar=None):
+def run_portfolio_backtest(
+    pairs_override=None,
+    max_trades_per_bar=None,
+    entry_start=None,
+    entry_end=None,
+    days=None,
+    results_by_symbol=None,
+    persist=True,
+):
     """
     Backtest the same way you trade live: at each bar, collect signals across all pairs,
     rank like live (SIG>LIM, trend>breakout>range, then WR), cap at MAX_SIGNALS_PER_CYCLE.
+
+    entry_start/entry_end limit which bars may open a trade. The weekly screen
+    passes the holdout so stored portfolio stats are out of sample.
+    Returns a metrics dict. portfolio_win_rate is also written to the state file
+    when persist is true and the file already exists.
     """
+    from utils.walkForward import in_entry_window
+
     if max_trades_per_bar is None:
         max_trades_per_bar = int(MAX_SIGNALS_PER_CYCLE) if int(MAX_SIGNALS_PER_CYCLE) > 0 else 5
+    fetch_days = int(days) if days is not None else BACKTEST_DAYS
     pairs = _get_backtest_pairs(pairs_override)
     symbols = [p[0] if isinstance(p, (list, tuple)) else p for p in pairs]
 
     state_path = os.path.abspath(BACKTEST_STATE_FILE)
-    results_by_symbol = {}
-    if os.path.isfile(state_path):
-        try:
-            with open(state_path, 'r') as f:
-                data = json.load(f)
-            results_by_symbol = data.get('results', {})
-        except Exception:
-            pass
+    if results_by_symbol is None:
+        results_by_symbol = {}
+        if os.path.isfile(state_path):
+            try:
+                with open(state_path, 'r') as f:
+                    data = json.load(f)
+                results_by_symbol = data.get('results', {})
+            except Exception:
+                pass
 
     data_by_symbol = {}
     for sym in symbols:
         try:
-            df_ltf = fetch_data(sym, TIMEFRAME, days=BACKTEST_DAYS)
-            df_htf = fetch_higher_timeframe_data(sym, HTF_TIMEFRAME, days=BACKTEST_DAYS)
+            df_ltf = fetch_data(sym, TIMEFRAME, days=fetch_days)
+            df_htf = fetch_higher_timeframe_data(sym, HTF_TIMEFRAME, days=fetch_days)
             if len(df_ltf) > 300 and len(df_htf) > 50:
                 if 'ATR' not in df_ltf.columns:
                     df_ltf = add_atr_column(df_ltf, period=7)
@@ -629,7 +780,7 @@ def run_portfolio_backtest(pairs_override=None, max_trades_per_bar=None):
 
     if not data_by_symbol:
         log_event("Portfolio backtest: no data for any pair.")
-        return 0.0
+        return _empty_portfolio()
 
     htf_end_by_sym = {
         sym: closed_htf_end_indices(
@@ -643,7 +794,7 @@ def run_portfolio_backtest(pairs_override=None, max_trades_per_bar=None):
     min_len = min(len(data_by_symbol[s][0]) for s in data_by_symbol) - 10
     if min_len < 70:
         log_event("Portfolio backtest: insufficient common bars.")
-        return 0.0
+        return _empty_portfolio()
 
     pnl_list = []
     last_trade_bar_by_sym = {s: -cooldown for s in data_by_symbol}
@@ -653,6 +804,8 @@ def run_portfolio_backtest(pairs_override=None, max_trades_per_bar=None):
     for i in range(60, min_len):
         signals_at_bar = []
         for symbol, (df_ltf, df_htf) in data_by_symbol.items():
+            if not in_entry_window(df_ltf['timestamp'].iloc[i], entry_start, entry_end):
+                continue
             if (i - last_trade_bar_by_sym[symbol]) < cooldown:
                 continue
             if one_open and i <= busy_until_by_sym[symbol]:
@@ -720,28 +873,38 @@ def run_portfolio_backtest(pairs_override=None, max_trades_per_bar=None):
     log_event(f"System win rate: {system_win_rate}%")
     log_event(f"Sharpe: {risk_metrics['sharpe']} | Max DD: {risk_metrics['max_drawdown_pct']}% | PF: {risk_metrics['profit_factor']}")
 
-    if os.path.isfile(state_path):
+    profit_factor = risk_metrics["profit_factor"]
+    if isinstance(profit_factor, float) and math.isinf(profit_factor):
+        profit_factor = 1e6
+    metrics = {
+        "win_rate": system_win_rate,
+        "trades": total_trades,
+        "sharpe": risk_metrics["sharpe"],
+        "max_drawdown_pct": risk_metrics["max_drawdown_pct"],
+        "profit_factor": profit_factor,
+        "net_pnl_pct": risk_metrics.get("net_pnl_pct", 0.0),
+    }
+    if persist and os.path.isfile(state_path):
         try:
             with open(state_path, 'r') as f:
                 state = json.load(f)
-            state['portfolio_win_rate'] = system_win_rate
-            state['portfolio_trades'] = total_trades
-            state['portfolio_sharpe'] = risk_metrics['sharpe']
-            state['portfolio_max_drawdown_pct'] = risk_metrics['max_drawdown_pct']
-            state['portfolio_profit_factor'] = risk_metrics['profit_factor']
+            state['portfolio_win_rate'] = metrics["win_rate"]
+            state['portfolio_trades'] = metrics["trades"]
+            state['portfolio_sharpe'] = metrics["sharpe"]
+            state['portfolio_max_drawdown_pct'] = metrics["max_drawdown_pct"]
+            state['portfolio_profit_factor'] = metrics["profit_factor"]
+            state['portfolio_net_pnl_pct'] = metrics["net_pnl_pct"]
             state['portfolio_run_at'] = datetime.now(timezone.utc).isoformat()
             with open(state_path, 'w') as f:
                 json.dump(state, f, indent=2)
         except Exception as e:
             log_event(f"Could not write portfolio results to state: {e}")
 
-    return system_win_rate
+    return metrics
 
 
 if __name__ == "__main__":
     config.IS_BACKTESTING = True
     log_event(f"Backtest OHLCV depth: BACKTEST_DAYS={BACKTEST_DAYS} (from config / project .env)")
     results = run_backtest()
-    print("Backtest completed, good pairs:", results)
-    if results:
-        run_portfolio_backtest(pairs_override=results)
+    print("Backtest completed, live pairs:", results)
