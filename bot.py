@@ -654,6 +654,10 @@ if __name__ == '__main__':
         _schedule_auto_backtest_job()
         _auto_backtest_scheduled = True
 
+    # The weekly job is the refresh. A boot also screens immediately so a
+    # deploy does not sit on the previous list until the next Sunday.
+    _kick_auto_backtest()
+
     try:
         get_trading_pairs()
     except Exception as e:
