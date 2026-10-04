@@ -14,6 +14,8 @@ from utils.signalTracker import build_quiet_day_eod_message
 
 class TestQuietHeartbeat:
     def setup_method(self):
+        from utils.feedHalt import reset_feed_state_for_tests
+        reset_feed_state_for_tests()
         hb.reset_heartbeat_state_for_tests()
         config.CHANNEL_HEARTBEAT_ENABLED = True
         config.CHANNEL_HEARTBEAT_AFTER_QUIET_HOURS = 8
@@ -74,6 +76,10 @@ class TestQuietHeartbeat:
 
 
 class TestQuietDayEod:
+    def setup_method(self):
+        from utils.feedHalt import reset_feed_state_for_tests
+        reset_feed_state_for_tests()
+
     def test_quiet_day_copy(self):
         msg = build_quiet_day_eod_message()
         assert "Signals today: <b>0</b>" in msg

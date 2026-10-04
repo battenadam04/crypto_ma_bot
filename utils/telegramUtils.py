@@ -478,14 +478,16 @@ def _backtest_confidence_lines(data) -> list:
     results = data.get("results") or {}
     active = symbols_from_backtest_state(data)
     lines = []
+    label = "Holdout win rate" if isinstance(data.get("promotion"), dict) else "Portfolio win rate"
     if portfolio_wr is not None:
         pf = data.get("portfolio_profit_factor")
-        if pf is not None:
-            lines.append(f"Portfolio win rate: <b>{portfolio_wr}%</b> (profit factor {pf})")
-        else:
-            lines.append(f"Portfolio win rate: <b>{portfolio_wr}%</b>")
+        net = data.get("portfolio_net_pnl_pct")
+        detail = f" (profit factor {pf})" if pf is not None else ""
+        if net is not None and isinstance(data.get("promotion"), dict):
+            detail += f", net {net}%"
+        lines.append(f"{label}: <b>{portfolio_wr}%</b>{detail}")
     else:
-        lines.append("Portfolio win rate: <i>n/a</i>")
+        lines.append(f"{label}: <i>n/a</i>")
     lines.append(f"Last backtest: <code>{run_at}</code>")
     lines.append(
         f"Pairs qualifying (WR, sample, profit factor): <b>{len(active)}</b>/{len(results)}"
@@ -561,26 +563,31 @@ def _cmd_pairs():
     pairs = symbols_from_backtest_state(data)
     results = data.get("results", {})
     if not pairs:
-        return (
-            "📭 No pairs clear the live gate "
-            f"(WR ≥ {config.BACKTEST_WIN_RATE_THRESHOLD}%, "
-            f"≥ {config.BACKTEST_MIN_TRADES} trades, "
-            f"profit factor ≥ {config.BACKTEST_MIN_PROFIT_FACTOR})."
+        promo = data.get("promotion") if isinstance(data.get("promotion"), dict) else {}
+        reason = promo.get("reason") or (
+            "No pair has a research pass and a positive untouched holdout."
         )
+        return f"📭 Book stood down. {reason}"
     lines = [
-        "<b>📋 Active Pairs</b> (win rate, sample size, and profit factor)",
+        "<b>📋 Active Pairs</b> (research gate plus untouched holdout)",
         f"Last run: <code>{_fmt_backtest_run_at(data.get('run_at'))}</code>",
     ]
     portfolio_wr = data.get("portfolio_win_rate")
+    holdout_net = data.get("portfolio_net_pnl_pct")
     if portfolio_wr is not None:
-        lines.append(f"Portfolio win rate: <b>{portfolio_wr}%</b>")
+        extra = f", net {holdout_net}%" if holdout_net is not None else ""
+        lines.append(f"Holdout win rate: <b>{portfolio_wr}%</b>{extra}")
     lines.append("")
     for sym in pairs:
         row = results.get(sym, {}) if isinstance(results.get(sym), dict) else {}
-        wr = row.get("win_rate", "?")
-        trades = row.get("total_trades", "?")
-        pf = row.get("profit_factor", "?")
-        lines.append(f"  • {sym}: <b>{wr}%</b> win rate, PF {pf} ({trades} trades)")
+        hold = row.get("holdout") if isinstance(row.get("holdout"), dict) else {}
+        wr = hold.get("win_rate", "?")
+        trades = hold.get("total_trades", "?")
+        pf = hold.get("profit_factor", "?")
+        net = hold.get("net_pnl_pct", "?")
+        lines.append(
+            f"  • {sym}: holdout <b>{wr}%</b>, PF {pf}, net {net}% ({trades} trades)"
+        )
     return "\n".join(lines)
 
 

@@ -109,27 +109,46 @@ def _run_auto_backtest():
                 log_event(f"Auto-backtest start notify failed: {e}")
 
         # Lazy import: simulate_trades pulls heavy deps; safe after IS_BACKTESTING fix.
-        from strategies.simulate_trades import run_backtest, run_portfolio_backtest
+        from strategies.simulate_trades import run_backtest
 
         good = run_backtest()
-        portfolio_wr = None
-        if good:
-            portfolio_wr = run_portfolio_backtest(pairs_override=good, max_trades_per_bar=3)
+        promotion = {}
+        holdout_net = None
+        holdout_pf = None
+        try:
+            state_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), BACKTEST_STATE_FILE)
+            with open(state_path, "r") as f:
+                saved = json.load(f)
+            promotion = saved.get("promotion") or {}
+            holdout_net = saved.get("portfolio_net_pnl_pct")
+            holdout_pf = saved.get("portfolio_profit_factor")
+        except Exception as e:
+            log_event(f"Auto-backtest could not read promotion summary: {e}")
 
         log_event(
-            f"✅ Scheduled backtest done: {len(good or [])} qualifying pair(s)"
-            + (f", portfolio WR={portfolio_wr}%" if portfolio_wr is not None else "")
+            f"✅ Scheduled backtest done: {len(good or [])} live pair(s)"
+            + (f", holdout net={holdout_net}%" if holdout_net is not None else "")
         )
         if config.AUTO_BACKTEST_NOTIFY:
             try:
                 lines = [
-                    "✅ <b>Weekly backtest complete</b>",
-                    f"Qualifying pairs: <b>{len(good or [])}</b>",
+                    "✅ <b>Weekly walk-forward screen complete</b>",
+                    f"Live pairs: <b>{len(good or [])}</b>",
                     f"Watchlist: <code>{_fmt_symbols_short(good)}</code>",
+                    (
+                        f"Holdout: last {promotion.get('test_days', config.WALK_FORWARD_TEST_DAYS)} days "
+                        f"after a {promotion.get('embargo_hours', config.WALK_FORWARD_EMBARGO_HOURS)}h embargo"
+                    ),
                 ]
-                if portfolio_wr is not None:
-                    lines.append(f"Portfolio win rate: <b>{portfolio_wr}%</b>")
-                lines.append("<i>Watchlist refreshed for upcoming setups.</i>")
+                if holdout_net is not None:
+                    lines.append(
+                        f"Holdout net: <b>{holdout_net}%</b>"
+                        + (f" (profit factor {holdout_pf})" if holdout_pf is not None else "")
+                    )
+                if promotion.get("stood_down"):
+                    lines.append(f"Book stood down: {promotion.get('reason')}")
+                else:
+                    lines.append("<i>Live list is the untouched holdout, not the research average.</i>")
                 send_telegram("\n".join(lines), parse_mode="HTML", bypass_rate_limit=True)
             except Exception as e:
                 log_event(f"Auto-backtest finish notify failed: {e}")
@@ -471,11 +490,21 @@ def get_trading_pairs():
                     f"trades ≥ {config.BACKTEST_MIN_TRADES}, "
                     f"profit factor ≥ {config.BACKTEST_MIN_PROFIT_FACTOR}): {dropped}"
                 )
+            from utils.feedHalt import note_book_status
+
             if not qualified:
-                log_event(
-                    "⚠️ No pairs clear win rate, sample size, and profit factor. "
-                    "Not scanning the default watchlist."
-                )
+                reason = ""
+                if isinstance(data.get("promotion"), dict):
+                    reason = str(data["promotion"].get("reason") or "")
+                if not reason:
+                    reason = (
+                        "No pair has a research pass and a positive untouched holdout. "
+                        "The book is off."
+                    )
+                note_book_status(True, reason)
+                log_event(f"⚠️ Walk-forward promotion has no live pairs. {reason}")
+            else:
+                note_book_status(False, "")
             return qualified
     except Exception:
         pass
@@ -564,7 +593,17 @@ def main():
         )
         signals = signals[:MAX_SIGNALS_PER_CYCLE]
 
-    if signals:
+    from utils.feedHalt import new_signals_blocked
+
+    halted, halt_reason = new_signals_blocked()
+    if halted:
+        if signals:
+            log_event(
+                f"Feed halted ({halt_reason}) Not posting "
+                f"{[(s['symbol'], s['direction']) for s in signals]}."
+            )
+        signals = []
+    elif signals:
         log_event(
             f"Signals this cycle: "
             f"{[(s['symbol'], s.get('signal_source'), s['direction']) for s in signals]}"
@@ -614,6 +653,15 @@ if __name__ == '__main__':
     if not _auto_backtest_scheduled:
         _schedule_auto_backtest_job()
         _auto_backtest_scheduled = True
+
+    # The weekly job is the refresh. A boot also screens immediately so a
+    # deploy does not sit on the previous list until the next Sunday.
+    _kick_auto_backtest()
+
+    try:
+        get_trading_pairs()
+    except Exception as e:
+        log_event(f"Watchlist load at startup failed: {e}")
 
     while True:
         try:

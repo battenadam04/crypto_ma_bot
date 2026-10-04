@@ -221,16 +221,28 @@ def backtest_result_qualifies(
 
 
 def symbols_from_backtest_state(data: Optional[dict]) -> list:
-    """Pairs from last_backtest.json that still clear the live gate."""
+    """Live pairs: research gate plus a positive untouched holdout.
+
+    A screen written before walk-forward promotion has no `promotion` block.
+    Those pairs stay off the feed.
+    """
     if not isinstance(data, dict):
         return []
+    promotion = data.get("promotion")
+    if not isinstance(promotion, dict) or promotion.get("stood_down"):
+        return []
+    from utils.walkForward import holdout_result_qualifies
+
     results = data.get("results") or {}
     qualified = []
     for p in data.get("pairs") or []:
         if not isinstance(p, str) or not p.strip():
             continue
         sym = p.strip()
-        if backtest_result_qualifies(results.get(sym)):
+        row = results.get(sym)
+        if backtest_result_qualifies(row) and holdout_result_qualifies(
+            row.get("holdout") if isinstance(row, dict) else None
+        ):
             qualified.append(sym)
     return qualified
 

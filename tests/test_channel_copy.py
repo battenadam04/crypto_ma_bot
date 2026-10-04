@@ -31,6 +31,10 @@ def _assert_no_admin_cmds(text: str):
 
 
 class TestChannelCopyNoAdminCommands:
+    def setup_method(self):
+        from utils.feedHalt import reset_feed_state_for_tests
+        reset_feed_state_for_tests()
+
     def test_macro_pause(self):
         release = datetime(2026, 9, 11, 12, 30, tzinfo=timezone.utc)
         msg = format_pause_telegram(

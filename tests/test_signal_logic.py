@@ -150,15 +150,57 @@ class TestWatchlistGate:
         ) is False
 
     def test_symbols_from_state_drop_losers(self):
+        passing_holdout = {
+            "win_rate": 50.0,
+            "total_trades": 10,
+            "profit_factor": 1.3,
+            "net_pnl_pct": 2.5,
+        }
         data = {
-            "pairs": ["DOGE/USDT:USDT", "AVAX/USDT:USDT", "TRX/USDT:USDT"],
+            "promotion": {"stood_down": False},
+            "pairs": ["DOGE/USDT:USDT", "AVAX/USDT:USDT", "TRX/USDT:USDT", "ENA/USDT:USDT"],
             "results": {
-                "DOGE/USDT:USDT": {"win_rate": 50.0, "total_trades": 100, "profit_factor": 1.42},
-                "AVAX/USDT:USDT": {"win_rate": 40.51, "total_trades": 79, "profit_factor": 0.86},
-                "TRX/USDT:USDT": {"win_rate": 50.0, "total_trades": 6, "profit_factor": 0.92},
+                "DOGE/USDT:USDT": {
+                    "win_rate": 50.0,
+                    "total_trades": 100,
+                    "profit_factor": 1.42,
+                    "holdout": passing_holdout,
+                },
+                "AVAX/USDT:USDT": {
+                    "win_rate": 40.51,
+                    "total_trades": 79,
+                    "profit_factor": 0.86,
+                    "holdout": passing_holdout,
+                },
+                "TRX/USDT:USDT": {
+                    "win_rate": 50.0,
+                    "total_trades": 6,
+                    "profit_factor": 0.92,
+                    "holdout": passing_holdout,
+                },
+                "ENA/USDT:USDT": {
+                    "win_rate": 40.0,
+                    "total_trades": 80,
+                    "profit_factor": 1.4,
+                    "holdout": {
+                        "win_rate": 20.0,
+                        "total_trades": 10,
+                        "profit_factor": 0.4,
+                        "net_pnl_pct": -4.0,
+                    },
+                },
             },
         }
         assert symbols_from_backtest_state(data) == ["DOGE/USDT:USDT"]
+
+    def test_symbols_without_promotion_stay_off(self):
+        data = {
+            "pairs": ["DOGE/USDT:USDT"],
+            "results": {
+                "DOGE/USDT:USDT": {"win_rate": 50.0, "total_trades": 100, "profit_factor": 1.42},
+            },
+        }
+        assert symbols_from_backtest_state(data) == []
 
 
 class TestAdapterParity:

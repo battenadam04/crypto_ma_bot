@@ -8,5 +8,8 @@ charts/
 .env
 channel_activity.json
 open_signals.json
+daily_signals.json
+signal_outcomes.json
+book_status.json
 runtime_config.json
 last_backtest_screen.json
